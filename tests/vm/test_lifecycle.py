@@ -36,7 +36,9 @@ from vmctl import (  # noqa: E402
     ssh,
     start,
     step,
+    wait_for_boot_complete,
     wait_for_ssh,
+    write_file,
 )
 
 VM_NAME = "homebase-test"
@@ -73,16 +75,7 @@ def install_probe(vm: VM) -> None:
     step("Installing a systemd service")
 
     ssh(vm, ["sudo", "mkdir", "-p", "/var/lib/homebase-probe"])
-
-    # Written through a single-quoted printf: the unit file contains newlines and
-    # '%' would otherwise be interpreted, and passing it as one argv element keeps
-    # it away from two layers of shell quoting (local, then remote).
-    encoded = UNIT.replace("'", "'\\''")
-    ssh(vm, [
-        "sudo", "sh", "-c",
-        f"printf '%s' '{encoded}' > /etc/systemd/system/homebase-probe.service",
-    ])
-
+    write_file(vm, "/etc/systemd/system/homebase-probe.service", UNIT)
     ssh(vm, ["sudo", "systemctl", "daemon-reload"])
     ssh(vm, ["sudo", "systemctl", "enable", "--now", "homebase-probe.service"])
     ok("homebase-probe.service installed and enabled")
@@ -121,6 +114,7 @@ def main() -> int:
         vm = create(VM_NAME, force=True)
         start(vm)
         wait_for_ssh(vm)
+        wait_for_boot_complete(vm)
 
         step("Confirming the guest is what we asked for")
         release = ssh(vm, ["lsb_release", "-ds"], check=False).stdout.strip()

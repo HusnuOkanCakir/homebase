@@ -28,6 +28,9 @@ Raw QEMU, UEFI, Ubuntu cloud images, no libvirt and no root —
    legacy BIOS would be testing a machine we do not ship.
 5. Networking is **user-mode with port forwarding** — no bridge, no daemon, nothing needing
    root. SSH plus the API and dashboard ports are forwarded to localhost.
+6. The harness then waits for **systemd to finish starting**, not merely for SSH to answer.
+   SSH is reachable several seconds before the system is ready, and a test that begins there
+   races cloud-init — producing flaky failures that get blamed on the code under test.
 
 ## Prerequisites
 

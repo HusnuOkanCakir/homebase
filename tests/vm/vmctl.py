@@ -102,6 +102,46 @@ class VMError(Exception):
         self.hint = hint
 
 
+# --- Process liveness --------------------------------------------------------
+
+def process_alive(pid: int) -> bool:
+    """Whether a pid is a live process.
+
+    `os.kill(pid, 0)` is the usual test and is wrong here. QEMU is started as a
+    child of this process, so when it exits it becomes a **zombie** until reaped —
+    and a zombie still answers signal 0. Using that test alone made `destroy` wait
+    out its full shutdown timeout and then SIGKILL an already-dead process, every
+    single time.
+
+    So: reap it if it is ours, and treat state Z as dead.
+    """
+    try:
+        # Reap if this is our child. Harmless otherwise.
+        reaped, _ = os.waitpid(pid, os.WNOHANG)
+        if reaped == pid:
+            return False
+    except (ChildProcessError, PermissionError, OSError):
+        pass  # Not our child, or already reaped.
+
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text()
+        # Field 3 is the state character, after "pid (comm) ". comm may contain
+        # spaces and parentheses, so split on the last ')'.
+        return state.rsplit(")", 1)[1].split()[0] != "Z"
+    except FileNotFoundError:
+        return False
+    except (IndexError, OSError):
+        pass
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 # --- VM state ----------------------------------------------------------------
 
 @dataclass
@@ -155,15 +195,7 @@ class VM:
         return cls(**json.loads(path.read_text()))
 
     def is_running(self) -> bool:
-        if self.pid is None:
-            return False
-        try:
-            os.kill(self.pid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
+        return self.pid is not None and process_alive(self.pid)
 
 
 # --- Prerequisites -----------------------------------------------------------
@@ -533,11 +565,16 @@ def wait_for_ssh(vm: VM, timeout: int = BOOT_TIMEOUT_S) -> None:
     )
 
 
-def ssh(vm: VM, command: list[str] | None = None, check: bool = True) -> subprocess.CompletedProcess:
+def ssh(
+    vm: VM,
+    command: list[str] | None = None,
+    check: bool = True,
+    stdin: str | None = None,
+) -> subprocess.CompletedProcess:
     args = ssh_args(vm)
     if command:
         args += command
-        result = subprocess.run(args, capture_output=True, text=True)
+        result = subprocess.run(args, capture_output=True, text=True, input=stdin)
         if check and result.returncode != 0:
             raise VMError(
                 f"Command failed in '{vm.name}': {' '.join(command)}",
@@ -545,6 +582,60 @@ def ssh(vm: VM, command: list[str] | None = None, check: bool = True) -> subproc
             )
         return result
     return subprocess.run(args)
+
+
+def write_file(vm: VM, path: str, content: str, mode: str = "0644") -> None:
+    """Write a file in the guest as root.
+
+    Content travels over **stdin**, never as part of the command line.
+
+    The obvious approach — `sudo sh -c "printf ... > /path"` — does not work, and
+    fails in a way that looks like a permissions problem rather than a quoting
+    one: ssh joins argv into a string for the remote shell, so the `>` is
+    interpreted by the *outer* unprivileged shell rather than by the sudo'd one.
+    The redirect then happens as the login user and the write is denied.
+
+    Piping into `sudo tee` puts the privileged part where the write actually
+    happens, and keeps file content out of shell quoting entirely — which also
+    means a unit file containing quotes, newlines or `%` needs no escaping.
+    """
+    ssh(vm, ["sudo", "tee", path], stdin=content, check=True)
+    ssh(vm, ["sudo", "chmod", mode, path])
+
+
+def wait_for_boot_complete(vm: VM, timeout: int = 120) -> str:
+    """Wait until systemd has finished starting up.
+
+    SSH answers well before the system is actually ready — a first run observed
+    `systemctl is-system-running` still reporting "starting" on a VM the harness
+    had already declared reachable. A test that begins there races cloud-init and
+    the remaining units, and races produce flaky tests that get blamed on the code
+    under test rather than on the harness.
+
+    "degraded" is accepted: it means every job finished but at least one unit
+    failed, which is normal in a cloud image and is caught explicitly by the
+    lifecycle test's "no failed units" assertion rather than being hidden here.
+    """
+    deadline = time.time() + timeout
+    state = "unknown"
+
+    while time.time() < deadline:
+        result = ssh(vm, ["systemctl", "is-system-running"], check=False)
+        state = result.stdout.strip() or result.stderr.strip()
+        if state in ("running", "degraded"):
+            ok(f"systemd finished starting ({state})")
+            return state
+        if state == "maintenance":
+            raise VMError(
+                "The guest booted into maintenance mode.",
+                f"Serial console: {vm.console_log}",
+            )
+        time.sleep(2)
+
+    raise VMError(
+        f"systemd was still '{state}' after {timeout}s.",
+        f"Serial console: {vm.console_log}",
+    )
 
 
 def reboot(vm: VM) -> None:
@@ -555,6 +646,7 @@ def reboot(vm: VM) -> None:
     ssh(vm, ["sudo", "systemctl", "reboot"], check=False)
     time.sleep(5)
     wait_for_ssh(vm)
+    wait_for_boot_complete(vm)
 
     boot_id_after = ssh(vm, ["cat", "/proc/sys/kernel/random/boot_id"]).stdout.strip()
     if boot_id_before == boot_id_after:
@@ -690,6 +782,7 @@ def main() -> int:
             vm = create(args.name, force=args.force)
             start(vm)
             wait_for_ssh(vm)
+            wait_for_boot_complete(vm)
             print()
             ok(f"'{vm.name}' is ready")
             info(f"ssh:       make vm-ssh")
@@ -702,6 +795,7 @@ def main() -> int:
         if args.command == "start":
             start(vm)
             wait_for_ssh(vm)
+            wait_for_boot_complete(vm)
             return 0
 
         if args.command == "reboot":

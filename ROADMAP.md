@@ -7,7 +7,7 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestone 0 complete. Milestone 1 next.**
+**Current position: Milestones 0 and 1 complete. Milestone 2 next.**
 
 ---
 
@@ -39,23 +39,30 @@ Pages is off until Milestone 6 — see [`.github/workflows/docs.yml`](.github/wo
 Until there is an installable release, the audience for the documentation is people
 reading it in this repository, where it already works.
 
-### Milestone 1 — Disposable VM lab ← *next*
+### Milestone 1 — Disposable VM lab ✅
 
 The first code written, because everything after it needs somewhere honest to be tested.
 
-- [ ] `make vm-create / vm-start / vm-reset / vm-test / vm-logs / vm-destroy`
-- [ ] Automated Ubuntu Server boot, serial console capture, log export
-- [ ] Fixtures: clean base image, blank disk, Windows-occupied disk
+- [x] `make vm-create / vm-start / vm-ssh / vm-reboot / vm-reset / vm-test / vm-logs /
+      vm-status / vm-destroy`
+- [x] Automated Ubuntu boot, serial console capture, log export
+- [x] Fixture: verified cloud base image, with copy-on-write overlays per VM
 
-Requires QEMU/KVM, OVMF and roughly 40 GB of free disk for the cached base image and a
-qcow2 overlay per test. No libvirt and no root — see
-[ADR-0010](docs/decisions/0010-vm-lab-qemu-cloud-image.md). This is also where Go and
-Node 20 are installed.
+Requires QEMU/KVM, OVMF and roughly 40 GB of free disk. No libvirt and no root — see
+[ADR-0010](docs/decisions/0010-vm-lab-qemu-cloud-image.md).
 
 **Done when:** one command creates a clean VM, installs a service, reboots, verifies health,
-exports logs and destroys the machine.
+exports logs and destroys the machine. ✅ — `make vm-test`, about 50 seconds.
 
-### Milestone 2 — Core vertical slice
+**Two items moved to Milestone 6.** The blank-disk and Windows-occupied-disk fixtures were
+listed here, but they exist to test *installation*, and ADR-0010 moved ISO-based installation
+to Milestone 6 where the installer actually exists. Putting them here would have meant
+building fixtures for a component that has not been written.
+
+Go and Node 20 were also expected here; they are only needed once there is code to build, so
+they move to Milestone 2 with it.
+
+### Milestone 2 — Core vertical slice ← *next*
 
 The smallest complete product: dashboard → API → privileged operation → hardware.
 
