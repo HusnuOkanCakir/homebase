@@ -1,0 +1,100 @@
+name: Epic
+description: A milestone-sized piece of work, tracking smaller issues
+labels: ["type/epic", "status/needs-design"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Epics exist so that a milestone can be broken into individually reviewable
+        pieces. If this fits in one pull request, open a feature or bug issue instead.
+
+  - type: input
+    id: milestone
+    attributes:
+      label: Milestone
+      placeholder: "Milestone 4 — Storage"
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What the user can do afterwards that they cannot do now.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included.
+    validations:
+      required: true
+
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals
+      description: >-
+        What this epic deliberately does not do. This field prevents more scope
+        creep than any other — fill it in properly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable outcomes, phrased as things a user can do.
+      placeholder: |
+        - [ ] A USB disk can be assigned as Jellyfin's media storage
+        - [ ] Removing it mid-playback produces a clear message, not a crash
+        - [ ] Reconnecting it restores the assignment without reconfiguration
+    validations:
+      required: true
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Test requirements
+      description: >-
+        Which of the four levels apply, and specifically which failure paths must be
+        covered. See tests/README.md.
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: >-
+        Does this add a privileged operation, move a trust boundary, or handle
+        credentials? If it adds anything to hostd, say what and why a narrower
+        operation would not do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation requirements
+      description: Which pages need writing or updating, and whether an ADR is needed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Issues
+      placeholder: |
+        - [ ] #12 Disk discovery
+        - [ ] #13 Mount management
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: What must land first, and what is blocked until this does.

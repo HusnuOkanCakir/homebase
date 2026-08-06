@@ -1,0 +1,42 @@
+name: Documentation
+description: Something is missing, wrong, or hard to follow
+labels: ["type/docs", "area/docs"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Which page?
+      description: URL or repository path.
+      placeholder: "docs/user-guide/backup.md"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What sort of problem?
+      options:
+        - Wrong — it says something untrue
+        - Missing — the thing I needed is not documented
+        - Unclear — I could not follow it
+        - Out of date — it describes an older version
+        - Assumes too much — it uses terms I do not know
+    validations:
+      required: true
+
+  - type: textarea
+    id: detail
+    attributes:
+      label: What went wrong?
+      description: >-
+        If you got stuck, tell us where you got stuck and what you tried. That is
+        more useful than a suggested wording — we can usually fix the words once we
+        know where the reader falls off.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording
+      description: Optional.

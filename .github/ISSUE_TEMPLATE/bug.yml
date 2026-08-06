@@ -1,0 +1,103 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: ["type/bug", "status/needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **If this is a security problem, stop and read
+        [SECURITY.md](https://github.com/HusnuOkanCakir/homebase/blob/main/SECURITY.md)
+        instead.** Report it privately, not here.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the dashboard
+        2. Install Jellyfin
+        3. Reboot the server
+        4. Jellyfin is missing from the applications list
+    validations:
+      required: true
+
+  - type: dropdown
+    id: data-loss
+    attributes:
+      label: Did this affect your data?
+      description: >-
+        Answer honestly even if you are not sure. Reports involving data are
+        triaged first.
+      options:
+        - "No"
+        - "Not sure"
+        - "Yes — data appears lost or corrupted"
+        - "Yes — a disk was erased or reformatted unexpectedly"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Homebase version
+      description: Shown in the dashboard under Settings, or `homebasectl version`.
+      placeholder: "0.1.0-alpha.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part?
+      options:
+        - Not sure
+        - Installer / first boot
+        - Dashboard
+        - Applications
+        - Storage / disks
+        - Backup / restore
+        - Network
+        - Updates
+        - Power / laptop behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware
+      description: >-
+        Laptop model, CPU, RAM, disks, and whether it is on Ethernet or Wi-Fi.
+        Homebase runs on whatever old machine you had spare, so this matters more
+        than usual.
+      placeholder: "ThinkPad T480, i5-8250U, 16 GB, 512 GB NVMe + 2 TB USB disk, Ethernet"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostics
+      description: >-
+        Attach a diagnostic bundle if you can (Settings → Support → Export
+        diagnostics). Review it before attaching — it may contain file and network
+        names. Never paste passwords or recovery codes.
+      render: text
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues
+          required: true
+        - label: This is not a security vulnerability
+          required: true

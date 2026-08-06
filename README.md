@@ -49,7 +49,7 @@ between the model and anything that can change the system. Read
 |---|---|
 | [Architecture overview](docs/architecture/overview.md) | How the pieces fit together |
 | [Decision records](docs/decisions/) | Why things are the way they are |
-| [Threat model](docs/security/threat-model.md) | What Homebase defends against, and what it does not |
+| [Threat model](docs/security/threat-model.md) | What it defends against, and what it does not |
 | [Getting started](docs/development/getting-started.md) | Set up a development environment |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, review |
 | [Roadmap](ROADMAP.md) | Milestones and current position |

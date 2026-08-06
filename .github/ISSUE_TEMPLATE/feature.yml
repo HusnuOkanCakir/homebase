@@ -1,0 +1,63 @@
+name: Feature request
+description: Propose a capability Homebase does not have
+labels: ["type/feature", "status/needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Check [ROADMAP.md](https://github.com/HusnuOkanCakir/homebase/blob/main/ROADMAP.md)
+        first — this may already be planned, or deliberately out of scope.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: >-
+        Describe the situation you are in, not the feature you have in mind. The
+        best proposals here have started from a concrete annoyance rather than a
+        design.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Homebase to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you do today instead?
+      description: Workarounds, other software, or doing without.
+
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Who is this for?
+      description: >-
+        Homebase targets people who do not use a terminal. Features that only make
+        sense to someone comfortable with Linux are not automatically rejected, but
+        they must not complicate the experience for everyone else.
+      options:
+        - Anyone running Homebase
+        - People with a specific hardware setup
+        - Technically confident users
+        - Developers working on Homebase
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      description: >-
+        These are deliberately out of scope for Stage 1. Ticking one does not mean
+        rejection, but it does mean the proposal needs a stronger case.
+      options:
+        - label: This involves exposing services to the public internet
+        - label: This involves RAID or storage pools
+        - label: This involves running Homebase on ARM, Raspberry Pi, Windows or macOS
+        - label: This involves installing arbitrary third-party applications
+        - label: This involves the AI operator (Stage 2)

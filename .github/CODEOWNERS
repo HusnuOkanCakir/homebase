@@ -1,0 +1,45 @@
+# Code owners — automatic reviewer assignment.
+#
+# Today every path resolves to the same person. The split is still worth having:
+# when a second maintainer joins, giving them the storage code is a one-line edit
+# rather than an argument about who reviews what. Ownership here reflects which
+# areas need *which kind* of scrutiny, not who happens to be available.
+#
+# Last matching pattern wins.
+
+# Default
+*                               @HusnuOkanCakir
+
+# --- Release and supply chain ------------------------------------------------
+# A compromise here reaches every installation at once.
+/.github/workflows/             @HusnuOkanCakir
+/.github/dependabot.yml         @HusnuOkanCakir
+/packaging/                     @HusnuOkanCakir
+/scripts/                       @HusnuOkanCakir
+
+# --- The privilege boundary --------------------------------------------------
+# Changes here can silently undo ADR-0006 without touching application logic.
+/cmd/hostd/                     @HusnuOkanCakir
+/internal/auth/                 @HusnuOkanCakir
+/docs/security/                 @HusnuOkanCakir
+/SECURITY.md                    @HusnuOkanCakir
+
+# --- Data destruction --------------------------------------------------------
+# The components that can erase somebody's photographs.
+/installer/                     @HusnuOkanCakir
+/controller/                    @HusnuOkanCakir
+/internal/storage/              @HusnuOkanCakir
+/tests/installer/               @HusnuOkanCakir
+/tests/upgrade/                 @HusnuOkanCakir
+
+# --- Contracts ---------------------------------------------------------------
+# The dashboard and the future AI operator are both clients of these. Breaking
+# them breaks things that are not in this repository.
+/api/                           @HusnuOkanCakir
+/schemas/                       @HusnuOkanCakir
+/docs/architecture/             @HusnuOkanCakir
+/docs/decisions/                @HusnuOkanCakir
+
+# --- Application catalogue ---------------------------------------------------
+# Each manifest is a claim that we tested this application.
+/app-store/                     @HusnuOkanCakir
