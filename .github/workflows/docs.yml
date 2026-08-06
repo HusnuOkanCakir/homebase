@@ -2,14 +2,43 @@ name: Docs
 
 # Publishes the documentation site to GitHub Pages.
 #
-# Separate from ci.yml because this is the only workflow that writes anything.
-# It runs on push to main only — never on a pull request, and therefore never
-# with untrusted code — and the write permissions live on the deploy job rather
-# than at the top level.
+# DISABLED until Milestone 6. Re-enable by uncommenting the `push` trigger below.
+#
+# Why it is off:
+#
+# The docs are readable in the repository today. GitHub renders mermaid natively,
+# so the architecture diagrams work as they are, and 28 of 29 pages read fine
+# without a site. What a published site adds — full-text search, a navigation
+# sidebar, a clean URL — matters when there is an audience that will not clone the
+# repository. That audience arrives at Milestone 6, with the first installable
+# release: a person who has just installed a server appliance cannot be told to
+# browse to docs/user-guide/backup.md on GitHub.
+#
+# It is also off because it does not currently work. Deployments are created and
+# then sit in `deployment_queued` until the action times out, on every attempt,
+# across a fresh commit and a delete-and-recreate of the Pages site. The build
+# succeeds and the artifact uploads; GitHub's Pages backend never picks it up.
+# `pages.status` stays null with zero builds ever recorded. That is outside this
+# repository's control, and leaving a workflow permanently red is how people learn
+# to ignore red workflows.
+#
+# Note that `mkdocs build --strict` still runs on every pull request, in ci.yml's
+# `docs` job. Validation and publication are separate concerns: the strict build
+# is what catches an orphaned page or a broken nav reference, and it keeps earning
+# its keep whether or not anything is published.
+#
+# To re-enable at Milestone 6:
+#   1. Uncomment the `push` trigger
+#   2. Confirm Pages is enabled — scripts/setup-branch-protection.sh does this
+#   3. Run manually first via workflow_dispatch and confirm the site serves
+#
+# Manual runs are deliberately left available, so the deployment can be retried
+# without editing this file.
 
 on:
-  push:
-    branches: [main]
+  # Re-enable at Milestone 6. See above.
+  # push:
+  #   branches: [main]
   workflow_dispatch:
 
 permissions:

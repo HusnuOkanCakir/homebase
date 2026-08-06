@@ -93,6 +93,15 @@ make docs          # live reload on :8000
 Adding a page means adding it to the `nav` in `mkdocs.yml` — `mkdocs build --strict` fails on
 an orphaned page, which is deliberate. Mermaid diagrams work in fenced ```mermaid blocks.
 
+**The site is not published yet.** Deployment to GitHub Pages is disabled until Milestone 6,
+when the first installable release gives it an audience that will not clone the repository.
+Until then the documentation is read here, and `make docs` renders it locally.
+
+That does not make the strict build optional. Validating the site and publishing it are
+separate concerns, and the strict build is what catches an orphaned page or a broken
+reference long before anyone would notice it on a site. Write pages as though they were
+published, because eventually they will be.
+
 Documentation ships in the **same pull request** as the change it describes. Not a follow-up;
 follow-ups do not happen.
 

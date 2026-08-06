@@ -49,6 +49,13 @@ considerably more than detecting it afterwards.
 
 - [ ] Source: **GitHub Actions**
 
+Enabled by the setup script, but the **Docs workflow that publishes to it is disabled
+until Milestone 6** — see `.github/workflows/docs.yml`. The documentation is readable in
+the repository until there is an audience that will not clone it.
+
+`mkdocs build --strict` still runs on every pull request regardless. Validating the site
+and publishing it are separate concerns.
+
 ## The `main` ruleset
 
 **Settings → Rules → Rulesets → New branch ruleset**
