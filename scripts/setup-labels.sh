@@ -86,23 +86,48 @@ LABELS=(
   "wontfix|cfd3d7|Deliberately not doing this"
 )
 
-created=0
+# Uses `gh api` rather than `gh label`, which did not exist until gh 2.6 — the
+# version shipped with Ubuntu 22.04 is 2.4. `gh api` is a generic REST client and
+# has been stable for years, so this works on whatever gh a contributor happens to
+# have.
+#
+# Idempotence: POST creates, and a 422 means the label already exists, so PATCH
+# updates it to match this file.
+apply_label() {
+  local name="$1" colour="$2" description="$3" encoded status
+
+  encoded=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${name}")
+
+  if gh api "repos/${REPO}/labels" --method POST --silent \
+      -f name="${name}" -f color="${colour}" -f description="${description}" 2>/dev/null
+  then
+    status="created"
+  elif gh api "repos/${REPO}/labels/${encoded}" --method PATCH --silent \
+      -f new_name="${name}" -f color="${colour}" -f description="${description}" 2>/dev/null
+  then
+    status="updated"
+  else
+    echo "  ! failed: ${name}" >&2
+    return 1
+  fi
+
+  printf '  %-8s %-28s %s\n' "${status}" "${name}" "${description}"
+}
+
+applied=0
+failed=0
 for entry in "${LABELS[@]}"; do
   IFS='|' read -r name colour description <<<"${entry}"
-  # --force updates an existing label rather than failing, which is what makes
-  # this file the source of truth.
-  gh label create "${name}" \
-    --repo "${REPO}" \
-    --color "${colour}" \
-    --description "${description}" \
-    --force >/dev/null
-  printf '  %-28s %s\n' "${name}" "${description}"
-  created=$((created + 1))
+  if apply_label "${name}" "${colour}" "${description}"; then
+    applied=$((applied + 1))
+  else
+    failed=$((failed + 1))
+  fi
 done
 
 echo
-echo "${created} labels applied."
+echo "${applied} labels applied, ${failed} failed."
 echo
 echo "GitHub's default labels (bug, enhancement, question, invalid) are left alone."
-echo "Delete them by hand if you want only the taxonomy above:"
-echo "  gh label delete bug --repo ${REPO} --yes"
+echo "Delete them if you want only the taxonomy above:"
+echo "  gh api repos/${REPO}/labels/bug --method DELETE"
