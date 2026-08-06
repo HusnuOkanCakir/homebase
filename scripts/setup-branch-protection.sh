@@ -105,6 +105,38 @@ gh api "repos/${REPO}/actions/permissions/workflow" --method PUT --silent \
 echo "  default token permission: read"
 echo "  Actions cannot approve pull requests"
 
+# Fork pull requests run untrusted code. GitHub's default only holds workflows
+# for *first-time* contributors; after one merged pull request an author's
+# subsequent workflows run automatically. On a public repository that is a
+# meaningful gap, so require approval for every external contributor, every time.
+if gh api "repos/${REPO}/actions/permissions/fork-pr-contributor-approval" \
+  --method PUT --silent -f approval_policy=all_external_contributors 2>/dev/null
+then
+  echo "  fork pull requests need approval from all external contributors"
+else
+  echo "  ! could not set the fork pull request approval policy — set it by hand"
+  echo "    (Settings -> Actions -> General -> Fork pull request workflows)"
+fi
+
+# --- GitHub Pages -----------------------------------------------------------
+
+echo
+echo "Pages"
+
+# The Docs workflow deploys here, and actions/configure-pages fails outright if
+# Pages has never been enabled — so enabling it is part of setup, not an
+# afterthought. 409 means it is already enabled, which is not an error.
+pages_state=$(gh api "repos/${REPO}/pages" --jq .build_type 2>/dev/null || true)
+
+if [[ "${pages_state}" == "workflow" ]]; then
+  echo "  already enabled, source: GitHub Actions"
+elif gh api "repos/${REPO}/pages" --method POST --silent -f build_type=workflow 2>/dev/null; then
+  echo "  enabled, source: GitHub Actions"
+else
+  echo "  ! could not enable Pages — set it by hand"
+  echo "    (Settings -> Pages -> Source: GitHub Actions)"
+fi
+
 # --- The main ruleset -------------------------------------------------------
 
 echo
@@ -202,8 +234,6 @@ does not bite is worse than none, because it is trusted:
 
   # A pull request with a failing check must be UNMERGEABLE, including for you
 
-Remaining manual steps (no API for these):
-  - Settings -> Pages -> Source: GitHub Actions
-  - Settings -> Actions -> Require approval for all outside collaborators
-  - Enable Discussions, if you want them
+Optional, and not scripted because it is a judgement call rather than a setting:
+  - Enable Discussions, if you want somewhere for questions that are not issues
 EOF
