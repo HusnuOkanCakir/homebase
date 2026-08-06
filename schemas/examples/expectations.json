@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "What each fixture is for, and — for the invalid ones — which constraint must reject it.",
+    "",
+    "Asserting merely that an invalid fixture is rejected is a weak test: a fixture that",
+    "becomes invalid for an unrelated reason (a typo, a renamed field) would still pass",
+    "while the constraint it was written to protect quietly stopped working. Naming the",
+    "expected path and keyword makes the test verify what it claims to verify.",
+    "",
+    "'path' is the JSON pointer to the offending value; 'keyword' is the JSON Schema",
+    "keyword that must produce the failure."
+  ],
+
+  "app-manifest": {
+    "schema": "app-manifest.schema.json",
+
+    "valid": {
+      "valid-jellyfin.json": "The realistic case: large image, user-selected media storage, optional GPU, declared credentials, Stage 2 capabilities and structured events.",
+      "valid-minimal.json": "The smallest manifest the schema accepts. Guards against required fields being added carelessly — every addition here is a breaking change for every existing manifest."
+    },
+
+    "invalid": {
+      "invalid-privileged-container.json": {
+        "why": "Requests a privileged container. The schema pins permissions.privileged to const false, because a privileged container is a root shell on the host and no catalogue application will be granted one. If this fixture ever validates, that guarantee has been removed.",
+        "path": "/permissions/privileged",
+        "keyword": "const"
+      },
+      "invalid-floating-tag.json": {
+        "why": "Pins the image to 'latest'. An application that silently changes version underneath a user is an application that silently breaks, and the user has no way to know why.",
+        "path": "/container/version",
+        "keyword": "pattern"
+      },
+      "invalid-absolute-host-path.json": {
+        "why": "Tries to choose its own location on the host filesystem. Applications declare storage by role; Homebase decides where it lives. Allowing a host path would let a manifest escape /srv/homebase/.",
+        "path": "/storage/0",
+        "keyword": "additionalProperties"
+      },
+      "invalid-missing-health.json": {
+        "why": "No health block. An application that cannot be checked cannot be managed — an unhealthy application reporting nothing is indistinguishable from a healthy one.",
+        "path": "",
+        "keyword": "required"
+      },
+      "invalid-bad-capability-risk.json": {
+        "why": "Declares a Stage 2 capability with an invented risk level. Risk levels are what the policy engine decides on, so an unrecognised value must never be silently accepted as safe.",
+        "path": "/capabilities/0/risk",
+        "keyword": "enum"
+      }
+    }
+  },
+
+  "error": {
+    "schema": "error.schema.json",
+
+    "valid": {
+      "valid-recoverable.json": "A recoverable error carrying the recovery instruction it is required to have.",
+      "valid-unrecoverable.json": "An unrecoverable error, which needs no recovery instruction."
+    },
+
+    "invalid": {
+      "invalid-recoverable-without-recovery.json": {
+        "why": "Claims to be recoverable but does not say how. Telling a user their problem is fixable while withholding the fix is worse than saying nothing.",
+        "path": "/error",
+        "keyword": "required"
+      },
+      "invalid-code-format.json": {
+        "why": "Error code is not lowercase domain.reason. Codes are the machine-readable contract clients switch on; an inconsistent one is a code nobody can match against reliably.",
+        "path": "/error/code",
+        "keyword": "pattern"
+      }
+    }
+  }
+}

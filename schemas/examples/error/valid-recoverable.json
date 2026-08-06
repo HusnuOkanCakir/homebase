@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "storage.disk_not_found",
+    "message": "The backup disk is not connected.",
+    "detail": "No disk with serial WD-WCC4N0304 is currently attached.",
+    "recoverable": true,
+    "recovery": "Reconnect the backup disk and try again.",
+    "request_id": "req_01HQ8X2K3MN4P5Q6R7S8T9V0W1",
+    "documentation_url": "https://homebase.dev/errors/storage.disk_not_found"
+  }
+}

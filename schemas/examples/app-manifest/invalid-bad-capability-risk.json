@@ -1,0 +1,26 @@
+{
+  "manifest_version": 1,
+  "id": "overreach",
+  "name": "Overreach",
+  "container": {
+    "image": "example/app",
+    "version": "1.0.0"
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config"
+    }
+  ],
+  "health": {
+    "type": "none"
+  },
+  "capabilities": [
+    {
+      "name": "overreach.delete_everything",
+      "description": "Remove all application data.",
+      "risk": "harmless"
+    }
+  ]
+}

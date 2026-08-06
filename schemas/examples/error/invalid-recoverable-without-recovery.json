@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "network.dns_resolution_failed",
+    "message": "Name lookups are failing.",
+    "recoverable": true
+  }
+}

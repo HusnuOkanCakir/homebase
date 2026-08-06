@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "apps.already_installed",
+    "message": "Jellyfin is already installed.",
+    "recoverable": false,
+    "request_id": "req_01HQ8X2K3MN4P5Q6R7S8T9V0W2"
+  }
+}

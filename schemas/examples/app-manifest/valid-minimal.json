@@ -1,0 +1,28 @@
+{
+  "manifest_version": 1,
+  "id": "hello-homebase",
+  "name": "Hello Homebase",
+  "summary": "A tiny test application used to exercise the install lifecycle.",
+
+  "container": {
+    "image": "traefik/whoami",
+    "version": "v1.10.4"
+  },
+
+  "network": {
+    "internal_port": 80
+  },
+
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config"
+    }
+  ],
+
+  "health": {
+    "type": "http",
+    "path": "/health"
+  }
+}

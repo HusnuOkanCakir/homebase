@@ -1,0 +1,129 @@
+{
+  "manifest_version": 1,
+  "revision": 1,
+  "id": "jellyfin",
+  "name": "Jellyfin",
+  "summary": "Watch your films, television and music on any device in your home.",
+  "homepage": "https://jellyfin.org",
+  "license": "GPL-2.0-only",
+
+  "container": {
+    "image": "jellyfin/jellyfin",
+    "version": "10.10.3",
+    "digest": "sha256:0f2c1e6a3b4d5e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f",
+    "environment": {
+      "TZ": "Europe/Zurich"
+    }
+  },
+
+  "network": {
+    "internal_port": 8096,
+    "protocol": "http",
+    "path": "/",
+    "discovery": ["dlna", "ssdp"]
+  },
+
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config",
+      "access": "read-write",
+      "description": "Jellyfin's own settings and library database.",
+      "backup": true
+    },
+    {
+      "id": "cache",
+      "type": "private",
+      "mount_path": "/cache",
+      "access": "read-write",
+      "description": "Transcoding scratch space. Rebuilt automatically.",
+      "backup": false
+    },
+    {
+      "id": "media",
+      "type": "user-selected",
+      "mount_path": "/media",
+      "access": "read-only",
+      "description": "The folder holding your films and television programmes.",
+      "backup": false
+    }
+  ],
+
+  "health": {
+    "type": "http",
+    "path": "/health",
+    "expected_status": 200,
+    "interval_seconds": 30,
+    "timeout_seconds": 5,
+    "start_period_seconds": 120,
+    "failures_before_unhealthy": 3
+  },
+
+  "permissions": {
+    "gpu": "optional",
+    "devices": ["dri"],
+    "privileged": false,
+    "read_only_root": false
+  },
+
+  "resources": {
+    "memory_limit_bytes": 2147483648,
+    "memory_minimum_bytes": 536870912,
+    "disk_minimum_bytes": 2147483648
+  },
+
+  "credentials": [
+    {
+      "ref": "jellyfin-admin",
+      "description": "Administrator account for the Jellyfin web interface.",
+      "generate": true
+    }
+  ],
+
+  "capabilities": [
+    {
+      "name": "media.get_status",
+      "description": "Whether Jellyfin is running and how many people are watching.",
+      "risk": "read",
+      "confirmation": "none",
+      "rollback": null
+    },
+    {
+      "name": "media.search",
+      "description": "Search the library by title.",
+      "risk": "read",
+      "confirmation": "none",
+      "rollback": null
+    },
+    {
+      "name": "media.restart",
+      "description": "Restart Jellyfin.",
+      "risk": "medium",
+      "confirmation": "required",
+      "rollback": null
+    }
+  ],
+
+  "events": [
+    {
+      "type": "transcode_failed",
+      "severity": "warning",
+      "description": "A video could not be transcoded, usually a missing codec or no GPU.",
+      "recoverable": true
+    },
+    {
+      "type": "library_scan_completed",
+      "severity": "info",
+      "description": "A library scan finished.",
+      "recoverable": false
+    }
+  ],
+
+  "sensitive_fields": ["api_key", "admin_password"],
+
+  "requires": {
+    "min_homebase_version": "0.3.0",
+    "architectures": ["amd64", "arm64"]
+  }
+}

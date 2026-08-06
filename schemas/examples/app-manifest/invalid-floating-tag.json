@@ -1,0 +1,19 @@
+{
+  "manifest_version": 1,
+  "id": "moving-target",
+  "name": "Moving Target",
+  "container": {
+    "image": "example/app",
+    "version": "latest"
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config"
+    }
+  ],
+  "health": {
+    "type": "none"
+  }
+}

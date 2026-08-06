@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homebase.dev/schemas/app-manifest.schema.json",
+  "title": "Homebase application manifest",
+  "description": "Describes an installable application. A manifest in app-store/ is a claim that the Homebase project has verified this application installs, starts, stops, survives a reboot, backs up and uninstalls cleanly. Manifests are runtime-neutral by design: they describe an image and its requirements, never Docker-specific invocations, so that changing the container runtime is a hostd change rather than a catalogue rewrite.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "manifest_version", "name", "container", "storage", "health"],
+
+  "properties": {
+    "manifest_version": {
+      "description": "Schema version this manifest targets. Incremented when a breaking change is made to this schema.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1
+    },
+
+    "id": {
+      "description": "Stable identifier. Used as a directory name under /srv/homebase/apps/ and as an API path segment, so it is deliberately restrictive.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$"
+    },
+
+    "name": {
+      "description": "Display name, as the application calls itself.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+    },
+
+    "summary": {
+      "description": "One sentence, for someone deciding whether they want this. Written for a person who does not know what a container is.",
+      "type": "string",
+      "maxLength": 200
+    },
+
+    "homepage": { "type": "string", "format": "uri" },
+
+    "license": {
+      "description": "SPDX identifier of the application's own licence.",
+      "type": "string"
+    },
+
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {
+        "image": {
+          "description": "Image reference without a tag. The tag lives in 'version' so that pinning is explicit and reviewable.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+([._/-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)*$"
+        },
+        "version": {
+          "description": "Image tag. A floating tag such as 'latest' is not permitted: an application that silently changes version underneath a user is an application that silently breaks.",
+          "type": "string",
+          "pattern": "^(?!latest$)[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        },
+        "digest": {
+          "description": "Optional sha256 digest. Where present it is authoritative and the tag is advisory.",
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "command": {
+          "description": "Override the image entrypoint. Discouraged; prefer an image that does not need it.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "environment": {
+          "description": "Environment variables. Values must never contain a secret — reference one with credential_ref instead.",
+          "type": "object",
+          "patternProperties": {
+            "^[A-Z][A-Z0-9_]*$": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+
+    "revision": {
+      "description": "Revision of this manifest, independent of the application version. Incremented whenever this file changes. Named 'revision' rather than 'version' because three fields called version — schema, manifest, image tag — would be one too many.",
+      "type": "integer",
+      "minimum": 1
+    },
+
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "internal_port": {
+          "description": "Port the application listens on inside its container. Homebase decides the external port.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "protocol": { "enum": ["http", "https", "tcp", "udp"], "default": "http" },
+        "path": {
+          "description": "Base path the web interface is served under.",
+          "type": "string",
+          "pattern": "^/",
+          "default": "/"
+        },
+        "host_network": {
+          "description": "Share the host network namespace. This removes network isolation and requires written justification in review — it is not a convenience setting.",
+          "type": "boolean",
+          "default": false
+        },
+        "discovery": {
+          "description": "Protocols the application needs on the local network, such as DLNA or mDNS.",
+          "type": "array",
+          "items": { "enum": ["mdns", "ssdp", "dlna", "wsdd"] },
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "storage": {
+      "description": "Storage the application needs. Locations are declared by role; Homebase decides where they live. An absolute host path is never permitted here.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "mount_path"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "type": {
+            "description": "'private' is created under /srv/homebase/apps/<id>/ and visible only to this application. 'user-selected' must be explicitly assigned by the user before the application starts.",
+            "enum": ["private", "user-selected"]
+          },
+          "mount_path": {
+            "description": "Where it appears inside the container.",
+            "type": "string",
+            "pattern": "^/[^\\0]*$"
+          },
+          "access": { "enum": ["read-write", "read-only"], "default": "read-write" },
+          "description": {
+            "description": "Shown to the user when they are asked to assign this location.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "backup": {
+            "description": "Whether this is included in a data backup by default. Caches should be false.",
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+
+    "health": {
+      "description": "How Homebase decides the application is working. Required: an application that cannot be checked cannot be managed, and an unhealthy application that reports nothing is indistinguishable from a healthy one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["http", "tcp", "command", "none"] },
+        "path": { "type": "string", "pattern": "^/" },
+        "expected_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599,
+          "default": 200
+        },
+        "interval_seconds": { "type": "integer", "minimum": 5, "default": 30 },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "default": 5 },
+        "start_period_seconds": {
+          "description": "Grace period after start before failures count. Some applications take minutes to become ready on old hardware.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 30
+        },
+        "failures_before_unhealthy": { "type": "integer", "minimum": 1, "default": 3 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "http" } }, "required": ["type"] },
+          "then": { "required": ["path"] }
+        }
+      ]
+    },
+
+    "permissions": {
+      "description": "What the application is allowed beyond the default. Everything here defaults to the most restrictive value; each exception is reviewed individually.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gpu": {
+          "description": "GPU access, for example Jellyfin transcoding. 'optional' means use it when present.",
+          "enum": ["none", "optional", "required"],
+          "default": "none"
+        },
+        "devices": {
+          "description": "Host devices to expose, by role rather than by path.",
+          "type": "array",
+          "items": { "enum": ["dri", "dvb", "serial", "usb-storage"] },
+          "uniqueItems": true
+        },
+        "capabilities": {
+          "description": "Linux capabilities to add. All are dropped by default. Adding one is a security review.",
+          "type": "array",
+          "items": {
+            "enum": ["NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_NICE", "DAC_READ_SEARCH"]
+          },
+          "uniqueItems": true
+        },
+        "privileged": {
+          "description": "Reserved so that a manifest cannot set it silently. It must be false; a privileged container is a root shell on the host, and no catalogue application will be granted one.",
+          "const": false,
+          "default": false
+        },
+        "read_only_root": {
+          "description": "Run with a read-only root filesystem. Should be true wherever the image tolerates it.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "memory_limit_bytes": { "type": "integer", "minimum": 67108864 },
+        "memory_minimum_bytes": {
+          "description": "Below this, installation is refused rather than allowed to fail confusingly later.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "cpu_shares": { "type": "integer", "minimum": 2, "maximum": 262144 },
+        "disk_minimum_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "credentials": {
+      "description": "Credentials this application needs. The manifest names them; values live in the secrets store and are resolved at the point of use. A credential value must never appear in a manifest.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "description"],
+        "properties": {
+          "ref": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "description": { "type": "string", "maxLength": 200 },
+          "generate": {
+            "description": "Generate a strong value at install time rather than asking the user.",
+            "type": "boolean",
+            "default": true
+          },
+          "environment_variable": {
+            "description": "Environment variable the resolved value is injected into at start.",
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$"
+          }
+        }
+      }
+    },
+
+    "capabilities": {
+      "description": "Read-only questions the Stage 2 AI operator may ask about this application, and actions it may propose. Declared per application so that an operator's reach is enumerable rather than emergent. Anything not listed here is not available to it, whatever it proposes.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "risk"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+            "examples": ["adblock.get_status", "media.search"]
+          },
+          "description": { "type": "string", "maxLength": 200 },
+          "risk": {
+            "description": "Determines how the policy engine handles a proposal. 'read' changes nothing; 'critical' destroys data irreversibly.",
+            "enum": ["read", "low", "medium", "high", "critical"]
+          },
+          "confirmation": {
+            "enum": ["none", "optional", "required", "explicit"],
+            "default": "required"
+          },
+          "rollback": {
+            "description": "Capability that undoes this one, or null where it cannot be undone. Null is permitted but must be deliberate.",
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+
+    "events": {
+      "description": "Structured events this application can raise. Declared so that consumers never have to parse log text to learn what happened.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "severity"],
+        "properties": {
+          "type": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "severity": { "enum": ["info", "warning", "error", "critical"] },
+          "description": { "type": "string", "maxLength": 200 },
+          "recoverable": { "type": "boolean" }
+        }
+      }
+    },
+
+    "sensitive_fields": {
+      "description": "Configuration keys whose values must be redacted in logs, API responses, diagnostic bundles and anything shown to the AI operator.",
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_homebase_version": { "type": "string" },
+        "architectures": {
+          "type": "array",
+          "items": { "enum": ["amd64", "arm64"] },
+          "uniqueItems": true,
+          "default": ["amd64"]
+        }
+      }
+    }
+  }
+}

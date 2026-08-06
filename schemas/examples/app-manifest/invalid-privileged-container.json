@@ -1,0 +1,22 @@
+{
+  "manifest_version": 1,
+  "id": "escape-hatch",
+  "name": "Escape Hatch",
+  "container": {
+    "image": "example/app",
+    "version": "1.0.0"
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config"
+    }
+  ],
+  "health": {
+    "type": "none"
+  },
+  "permissions": {
+    "privileged": true
+  }
+}

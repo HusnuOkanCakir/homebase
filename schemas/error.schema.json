@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homebase.dev/schemas/error.schema.json",
+  "title": "Homebase error envelope",
+  "description": "Every API error uses this shape. The 'code' field is the contract — clients switch on it and it never changes meaning once shipped. The 'message' field is not: rewording it, or translating it, is a compatible change. Mirrors the Error schema in api/openapi.yaml; both are validated in CI and must not diverge.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["error"],
+
+  "properties": {
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable identifier, 'domain.reason'. The domain matches an API area.",
+          "type": "string",
+          "pattern": "^[a-z]+(\\.[a-z_]+)+$",
+          "examples": [
+            "auth.invalid_credentials",
+            "apps.health_check_failed",
+            "storage.disk_not_found",
+            "network.dns_resolution_failed",
+            "jobs.conflict"
+          ]
+        },
+
+        "message": {
+          "description": "One sentence for the person reading it, who does not know what a mount point is. Never contains a path, a device name, or a stack trace — those belong in 'detail'.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "examples": ["The backup disk is not connected."]
+        },
+
+        "detail": {
+          "description": "Specifics for someone diagnosing the problem. May name paths, devices and versions. Must never contain a secret, a token or a password.",
+          "type": ["string", "null"],
+          "maxLength": 2000
+        },
+
+        "recoverable": {
+          "description": "Whether retrying could plausibly succeed. Distinguishes 'the disk is unplugged' from 'this request can never work'.",
+          "type": ["boolean", "null"]
+        },
+
+        "recovery": {
+          "description": "What the user can actually do about it. An error that is recoverable should say how.",
+          "type": ["string", "null"],
+          "maxLength": 500,
+          "examples": ["Reconnect the backup disk and try again."]
+        },
+
+        "request_id": {
+          "description": "Correlates this response with the logs and the audit trail.",
+          "type": ["string", "null"]
+        },
+
+        "documentation_url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        }
+      },
+
+      "allOf": [
+        {
+          "description": "A recoverable error must say how to recover from it. Reporting that a problem is fixable without saying how is worse than saying nothing.",
+          "if": {
+            "properties": { "recoverable": { "const": true } },
+            "required": ["recoverable"]
+          },
+          "then": {
+            "required": ["recovery"],
+            "properties": { "recovery": { "type": "string", "minLength": 1 } }
+          }
+        }
+      ]
+    }
+  }
+}

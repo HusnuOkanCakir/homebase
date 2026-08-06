@@ -1,0 +1,560 @@
+openapi: 3.1.0
+
+info:
+  title: Homebase Core API
+  version: 1.0.0-draft
+  summary: The only supported interface to a Homebase server.
+  description: |
+    **This is a contract written ahead of its implementation.** Nothing here exists yet;
+    the endpoints below are the Milestone 2 target.
+
+    The dashboard, `homebasectl` and — from Stage 2 — the local AI operator are all clients
+    of this API. Nothing bypasses it, and nothing that uses it holds privilege of its own:
+    every privileged action is performed by `hostd` behind a fixed set of typed operations.
+
+    Two conventions are worth knowing before reading further.
+
+    **Every mutating endpoint returns `202` with a job**, never a finished result — even for
+    operations that are usually instant. A client that has to know which operations are fast
+    is a client that breaks the first time a "fast" one is not.
+
+    **Error `code` is the contract; `message` is not.** Clients switch on `code`, which never
+    changes meaning once shipped. Rewording a `message` is a compatible change.
+
+    See the [API conventions](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/architecture/api-conventions.md).
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+  contact:
+    name: Homebase
+    url: https://github.com/HusnuOkanCakir/homebase
+
+servers:
+  - url: https://homebase.local/api/v1
+    description: A Homebase server on the local network
+
+tags:
+  - name: system
+    description: System information and machine-level operations
+  - name: jobs
+    description: Long-running operations
+  - name: events
+    description: Structured events and the audit trail
+
+security:
+  - sessionCookie: []
+  - bearerToken: []
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Liveness and readiness
+      description: |
+        Unauthenticated, so that a machine that cannot authenticate anyone can still be
+        diagnosed. It reveals whether the service is up and whether `hostd` is reachable —
+        deliberately nothing else.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: The service is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: Running but not ready, typically because `hostd` is unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /system:
+    get:
+      tags: [system]
+      summary: System information and current resource usage
+      description: |
+        Read live from `hostd` on every request. Nothing here is cached or remembered —
+        a remembered disk-usage figure is a wrong disk-usage figure, and the Stage 2
+        operator must never reason about the machine from stale values.
+      operationId: getSystem
+      responses:
+        "200":
+          description: Current system state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/System"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /system/reboot:
+    post:
+      tags: [system]
+      summary: Reboot the server
+      description: |
+        Requires `system.manage`. Returns a job that will not complete in the usual sense —
+        the connection drops when the machine goes down. Clients should treat loss of
+        connectivity after a `202` as expected rather than as a failure.
+      operationId: rebootSystem
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: Recorded in the audit log.
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: An exclusive job is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /jobs:
+    get:
+      tags: [jobs]
+      summary: List jobs
+      operationId: listJobs
+      parameters:
+        - name: state
+          in: query
+          description: Filter by state.
+          schema:
+            $ref: "#/components/schemas/JobState"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Job"
+                  total:
+                    type: integer
+                    minimum: 0
+                  next_cursor:
+                    type: [string, "null"]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /jobs/{job_id}:
+    get:
+      tags: [jobs]
+      summary: Get a job
+      operationId: getJob
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^job_[0-9A-HJKMNP-TV-Z]{26}$"
+      responses:
+        "200":
+          description: The job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /jobs/{job_id}/cancel:
+    post:
+      tags: [jobs]
+      summary: Cancel a job
+      description: |
+        Only jobs reporting `cancellable: true` may be cancelled. Cancellation is a request,
+        not a guarantee — the job moves to `cancelling` and may still finish.
+      operationId: cancelJob
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^job_[0-9A-HJKMNP-TV-Z]{26}$"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The job is not cancellable, or has already finished
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /events:
+    get:
+      tags: [events]
+      summary: List events
+      description: |
+        Structured events, not log text. Consumers — including the Stage 2 operator — must
+        never have to parse a human-readable string to learn what happened.
+      operationId: listEvents
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            $ref: "#/components/schemas/EventSeverity"
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+                  next_cursor:
+                    type: [string, "null"]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: homebase_session
+      description: Set at sign-in. `HttpOnly`, `Secure`, `SameSite=Lax`.
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: |
+        API token for `homebasectl` and, later, the AI operator. Tokens carry a permission
+        set and are individually revocable — so revoking the AI's access does not mean
+        revoking the user's.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        A repeated key returns the original job rather than starting a second one.
+
+        Not an edge case: a user on poor Wi-Fi will press a button twice, and an automated
+        client that loses a connection mid-request will retry.
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous response's `next_cursor`.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+  responses:
+    JobAccepted:
+      description: Accepted. Poll the job for progress.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Job"
+    Unauthorized:
+      description: Not authenticated
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Authenticated, but lacking the required permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: No such resource
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unavailable:
+      description: Temporarily unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status, version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        version:
+          type: string
+          examples: ["0.1.0-alpha.1"]
+        hostd_reachable:
+          type: boolean
+        uptime_seconds:
+          type: integer
+          minimum: 0
+
+    System:
+      type: object
+      additionalProperties: false
+      required: [hostname, cpu, memory, storage]
+      properties:
+        hostname:
+          type: string
+        os:
+          type: string
+          examples: ["Ubuntu 24.04.1 LTS"]
+        kernel:
+          type: string
+        uptime_seconds:
+          type: integer
+          minimum: 0
+        cpu:
+          type: object
+          additionalProperties: false
+          required: [model, cores, usage_percent]
+          properties:
+            model:
+              type: string
+            cores:
+              type: integer
+              minimum: 1
+            threads:
+              type: integer
+              minimum: 1
+            usage_percent:
+              type: number
+              minimum: 0
+              maximum: 100
+            temperature_celsius:
+              type: [number, "null"]
+              description: Null where the hardware does not report it.
+        memory:
+          type: object
+          additionalProperties: false
+          required: [total_bytes, available_bytes]
+          properties:
+            total_bytes:
+              type: integer
+              minimum: 0
+            available_bytes:
+              type: integer
+              minimum: 0
+        storage:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [mount_point, total_bytes, available_bytes]
+            properties:
+              mount_point:
+                type: string
+              filesystem:
+                type: string
+              total_bytes:
+                type: integer
+                minimum: 0
+              available_bytes:
+                type: integer
+                minimum: 0
+              removable:
+                type: boolean
+        power:
+          type: object
+          additionalProperties: false
+          properties:
+            on_battery:
+              type: boolean
+            battery_percent:
+              type: [integer, "null"]
+              minimum: 0
+              maximum: 100
+            lid_closed:
+              type: [boolean, "null"]
+
+    JobState:
+      type: string
+      description: |
+        `rollback_failed` is terminal and the worst outcome: the operation failed and the
+        attempt to undo it also failed. It always produces a user-visible alert with
+        specific recovery instructions, and is never retried automatically — an automatic
+        retry against an unknown state is how a bad situation becomes an unrecoverable one.
+      enum:
+        - queued
+        - running
+        - cancelling
+        - cancelled
+        - succeeded
+        - failed
+        - rolling_back
+        - rolled_back
+        - rollback_failed
+
+    Job:
+      type: object
+      additionalProperties: false
+      required: [job_id, state, operation, created_at]
+      properties:
+        job_id:
+          type: string
+          pattern: "^job_[0-9A-HJKMNP-TV-Z]{26}$"
+        state:
+          $ref: "#/components/schemas/JobState"
+        operation:
+          type: string
+          examples: ["system.reboot", "apps.install"]
+        stage:
+          type: [string, "null"]
+          examples: ["downloading_image"]
+        progress:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 100
+          description: Null where progress is not knowable; report `stage` alone.
+        message:
+          type: [string, "null"]
+          description: |
+            Written for the person reading it, not for the developer who wrote it. This is
+            a requirement rather than a nicety — it is the difference between a server its
+            owner can reason about and one they must ask somebody about.
+          examples: ["Downloading Jellyfin (1.2 GB of 1.8 GB)"]
+        cancellable:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: [string, "null"]
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        error:
+          oneOf:
+            - $ref: "#/components/schemas/ErrorDetail"
+            - type: "null"
+
+    EventSeverity:
+      type: string
+      enum: [info, warning, error, critical]
+
+    Event:
+      type: object
+      additionalProperties: false
+      required: [event_id, type, severity, occurred_at]
+      properties:
+        event_id:
+          type: string
+        type:
+          type: string
+          description: Machine-readable, `domain.event`.
+          examples: ["application_unhealthy", "backup_completed"]
+        severity:
+          $ref: "#/components/schemas/EventSeverity"
+        subject:
+          type: [string, "null"]
+          description: What the event is about.
+          examples: ["adguard"]
+        reason:
+          type: [string, "null"]
+          description: Machine-readable cause.
+          examples: ["dns_probe_failed"]
+        recoverable:
+          type: [boolean, "null"]
+        message:
+          type: [string, "null"]
+          description: Human-readable rendering. Never the only source of information.
+        occurred_at:
+          type: string
+          format: date-time
+
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          pattern: "^[a-z]+(\\.[a-z_]+)+$"
+          description: |
+            Stable and machine-readable, `domain.reason`. Never changes meaning once
+            shipped. This is the contract; `message` is not.
+          examples: ["storage.disk_not_found"]
+        message:
+          type: string
+          description: One sentence, for someone who does not know what a mount point is.
+          examples: ["The backup disk is not connected."]
+        detail:
+          type: [string, "null"]
+          description: Specifics for diagnosis. May name paths and devices. Never secrets.
+        recoverable:
+          type: [boolean, "null"]
+        recovery:
+          type: [string, "null"]
+          description: What the user can actually do.
+          examples: ["Reconnect the backup disk and try again."]
+        request_id:
+          type: [string, "null"]
+        documentation_url:
+          type: [string, "null"]
+          format: uri
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"

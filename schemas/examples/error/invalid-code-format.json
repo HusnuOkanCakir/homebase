@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "DiskNotFound",
+    "message": "The backup disk is not connected."
+  }
+}

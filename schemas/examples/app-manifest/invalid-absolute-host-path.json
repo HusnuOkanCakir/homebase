@@ -1,0 +1,20 @@
+{
+  "manifest_version": 1,
+  "id": "path-picker",
+  "name": "Path Picker",
+  "container": {
+    "image": "example/app",
+    "version": "1.0.0"
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config",
+      "host_path": "/srv/homebase/apps/path-picker/config"
+    }
+  ],
+  "health": {
+    "type": "none"
+  }
+}

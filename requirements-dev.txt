@@ -18,8 +18,12 @@ pymarkdownlnt==0.9.39
 # YAML linting (workflows, issue templates, app manifests)
 yamllint==1.38.0
 
-# Contract validation
+# Contract validation.
+# jsonschema arrives transitively via check-jsonschema, but scripts/validate_contracts.py
+# imports it directly — so it is declared directly. A transitive dependency that a script
+# imports is a dependency waiting to disappear in someone else's minor release.
 check-jsonschema==0.37.4
+jsonschema==4.26.0
 openapi-spec-validator==0.9.0
 
 # Workflow security analysis: unpinned actions, injection-prone template
