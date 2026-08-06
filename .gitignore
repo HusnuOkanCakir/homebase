@@ -1,0 +1,60 @@
+# --- Local tooling -----------------------------------------------------------
+.venv/
+__pycache__/
+*.py[cod]
+.pymarkdown*.json
+site/                       # mkdocs build output
+
+# --- Go (Phase 2+) -----------------------------------------------------------
+/bin/
+/dist/
+*.test
+*.out
+vendor/
+
+# --- Node / dashboard (Phase 3+) ---------------------------------------------
+node_modules/
+dashboard/dist/
+dashboard/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# --- VM lab (Phase 2+) -------------------------------------------------------
+# Disk images and ISOs must never be committed. They are large and rebuildable.
+*.qcow2
+*.img
+*.iso
+*.vmdk
+tests/vm/run/
+tests/vm/cache/
+
+# --- Packaging ---------------------------------------------------------------
+*.deb
+*.buildinfo
+*.changes
+packaging/**/debian/files
+packaging/**/debian/.debhelper/
+
+# --- Secrets -----------------------------------------------------------------
+# Belt and braces: gitleaks + GitHub push protection are the real defence, but
+# keep the obvious shapes out of the working tree entirely.
+*.pem
+*.key
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
+secrets/
+
+# --- Editors and OS ----------------------------------------------------------
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# --- Agent tooling -----------------------------------------------------------
+# Per-developer Claude Code settings; the shared .claude/settings.json (if any)
+# is committed deliberately.
+.claude/settings.local.json

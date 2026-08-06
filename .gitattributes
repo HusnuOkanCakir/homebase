@@ -1,0 +1,30 @@
+# Normalise line endings: the repo is LF everywhere, including on Windows
+# checkouts of the controller (installer-USB creator), which is the only
+# component expected to be developed on Windows.
+* text=auto eol=lf
+
+# Shell scripts and systemd units are executed by the OS; CRLF breaks them.
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.service   text eol=lf
+*.socket    text eol=lf
+*.timer     text eol=lf
+Makefile    text eol=lf
+
+# Binary files: never diff, never normalise.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.qcow2     binary
+*.img       binary
+*.iso       binary
+*.deb       binary
+*.gz        binary
+*.xz        binary
+*.zst       binary
+
+# Generated files: collapse in PR diffs so review attention goes to the source.
+docs/reference/**   linguist-generated=true
