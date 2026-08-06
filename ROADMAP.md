@@ -7,29 +7,39 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestone 0.**
+**Current position: Milestone 0 complete. Milestone 1 next.**
 
 ---
 
 ## Stage 1 — the server
 
-### Milestone 0 — Contracts and project machinery ← *we are here*
+### Milestone 0 — Contracts and project machinery ✅
 
 No product code. Establish what everything else will be built against.
 
 - [x] Monorepo skeleton, Apache-2.0, editor and line-ending conventions
-- [ ] Governance: contributing guide, security policy, PR and issue templates, CODEOWNERS
-- [ ] Hardened CI: hygiene, docs, contracts, workflow-security, secret scanning
-- [ ] Branch protection and repository settings, scripted and documented
-- [ ] Architecture documentation and ADRs 0001–0009
-- [ ] Threat model and privilege-boundary documentation
-- [ ] `api/openapi.yaml` — the v1 API contract, ahead of implementation
-- [ ] `schemas/app-manifest.schema.json` — with valid *and* invalid fixtures in CI
+- [x] Governance: contributing guide, security policy, PR and issue templates, CODEOWNERS
+- [x] Hardened CI: hygiene, docs, contracts, workflow-security, secret scanning
+- [x] Branch protection and repository settings, scripted and documented
+- [x] Architecture documentation and ADRs 0001–0009
+- [x] Threat model and privilege-boundary documentation
+- [x] `api/openapi.yaml` — the v1 API contract, ahead of implementation
+- [x] `schemas/app-manifest.schema.json` — with valid *and* invalid fixtures in CI
 
-**Done when:** CI is green on a public repository, `main` is protected, the docs site
-publishes, and the contracts are machine-validated on every pull request.
+**Done when:** CI is green on a public repository, `main` is protected, and the contracts
+are machine-validated on every pull request. ✅
 
-### Milestone 1 — Disposable VM lab
+Branch protection was verified by the test that matters: a direct push to `main` is
+rejected, and a pull request cannot merge until all five required checks pass. A ruleset
+that exists but does not bite is worse than none, because it gets trusted.
+
+**One deliverable deliberately deferred:** publishing the documentation site. The
+site builds under `mkdocs build --strict` on every pull request, but deployment to GitHub
+Pages is off until Milestone 6 — see [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
+Until there is an installable release, the audience for the documentation is people
+reading it in this repository, where it already works.
+
+### Milestone 1 — Disposable VM lab ← *next*
 
 The first code written, because everything after it needs somewhere honest to be tested.
 
@@ -37,8 +47,8 @@ The first code written, because everything after it needs somewhere honest to be
 - [ ] Automated Ubuntu Server boot, serial console capture, log export
 - [ ] Fixtures: clean base image, blank disk, Windows-occupied disk
 
-**Blocked on disk space** — needs roughly 40 GB. Also the point where Go and Node 20 are
-installed.
+Requires QEMU/KVM, libvirt, and roughly 40 GB of free disk for the ISO cache, a base
+image and a qcow2 overlay per test. This is also where Go and Node 20 are installed.
 
 **Done when:** one command creates a clean VM, installs a service, reboots, verifies health,
 exports logs and destroys the machine.

@@ -2,11 +2,13 @@
 
 Turn an old laptop into a home server you can actually manage.
 
-!!! warning "Pre-alpha — Milestone 0"
+!!! warning "Pre-alpha — Milestone 0 complete, Milestone 1 next"
 
-    There is no installable release. This site currently documents the architecture and
-    contracts that the implementation is being built against. Nothing here should be
-    pointed at data you care about.
+    There is no installable release and no product code yet. These pages document the
+    architecture and contracts the implementation is being built against, which means they
+    describe intent rather than behaviour. Where the two eventually disagree, the
+    documentation is the target and the gap is a bug. Nothing here should be pointed at
+    data you care about.
 
 ## The idea
 
