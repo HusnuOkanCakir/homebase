@@ -22,10 +22,23 @@ Each release records the minimum version it can upgrade from. See
 
 ## [Unreleased]
 
+Milestone 0 — contracts and project machinery. No product code.
+
 ### Added
 
 - Repository skeleton, Apache-2.0 licence, editor and line-ending conventions
 - Contributing guide, security policy, code of conduct, roadmap
 - Pull request and issue templates, CODEOWNERS
+- Hardened CI: hygiene, docs, contracts, workflow-security and secret-scanning jobs,
+  with every action pinned to a commit SHA and no secrets exposed to fork pull requests
+- Python-only developer tooling — `make bootstrap` needs only Python 3.11 and Git
+- Architecture documentation: components, services, jobs, data layout, API conventions
+- Decision records 0001–0009, including **ADR-0006**, which fixes the privilege boundary:
+  unprivileged `core`, minimal `hostd`, and no generic execution path in any form
+- Threat model, privilege boundaries, update security, CI security, disclosure policy
+- `api/openapi.yaml` — the v1 API contract, written ahead of its implementation
+- `schemas/app-manifest.schema.json` and `schemas/error.schema.json`, with valid *and*
+  invalid fixtures; each invalid fixture asserts rejection by a named constraint
+- Repository automation for labels, branch protection and environment checks
 
 [Unreleased]: https://github.com/HusnuOkanCakir/homebase/commits/main
