@@ -93,6 +93,22 @@ else
   echo "  ! private vulnerability reporting could not be enabled automatically"
 fi
 
+# Dependabot alerts, which also switch on the dependency graph. The graph is what
+# actions/dependency-review-action reads; without it that job fails outright with
+# "Dependency review is not supported on this repository", which reads like a
+# broken workflow rather than a missing setting.
+if gh api "repos/${REPO}/vulnerability-alerts" --method PUT --silent 2>/dev/null; then
+  echo "  Dependabot alerts and dependency graph enabled"
+else
+  echo "  ! Dependabot alerts could not be enabled automatically"
+fi
+
+if gh api "repos/${REPO}/automated-security-fixes" --method PUT --silent 2>/dev/null; then
+  echo "  Dependabot security updates enabled"
+else
+  echo "  ! Dependabot security updates could not be enabled automatically"
+fi
+
 # --- Actions permissions ----------------------------------------------------
 
 echo
