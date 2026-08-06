@@ -90,6 +90,7 @@ nav:
       - 0007 Trunk-based development: decisions/0007-trunk-based-development.md
       - 0008 Apache-2.0: decisions/0008-apache-license.md
       - 0009 Docs toolchain: decisions/0009-python-docs-toolchain.md
+      - 0010 VM lab: decisions/0010-vm-lab-qemu-cloud-image.md
       - Template: decisions/template.md
   - Security:
       - Threat model: security/threat-model.md

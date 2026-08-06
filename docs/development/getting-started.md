@@ -24,7 +24,7 @@ make check
 
 | Milestone | Adds | Why |
 |---|---|---|
-| 1 — VM lab | QEMU/KVM, libvirt, **~40 GB free disk** | Booting real Ubuntu VMs for tests |
+| 1 — VM lab | QEMU/KVM, OVMF, cloud-image-utils, **~40 GB free disk** | Booting real Ubuntu VMs for tests |
 | 2 — Core slice | Go 1.23+, Node 20+ | `core`, `hostd`, the dashboard |
 | 3 — Applications | Docker Engine | Container lifecycle |
 

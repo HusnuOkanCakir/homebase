@@ -30,5 +30,13 @@ updates or the privilege boundary:
 
 ## Milestone gating
 
-Empty for now. `vm/` requires the QEMU harness (Milestone 1) and roughly 40 GB of free disk.
-`installer/` and `upgrade/` require release artifacts to exist (Milestones 6 and 8).
+`vm/` is built — see [tests/vm/README.md](vm/README.md). It needs QEMU, OVMF and roughly
+40 GB of free disk; `make vm-test` runs the end-to-end check.
+
+`unit/`, `integration/` and `e2e/` fill up from Milestone 2, when there is product code to
+exercise. `installer/` and `upgrade/` need release artifacts to exist (Milestones 6 and 8).
+
+The distinction between `vm/` and `installer/` is worth keeping straight: `vm/` tests
+Homebase running **on** a machine, using VMs built from Ubuntu cloud images. `installer/`
+tests **installing** Homebase, from real media onto blank and Windows-occupied disks. The
+first is fast enough to run per test; the second is not, and is not meant to be.

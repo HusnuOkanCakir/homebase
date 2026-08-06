@@ -47,8 +47,10 @@ The first code written, because everything after it needs somewhere honest to be
 - [ ] Automated Ubuntu Server boot, serial console capture, log export
 - [ ] Fixtures: clean base image, blank disk, Windows-occupied disk
 
-Requires QEMU/KVM, libvirt, and roughly 40 GB of free disk for the ISO cache, a base
-image and a qcow2 overlay per test. This is also where Go and Node 20 are installed.
+Requires QEMU/KVM, OVMF and roughly 40 GB of free disk for the cached base image and a
+qcow2 overlay per test. No libvirt and no root — see
+[ADR-0010](docs/decisions/0010-vm-lab-qemu-cloud-image.md). This is also where Go and
+Node 20 are installed.
 
 **Done when:** one command creates a clean VM, installs a service, reboots, verifies health,
 exports logs and destroys the machine.
