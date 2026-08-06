@@ -1,0 +1,80 @@
+version: 2
+
+updates:
+  # GitHub Actions. Dependabot rewrites the pinned SHA and updates the trailing
+  # version comment, which is the only sustainable way to keep SHA pinning from
+  # rotting into permanently stale actions.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: scope
+    labels:
+      - "type/chore"
+      - "area/ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # Milestone 0 development tooling.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: scope
+    labels:
+      - "type/chore"
+      - "area/ci"
+    groups:
+      dev-tooling:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # Go modules and npm are registered ahead of the code arriving in Milestones
+  # 2 and 3. Dependabot ignores an ecosystem with no manifest, so these are inert
+  # until then — and active the moment the first go.mod lands, rather than being
+  # forgotten.
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+      include: scope
+    labels:
+      - "type/chore"
+      - "area/core"
+
+  - package-ecosystem: npm
+    directory: "/dashboard"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+      include: scope
+    labels:
+      - "type/chore"
+      - "area/dashboard"

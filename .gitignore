@@ -2,7 +2,7 @@
 .venv/
 __pycache__/
 *.py[cod]
-.pymarkdown*.json
+.pymarkdown_cache/
 site/                       # mkdocs build output
 
 # --- Go (Phase 2+) -----------------------------------------------------------

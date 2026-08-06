@@ -1,0 +1,55 @@
+{
+  // Markdown lint configuration. Parsed as JSON5, so comments are allowed.
+
+  "plugins": {
+    // Prose in this repository wraps at about 90-95 characters, so a 130 limit
+    // still catches genuinely runaway lines. It is set above the prose width
+    // deliberately: several documents use three-column tables whose rows cannot
+    // be wrapped at all, and squeezing those cells to fit a 100-character rule
+    // costs more in clarity than the rule returns. If a *paragraph* approaches
+    // this limit, wrap it — the linter is the floor, not the target.
+    "line-length": {
+      "enabled": true,
+      "line_length": 130,
+      "code_block_line_length": 130,
+      "heading_line_length": 130
+    },
+
+    // Issue templates and the PR template rely on HTML comments for guidance
+    // that must not render.
+    "no-inline-html": {
+      "enabled": false
+    },
+
+    "first-line-heading": {
+      "enabled": true
+    },
+
+    // "### 1. Correction" and similar repeat across nesting levels in the code
+    // of conduct; identical headings at the *same* level remain an error.
+    "no-duplicate-heading": {
+      "enabled": true,
+      "allow_different_nesting": true
+    },
+
+    "no-bare-urls": {
+      "enabled": true
+    },
+
+    // A fence without a language renders without highlighting and tells the
+    // reader nothing about what they are looking at.
+    "fenced-code-language": {
+      "enabled": true
+    },
+
+    "no-emphasis-as-heading": {
+      "enabled": false
+    }
+  },
+
+  "extensions": {
+    "front-matter": {
+      "enabled": true
+    }
+  }
+}

@@ -1,0 +1,46 @@
+# yamllint configuration.
+#
+# GitHub workflow and issue-template YAML has house conventions of its own (the
+# `on:` key, long expressions). The rules below accommodate those without giving
+# up the checks that catch real mistakes: tabs, duplicate keys, and inconsistent
+# indentation.
+
+extends: default
+
+rules:
+  line-length:
+    max: 100
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+
+  # GitHub requires the literal key `on:`. YAML 1.1 would read it as a boolean,
+  # which is exactly the "truthy" case this rule exists to catch — so exempt the
+  # key and keep the check for values.
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+
+  comments:
+    min-spaces-from-content: 1
+
+  comments-indentation: disable
+
+  document-start: disable
+
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+
+  # Duplicate keys silently discard configuration. Never allowed.
+  key-duplicates: enable
+
+  braces:
+    max-spaces-inside: 1
+
+  brackets:
+    max-spaces-inside: 1
+
+ignore: |
+  .venv/
+  site/
+  node_modules/
