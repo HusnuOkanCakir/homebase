@@ -14,13 +14,18 @@ name: Docs
 # release: a person who has just installed a server appliance cannot be told to
 # browse to docs/user-guide/backup.md on GitHub.
 #
-# It is also off because it does not currently work. Deployments are created and
-# then sit in `deployment_queued` until the action times out, on every attempt,
-# across a fresh commit and a delete-and-recreate of the Pages site. The build
-# succeeds and the artifact uploads; GitHub's Pages backend never picks it up.
-# `pages.status` stays null with zero builds ever recorded. That is outside this
-# repository's control, and leaving a workflow permanently red is how people learn
-# to ignore red workflows.
+# It was switched off during a GitHub incident — "Pages - Deployment Lag",
+# 2026-08-06, since resolved — in which deployments were created and then sat in
+# `deployment_queued` until the action timed out. That incident is over, so the
+# technical obstacle is gone; the reason above is the one that still applies, and
+# it is the reason this stays off.
+#
+# Worth recording because the misdiagnosis is instructive: the failure looked like
+# a repository misconfiguration and was investigated as one, through a fresh commit
+# and a delete-and-recreate of the Pages site, before githubstatus.com listed the
+# incident. The build had succeeded and the artifact had uploaded every time. When
+# every input to a step is correct and it still fails, check whether the service is
+# up before rebuilding your own side of it.
 #
 # Note that `mkdocs build --strict` still runs on every pull request, in ci.yml's
 # `docs` job. Validation and publication are separate concerns: the strict build
