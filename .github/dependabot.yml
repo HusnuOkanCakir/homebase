@@ -47,34 +47,25 @@ updates:
           - minor
           - patch
 
-  # Go modules and npm are registered ahead of the code arriving in Milestones
-  # 2 and 3. Dependabot ignores an ecosystem with no manifest, so these are inert
-  # until then — and active the moment the first go.mod lands, rather than being
-  # forgotten.
-  - package-ecosystem: gomod
-    directory: "/"
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "build"
-      include: scope
-    labels:
-      - "type/chore"
-      - "area/core"
-
-  - package-ecosystem: npm
-    directory: "/dashboard"
-    schedule:
-      interval: weekly
-      day: monday
-      time: "06:00"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "build"
-      include: scope
-    labels:
-      - "type/chore"
-      - "area/dashboard"
+  # Go modules (Milestone 2) and npm (Milestone 2, dashboard) are deliberately
+  # NOT registered yet.
+  #
+  # These were originally listed here on the assumption that Dependabot ignores
+  # an ecosystem whose manifest does not exist. It does not — it runs, fails to
+  # find go.mod and package.json, and reports an error on every schedule. Two
+  # permanently red jobs on a repository with no Go or JavaScript in it is how
+  # people learn to ignore red jobs.
+  #
+  # Add the blocks below when the first go.mod and package.json land:
+  #
+  #   - package-ecosystem: gomod
+  #     directory: "/"
+  #     schedule: {interval: weekly, day: monday, time: "06:00"}
+  #     commit-message: {prefix: "build", include: scope}
+  #     labels: ["type/chore", "area/core"]
+  #
+  #   - package-ecosystem: npm
+  #     directory: "/dashboard"
+  #     schedule: {interval: weekly, day: monday, time: "06:00"}
+  #     commit-message: {prefix: "build", include: scope}
+  #     labels: ["type/chore", "area/dashboard"]

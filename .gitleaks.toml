@@ -1,0 +1,33 @@
+# gitleaks configuration.
+#
+# The default ruleset, plus a deliberately narrow allowlist.
+#
+# The allowlist names individual literal strings rather than exempting paths or
+# file types. Exempting docs/ would be far less work and would create exactly the
+# blind spot worth avoiding: a real credential pasted into a documentation example
+# is a real leak, and it is a plausible way for one to happen. Listing each value
+# explicitly means every future exemption is a line in a diff somebody has to
+# approve.
+#
+# Before adding an entry here, be sure the value is genuinely illustrative. If
+# there is any doubt, treat it as a leak: rotate the credential first and argue
+# afterwards.
+
+title = "Homebase"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Illustrative values in documentation and contract examples"
+regexTarget = "match"
+
+regexes = [
+  # docs/architecture/jobs.md — example Idempotency-Key header. A randomly
+  # generated UUID, never issued to anything, present to show the header's shape.
+  '''7f3a9c21-4e8b-4d2a-9f1c-3b5e8d7a2f60''',
+
+  # schemas/examples/app-manifest/valid-jellyfin.json — example image digest.
+  # Not a real published Jellyfin layer; it demonstrates the digest field format.
+  '''sha256:0f2c1e6a3b4d5e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f''',
+]

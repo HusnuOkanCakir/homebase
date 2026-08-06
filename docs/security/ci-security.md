@@ -104,6 +104,37 @@ Two independent layers, because they fail differently:
 - **GitHub push protection** blocks recognised secrets at push time, before they ever reach
   the repository
 
+### Why the binary and not the action
+
+CI installs the gitleaks **binary**, pinned by version and verified by SHA-256 checksum
+before it is allowed to run, rather than using `gitleaks/gitleaks-action`.
+
+The action is closed-source and commercially licensed, and by its own documentation contacts
+`keygen.sh` for licence validation on every run. Granting a third party execution rights in
+CI to check our own hygiene is the trade this page argues against, and a security job that
+phones home is a poor place to make an exception.
+
+Verifying the artifact's checksum is also a stronger guarantee than pinning an action SHA:
+it verifies the thing that executes, not the recipe that fetches it.
+
+### The allowlist
+
+`.gitleaks.toml` allowlists **individual literal strings**, never paths or file types.
+
+Exempting `docs/` would be far less work and would create exactly the blind spot worth
+avoiding — a real credential pasted into a documentation example is a real leak, and a
+plausible way for one to happen. Listing each value explicitly makes every future exemption
+a line in a diff somebody has to approve.
+
+Two entries exist today: an example `Idempotency-Key` UUID in
+[jobs](../architecture/jobs.md#idempotency) and an example image digest in the Jellyfin
+manifest fixture. Both were flagged on entropy, and neither is a credential.
+
+If there is ever doubt about whether a flagged value is illustrative, treat it as a leak:
+**rotate the credential first and argue afterwards.** Rewriting history does not help — the
+value was public, and public repositories are scraped continuously by automation faster than
+any human response.
+
 A committed secret must be treated as compromised and **rotated**, not merely removed.
 Rewriting history does not help: it was public, and public repositories are scraped
 continuously by automation that is faster than any human response.
