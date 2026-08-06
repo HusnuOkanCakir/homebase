@@ -1,0 +1,114 @@
+site_name: Homebase
+site_description: >-
+  Turn an old laptop into a home server you can actually manage. Local-first,
+  recoverable by design, with no root access for the dashboard.
+site_url: https://husnuokancakir.github.io/homebase/
+repo_url: https://github.com/HusnuOkanCakir/homebase
+repo_name: HusnuOkanCakir/homebase
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 Husnu Okan Cakir and the Homebase contributors
+
+# Warnings are errors. An orphaned page or a broken reference fails the build
+# rather than shipping quietly.
+strict: true
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  # Mermaid diagrams render client-side from ```mermaid fences.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Services: architecture/services.md
+      - Jobs: architecture/jobs.md
+      - Data layout: architecture/data-layout.md
+      - API conventions: architecture/api-conventions.md
+  - Decisions:
+      - Index: decisions/index.md
+      - 0001 Monorepo: decisions/0001-monorepo.md
+      - 0002 Languages: decisions/0002-implementation-languages.md
+      - 0003 REST and OpenAPI: decisions/0003-rest-openapi.md
+      - 0004 SQLite: decisions/0004-sqlite.md
+      - 0005 Container runtime: decisions/0005-container-runtime.md
+      - 0006 Privilege split: decisions/0006-privilege-split.md
+      - 0007 Trunk-based development: decisions/0007-trunk-based-development.md
+      - 0008 Apache-2.0: decisions/0008-apache-license.md
+      - 0009 Docs toolchain: decisions/0009-python-docs-toolchain.md
+      - Template: decisions/template.md
+  - Security:
+      - Threat model: security/threat-model.md
+      - Privilege boundaries: security/privilege-boundaries.md
+      - Update security: security/update-security.md
+      - CI security: security/ci-security.md
+      - Disclosure: security/disclosure.md
+  - Development:
+      - Getting started: development/getting-started.md
+      - Branching and commits: development/branching.md
+      - Testing: development/testing.md
+      - Repository setup: development/repository.md
+  - Release:
+      - Process: release/process.md
+      - Versioning: release/versioning.md
+  - User guide: user-guide/index.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/HusnuOkanCakir/homebase
+      name: Homebase on GitHub

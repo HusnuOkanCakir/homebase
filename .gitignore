@@ -3,7 +3,8 @@
 __pycache__/
 *.py[cod]
 .pymarkdown_cache/
-site/                       # mkdocs build output
+# mkdocs build output
+site/
 
 # --- Go (Phase 2+) -----------------------------------------------------------
 /bin/
