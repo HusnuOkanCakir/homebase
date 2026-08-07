@@ -2,12 +2,15 @@
 
 Turn an old laptop into a home server you can actually manage.
 
-!!! warning "Pre-alpha — Milestone 0 complete, Milestone 1 next"
+!!! warning "Pre-alpha — Milestones 0 and 1 complete, Milestone 2 nearly done"
 
-    There is no installable release and no product code yet. These pages document the
-    architecture and contracts the implementation is being built against, which means they
-    describe intent rather than behaviour. Where the two eventually disagree, the
-    documentation is the target and the gap is a bug. Nothing here should be pointed at
+    There is no installable release. `hostd`, `core` and the dashboard work: you can set up
+    an administrator, read live system information and restart the machine from a browser.
+    There is no installer, no applications, no storage management and no backups.
+
+    Much of what follows still describes intent rather than behaviour — everything from
+    Milestone 3 onward. Where the documentation and the implementation eventually disagree,
+    the documentation is the target and the gap is a bug. Nothing here should be pointed at
     data you care about.
 
 ## The idea

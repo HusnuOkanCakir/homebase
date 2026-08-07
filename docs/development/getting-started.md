@@ -2,13 +2,18 @@
 
 ## What you need right now
 
-Milestone 0 contains no product code. To work on it you need:
+It depends what you are working on, and this page says which so you are not installing
+things you cannot yet use.
 
-- **Python 3.11+**
-- **Git**
+**Documentation, contracts, CI** — Python 3.11+ and Git. That is the whole list.
 
-That is the whole list. Go, Node and QEMU arrive later, and this page says exactly when so
-you are not installing things you cannot yet use.
+**The services and the dashboard** — additionally Go 1.23+, Node 20+, and QEMU with KVM to
+run the tests. The tests are not optional here: `hostd` runs as root and `core` holds the
+only copy of somebody's configuration, so both are verified in a real VM rather than only
+in unit tests.
+
+`./scripts/bootstrap-dev.sh` reports what this machine has and what it is missing, per
+milestone. It installs nothing.
 
 ```sh
 git clone https://github.com/HusnuOkanCakir/homebase.git
@@ -20,11 +25,11 @@ make check
 `make bootstrap` creates `.venv` and installs the pinned tooling from `requirements-dev.txt`.
 `make check` runs exactly what CI runs.
 
-## What you will need later
+## What each milestone adds
 
 | Milestone | Adds | Why |
 |---|---|---|
-| 1 — VM lab | QEMU/KVM, OVMF, cloud-image-utils, **~40 GB free disk** | Booting real Ubuntu VMs for tests |
+| 1 — VM lab ✅ | QEMU/KVM, OVMF, cloud-image-utils, **~40 GB free disk** | Booting real Ubuntu VMs for tests |
 | 2 — Core slice | Go 1.23+, Node 20+ | `core`, `hostd`, the dashboard |
 | 3 — Applications | Docker Engine | Container lifecycle |
 
@@ -36,27 +41,35 @@ overlay per test. Run `make vm-destroy` after each run: the overlays are what cr
 the base image should be the only long-lived artifact.
 
 **Node version.** The dashboard needs Node 20+. Node 12 is still the default on some
-long-lived Ubuntu installations and will fail in confusing ways. Check with `node --version`
-before Milestone 2, not during it.
+long-lived Ubuntu installations, and upgrading it on one collides with the distribution's
+own `libnode-dev`, which has to be removed first. Check with `node --version` before you
+start, not once a build is failing.
 
 **GitHub CLI version.** `gh` is optional, but the repository scripts use `gh api` rather
 than newer subcommands so they work on old versions — Ubuntu 22.04 ships gh 2.4, which
 predates `gh label` and `gh run list --branch`. If you extend those scripts, stay on
 `gh api` for the same reason.
 
-`./scripts/bootstrap-dev.sh` checks all of this and reports what is missing for which
-milestone. It installs nothing.
-
 ## Everyday commands
 
 ```sh
-make help          # list targets
-make check        # everything CI runs
-make docs          # serve the documentation site on :8000
-make lint          # markdown, YAML, workflow security
-make validate      # links, OpenAPI, JSON schemas
-make clean
+make help              # list targets
+make check             # everything CI runs for docs and contracts
+make go-lint go-test   # Go: gofmt, vet, race tests
+make dash-lint         # dashboard: typecheck and lint
+make docs              # serve the documentation site on :8000
+
+make vm-create         # a disposable VM
+make vm-test           # the harness itself
+make vm-test-hostd     # hostd under real systemd
+make vm-test-core      # the API vertical slice
+make vm-test-dashboard # the user journey, in a browser
+make vm-destroy
 ```
+
+The `vm-test-*` targets each create a VM, exercise it, and destroy it — including on
+failure, after collecting diagnostics. A failing test that leaves a 20 GB disk image behind
+is a test people stop running.
 
 Run `make check` before pushing. It is the same tooling at the same pinned versions as CI, so
 a local pass should mean a CI pass — if the two ever disagree, that is a bug worth reporting
