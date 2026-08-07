@@ -154,6 +154,14 @@ dash-lint: ## Lint and typecheck the dashboard
 dash-dev: ## Serve the dashboard on :5173, proxying the API to a running core
 	@cd dashboard && npm run dev
 
+# --- Packaging ---------------------------------------------------------------
+
+.PHONY: packages
+packages: go-build dash-build ## Build the Debian packages into dist/
+	@python3 scripts/build-packages.py --version $(VERSION)
+
+VERSION ?= 0.0.0~dev
+
 # --- VM lab --------------------------------------------------------------------
 # Disposable Ubuntu VMs, for testing what cannot be tested honestly anywhere else:
 # systemd units, real disks, real reboots. Raw QEMU and cloud images, no libvirt
@@ -205,6 +213,10 @@ vm-test-core: ## The vertical slice: setup, sign in, read system, reboot, job re
 .PHONY: vm-test-dashboard
 vm-test-dashboard: ## The milestone's user journey, in a real browser against a real VM
 	@python3 tests/vm/test_dashboard.py
+
+.PHONY: vm-test-packages
+vm-test-packages: ## Install, upgrade and purge the .debs on a clean machine
+	@python3 tests/vm/test_packages.py
 
 .PHONY: vm-destroy
 vm-destroy: ## Destroy the VM and its overlay

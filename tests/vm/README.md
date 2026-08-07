@@ -10,6 +10,7 @@ make vm-test       # the full end-to-end check
 make vm-test-hostd # hostd under real systemd
 make vm-test-core  # the full vertical slice
 make vm-test-dashboard # the user journey, in a browser
+make vm-test-packages  # install, upgrade and purge the .debs
 make vm-destroy    # remove it
 ```
 

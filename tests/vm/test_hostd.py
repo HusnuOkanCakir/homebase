@@ -92,8 +92,12 @@ def curl(vm: VM, path: str, method: str = "GET", body: str | None = None,
     ordinary HTTP that anyone can debug at 11pm, which was the argument for
     choosing it.
     """
+    # No `-o /dev/stdout`. Under `sudo -u`, /dev/stdout resolves to
+    # /proc/self/fd/1 — a pipe owned by the *login* user — and another user
+    # cannot open it. curl writes the body to stdout by default anyway; the
+    # redirect only ever added a way to fail.
     cmd = ["sudo", "-u", as_user, "curl", "--silent", "--show-error",
-           "--unix-socket", SOCKET, "-o", "/dev/stdout",
+           "--unix-socket", SOCKET,
            "-w", "\\n%{http_code}", "-X", method]
 
     for key, value in (headers or {}).items():
@@ -112,6 +116,20 @@ def curl(vm: VM, path: str, method: str = "GET", body: str | None = None,
     if len(status_line) == 2:
         return int(status_line[1]), status_line[0]
     return int(output), ""
+
+
+def parse_json(body: str, what: str) -> dict:
+    """Decode a response, failing as a test failure rather than a traceback.
+
+    A harness that crashes instead of failing tells you nothing about what the
+    server actually said, which is the one thing you need.
+    """
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise TestFailure(
+            f"{what} did not return JSON: {exc}\n    body was: {body[:300]!r}"
+        ) from exc
 
 
 def install_hostd(vm: VM, binary: Path) -> None:
@@ -178,7 +196,7 @@ def verify_read_operations(vm: VM) -> None:
 
     status, body = curl(vm, "/v1/operations")
     check(status == 200, f"operations returned {status}", body)
-    ops = {op["name"]: op for op in json.loads(body)["operations"]}
+    ops = {op["name"]: op for op in parse_json(body, "/v1/operations")["operations"]}
     check(
         {"system.get_info", "system.get_resources", "system.reboot"} <= set(ops),
         f"registry lists {len(ops)} operations",
@@ -191,7 +209,7 @@ def verify_read_operations(vm: VM) -> None:
 
     status, body = curl(vm, "/v1/op/system.get_info", "POST", "{}")
     check(status == 200, f"system.get_info returned {status}", body)
-    facts = json.loads(body)
+    facts = parse_json(body, "system.get_info")
     check(facts["hostname"] == VM_NAME, f"hostname = {facts['hostname']}")
     check(bool(facts["kernel"]), f"kernel = {facts['kernel']}")
     check(facts["uptime_seconds"] > 0, f"uptime = {facts['uptime_seconds']}s")
@@ -200,7 +218,7 @@ def verify_read_operations(vm: VM) -> None:
 
     status, body = curl(vm, "/v1/op/system.get_resources", "POST", "{}")
     check(status == 200, f"system.get_resources returned {status}", body)
-    res = json.loads(body)
+    res = parse_json(body, "system.get_resources")
     check(res["memory"]["total_bytes"] > 0, f"memory total = {res['memory']['total_bytes'] // 1048576} MB")
     check(
         0 < res["memory"]["available_bytes"] <= res["memory"]["total_bytes"],
@@ -223,7 +241,8 @@ def verify_rejections(vm: VM) -> None:
 
     status, body = curl(vm, "/v1/op/system.does_not_exist", "POST", "{}")
     check(status == 404, f"an unknown operation returns {status}", body)
-    check(json.loads(body)["error"]["code"] == "hostd.unknown_operation", "with the right error code")
+    check(parse_json(body, "the error")["error"]["code"] == "hostd.unknown_operation",
+          "with the right error code")
 
     status, body = curl(vm, "/v1/op/system.reboot", "POST", '{"confirm":"anything"}')
     check(status == 428, f"reboot without confirmation returns {status}", body)
@@ -234,7 +253,7 @@ def verify_rejections(vm: VM) -> None:
     )
     check(status == 428, f"reboot naming the wrong machine returns {status}", body)
     check(
-        json.loads(body)["error"]["code"] == "system.confirmation_mismatch",
+        parse_json(body, "the error")["error"]["code"] == "system.confirmation_mismatch",
         "with confirmation_mismatch, so a confirmation cannot be replayed elsewhere",
     )
 

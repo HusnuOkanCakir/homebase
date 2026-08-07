@@ -35,6 +35,8 @@ tests/vm/cache/
 
 # --- Packaging ---------------------------------------------------------------
 *.deb
+/build/
+/dist/
 *.buildinfo
 *.changes
 packaging/**/debian/files

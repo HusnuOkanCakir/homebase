@@ -63,6 +63,13 @@ Milestone 0 — contracts and project machinery. No product code.
 - A browser journey covering the milestone's exit condition, run against a real machine
   in a VM including a real reboot
 - `ci/dashboard`: typecheck, lint, build, a bundle-size gate and `npm audit`
+- **Debian packages** for all three components, which is where the privilege split stops
+  being unit files and becomes something the kernel enforces: socket mode, service
+  account, directory ownership. The build refuses to produce a package containing a
+  setuid file, a writable directory, or anything outside `/usr`, `/lib` and `/etc`
+- A package lifecycle test covering install, upgrade, reinstall, reboot and purge, with
+  a real administrator account and a real file intact throughout — including after
+  purge, which deliberately keeps user data
 
 ### Changed
 

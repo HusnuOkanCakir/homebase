@@ -7,9 +7,7 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0 and 1 complete. Milestone 2 in progress —
-`hostd`, `core` and the dashboard are built and the user journey passes end to end;
-`.deb` packaging remains.**
+**Current position: Milestones 0, 1 and 2 complete. Milestone 3 next.**
 
 ---
 
@@ -64,7 +62,7 @@ building fixtures for a component that has not been written.
 Go and Node 20 were also expected here; they are only needed once there is code to build, so
 they move to Milestone 2 with it.
 
-### Milestone 2 — Core vertical slice ← *in progress*
+### Milestone 2 — Core vertical slice ✅
 
 The smallest complete product: dashboard → API → privileged operation → hardware.
 
@@ -76,19 +74,26 @@ The smallest complete product: dashboard → API → privileged operation → ha
 - [x] systemd units for both, and `ci/go` running build, vet, race tests, a
       dependency guard and govulncheck
 - [x] Dashboard: first-run admin setup, login, system overview, reboot with confirmation
-- [ ] `.deb` packaging, `ci/go` and `ci/dashboard` as **required** checks
+- [x] `.deb` packaging, with `go`, `packages` and `dashboard` as **required** checks
 
 **Done when:** a user opens the dashboard, creates an administrator, sees accurate system
-information, reboots the machine, and everything comes back by itself.
+information, reboots the machine, and everything comes back by itself. ✅
 
-**That journey now passes in a real browser against a real machine** —
+**That journey passes in a real browser against a real machine** —
 `make vm-test-dashboard`, about 64 seconds: first-run setup, a refused second
 administrator, sign-in, live system information read through
 `/proc` → `hostd` → socket → `core` → HTTP → browser, a restart refused until the machine
 is named, a genuine reboot, and the dashboard noticing the server come back.
 
-The e2e suite is not in CI: it needs KVM, which GitHub's hosted runners do not provide.
-It moves there when the VM lab has an ephemeral, network-isolated self-hosted runner.
+The packages are verified the same way — `make vm-test-packages`, about 89 seconds:
+installed on a clean machine, given a real administrator account and a real file,
+upgraded in place, reinstalled, rebooted and finally purged, with the account and the
+file intact at every step.
+
+The browser and package suites are not in CI: both need KVM, which GitHub's hosted
+runners do not provide. They move there when the VM lab has an ephemeral,
+network-isolated self-hosted runner. CI does build the packages, install them, reinstall
+them and purge them, which covers everything that does not need a VM.
 
 **How a reboot job finishes.** Nothing can observe a reboot completing — the connection dies
 with the machine. Assuming success would make every job report a value nobody checked, so
@@ -99,7 +104,7 @@ behind it is indistinguishable, to a user, from one still working.
 
 `/events` is deferred to Milestone 3, where there will be something to raise events about.
 
-### Milestone 3 — Applications
+### Milestone 3 — Applications ← *next*
 
 - [ ] Manifest validation, image pull, container creation, port allocation
 - [ ] Health checks; start, stop, restart, uninstall

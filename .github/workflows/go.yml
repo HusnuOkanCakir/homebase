@@ -117,3 +117,60 @@ jobs:
             echo "in the pull request rather than suppressing it silently."
             exit 1
           }
+
+  # Packaging is where the privilege split stops being unit files in a
+  # repository and becomes something the kernel enforces: the socket mode, the
+  # service account, the directory ownership. It gets its own job because those
+  # properties are checked at build time and are worth failing on their own.
+  packages:
+    name: packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: true
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Build the dashboard
+        run: |
+          cd dashboard
+          npm ci
+          npm run build
+
+      # dpkg-deb and fakeroot only — no debhelper. `make packages` does the same
+      # thing here as on a laptop, which is the point.
+      - name: Build packages
+        run: make packages VERSION=0.0.0~ci
+
+      # A package that installs cleanly on a fresh machine and then fails on the
+      # second run leaves a half-configured system, which is a state nothing has
+      # code for. The VM suite covers the full lifecycle; this covers the part
+      # that needs no VM.
+      - name: Install, reinstall and purge
+        run: |
+          set -euo pipefail
+          sudo dpkg -i dist/*.deb
+          echo "--- reinstalling the same version ---"
+          sudo dpkg -i dist/*.deb
+          echo "--- the accounts and directories the boundary depends on ---"
+          getent group homebase
+          getent passwd homebase
+          stat -c '%a %U %G  %n' /etc/homebase /var/lib/homebase /srv/homebase
+          test "$(stat -c '%U' /var/lib/homebase)" = homebase
+          test "$(stat -c '%U' /etc/homebase)" = root
+          echo "--- user data must survive purge ---"
+          sudo touch /srv/homebase/user-file
+          sudo apt-get remove -y --purge homebase-dashboard homebase-core homebase-hostd
+          test -f /srv/homebase/user-file \
+            || { echo "purge removed user data"; exit 1; }
+          echo "user data survived purge"
