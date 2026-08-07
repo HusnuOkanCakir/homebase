@@ -17,7 +17,16 @@ green() { printf '  \033[32m✓\033[0m %s\n' "$1"; ok=$((ok + 1)); }
 warn()  { printf '  \033[33m!\033[0m %s\n' "$1"; }
 bad()   { printf '  \033[31m✗\033[0m %s\n' "$1"; missing=$((missing + 1)); }
 
-version_of() { "$1" --version 2>&1 | head -1; }
+# Most tools take --version. Go does not: `go --version` errors, and the error
+# still exits 0 through a pipeline, so a naive check reports a green tick next to
+# a failure message. Anything that reports success while printing an error is
+# worse than no check at all.
+version_of() {
+  case "$1" in
+    go) "$1" version 2>&1 | head -1 ;;
+    *)  "$1" --version 2>&1 | head -1 ;;
+  esac
+}
 
 echo "Homebase development environment"
 echo
@@ -119,7 +128,7 @@ else
 fi
 
 echo
-echo "Milestone 2 — core, hostd and the dashboard (not yet started)"
+echo "Milestone 2 — core, hostd and the dashboard"
 
 if command -v go >/dev/null 2>&1; then
   green "$(version_of go)"
@@ -167,14 +176,17 @@ fi
 
 echo
 if [[ "${missing}" -eq 0 ]]; then
-  echo "Ready for Milestone 0. Next:"
+  echo "Ready. Common commands:"
   echo
   echo "  make bootstrap    # create .venv and install pinned tooling"
   echo "  make check        # run exactly what CI runs"
+  echo "  make vm-test      # end-to-end VM lifecycle check"
   echo "  make docs         # serve the documentation site on :8000"
+  echo
+  echo "Warnings above, if any, are for milestones not yet reached."
   exit 0
 fi
 
-echo "${missing} required item(s) missing for Milestone 0."
+echo "${missing} required item(s) missing."
 echo "Warnings above are for later milestones and are not blocking today."
 exit 1
