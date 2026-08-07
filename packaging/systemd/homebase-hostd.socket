@@ -1,0 +1,24 @@
+[Unit]
+Description=Homebase privileged host service socket
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/security/privilege-boundaries.md
+
+[Socket]
+ListenStream=/run/homebase/hostd.sock
+
+# These three lines are the privilege boundary.
+#
+# Mode 0660 with group homebase means core can connect and nothing else on the
+# machine can. Widening this to 0666 would remove the boundary entirely without
+# touching a line of Go — which is why packaging changes need security review,
+# and why this is stated here as well as in ADR-0006.
+SocketUser=root
+SocketGroup=homebase
+SocketMode=0660
+
+# Socket activation, so core can start before hostd is ready: the first request
+# blocks rather than failing. It also means hostd does not have to be running
+# for the socket to exist, which keeps the startup ordering simple.
+Accept=no
+
+[Install]
+WantedBy=sockets.target

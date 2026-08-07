@@ -28,6 +28,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -571,9 +572,20 @@ def ssh(
     check: bool = True,
     stdin: str | None = None,
 ) -> subprocess.CompletedProcess:
+    """Run a command in the guest.
+
+    `command` is an argv list and is treated as one: each element is quoted so it
+    arrives as a single argument, whatever it contains.
+
+    This is not incidental. ssh does not take an argv — it joins whatever it is
+    given into one string and hands that to the login shell, which then re-splits
+    it. So `["stat", "-c", "%a %U %G", path]` arrives as five arguments and stat
+    tries to open "%U" as a file. Anything containing a space silently becomes
+    two arguments, which is a confusing failure a long way from its cause.
+    """
     args = ssh_args(vm)
     if command:
-        args += command
+        args.append(" ".join(shlex.quote(part) for part in command))
         result = subprocess.run(args, capture_output=True, text=True, input=stdin)
         if check and result.returncode != 0:
             raise VMError(
@@ -582,6 +594,40 @@ def ssh(
             )
         return result
     return subprocess.run(args)
+
+
+def copy_to(vm: VM, local: Path, remote: str, mode: str = "0755") -> None:
+    """Copy a local file into the guest as root.
+
+    Via scp to a staging path then `sudo install`, because scp itself connects as
+    the unprivileged user and cannot write to /usr or /etc. `install` sets the
+    mode in the same step, so the file is never briefly present with the wrong
+    permissions — which matters for anything that is about to run as root.
+    """
+    staged = f"/tmp/{Path(remote).name}"
+
+    result = subprocess.run(
+        [
+            "scp",
+            "-i", str(vm.key),
+            "-P", str(vm.ssh_port),
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR",
+            str(local),
+            f"homebase@127.0.0.1:{staged}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise VMError(
+            f"Could not copy {local.name} into '{vm.name}'.",
+            (result.stderr or result.stdout).strip()[:400],
+        )
+
+    ssh(vm, ["sudo", "install", "-m", mode, "-o", "root", "-g", "root", staged, remote])
+    ssh(vm, ["rm", "-f", staged])
 
 
 def write_file(vm: VM, path: str, content: str, mode: str = "0644") -> None:

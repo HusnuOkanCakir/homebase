@@ -91,6 +91,7 @@ nav:
       - 0008 Apache-2.0: decisions/0008-apache-license.md
       - 0009 Docs toolchain: decisions/0009-python-docs-toolchain.md
       - 0010 VM lab: decisions/0010-vm-lab-qemu-cloud-image.md
+      - 0011 hostd protocol: decisions/0011-hostd-protocol.md
       - Template: decisions/template.md
   - Security:
       - Threat model: security/threat-model.md

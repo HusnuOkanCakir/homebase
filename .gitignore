@@ -59,3 +59,4 @@ Thumbs.db
 # Per-developer Claude Code settings; the shared .claude/settings.json (if any)
 # is committed deliberately.
 .claude/settings.local.json
+bin/

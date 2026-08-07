@@ -1,0 +1,119 @@
+name: Go
+
+# Build, vet and test the Go services.
+#
+# Hardened the same way as ci.yml: pull_request rather than pull_request_target,
+# read-only token, every action pinned to a commit SHA, no self-hosted runners.
+# See docs/security/ci-security.md.
+
+on:
+  pull_request:
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - ".github/workflows/go.yml"
+  push:
+    branches: [main]
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "internal/**"
+      - ".github/workflows/go.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # `stable`, not go-version-file. The `go` directive in go.mod is a
+      # language-version floor for contributors, not a toolchain pin — reading it
+      # here made CI build with Go 1.23.12, which govulncheck correctly reported
+      # as carrying 19 standard-library vulnerabilities. Building with the current
+      # release is how those get fixed; pinning an old one and suppressing the
+      # scanner is how they get shipped.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Toolchain
+        run: go version
+
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            echo
+            echo "Run: gofmt -w ./cmd ./internal"
+            exit 1
+          fi
+          echo "All files are formatted."
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -race -cover
+
+      # hostd runs as root and its dependency tree is code that runs as root.
+      # ADR-0002 commits to keeping it close to the standard library; this is
+      # what makes that commitment observable rather than aspirational.
+      - name: No third-party dependencies in the privileged service
+        run: |
+          # `.Standard` is Go's own answer to "is this the standard library",
+          # which matters because the stdlib vendors golang.org/x/* internally —
+          # grepping import paths for a dot reports those as third-party and is
+          # wrong.
+          deps=$(go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./cmd/hostd \
+                 | grep -v '^github.com/HusnuOkanCakir/homebase' || true)
+          if [ -n "$deps" ]; then
+            echo "hostd has acquired non-stdlib dependencies:"
+            echo "$deps"
+            echo
+            echo "hostd runs as root. Every dependency here is code running as root."
+            echo "Adding one is a security review, not a build change -- see ADR-0002."
+            exit 1
+          fi
+          echo "hostd depends only on the Go standard library."
+
+      # The registry is the source of truth for docs, contract tests and the
+      # Stage 2 capability list. If it cannot be exported, all three break.
+      - name: Operation registry is exportable
+        run: |
+          go run ./cmd/hostd --describe > /tmp/operations.json
+          python3 -m json.tool /tmp/operations.json > /dev/null
+          echo "Operations declared:"
+          python3 -c "
+          import json
+          ops = json.load(open('/tmp/operations.json'))['operations']
+          for op in ops:
+              print(f\"  {op['name']:<26} risk={op['risk']:<8} confirm={op['confirmation']}\")
+          "
+
+      - name: Vulnerability scan
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... || {
+            echo
+            echo "govulncheck reported a problem. If it is a false positive, say so"
+            echo "in the pull request rather than suppressing it silently."
+            exit 1
+          }

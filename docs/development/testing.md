@@ -108,6 +108,12 @@ Required where applicable to the change:
 
 ## Later milestones
 
+**`make vm-test-hostd`** runs `hostd` under real systemd in a VM and checks the things a
+unit test cannot: the socket's mode and group, systemd's sandbox actually applying, an
+unprivileged user being refused by the *kernel* rather than by our code, and the service
+surviving the reboot it performed itself. Each of those is a property of the deployment, and
+each would pass a unit test while being wrong in production.
+
 **VM tests (Milestone 1)** need QEMU/KVM and roughly 40 GB of free disk. `make vm-create`,
 `vm-test`, `vm-destroy`.
 
