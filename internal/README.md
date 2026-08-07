@@ -6,6 +6,7 @@ is deliberate: Homebase's stable, supported surface is the **HTTP API**
 
 | Package | Owns |
 |---|---|
+| `hostd` | **Built.** The privileged service: operation registry, socket server, audit log |
 | `api` | HTTP handlers, routing, request/response types, error envelope |
 | `auth` | Sessions, password hashing, permission checks, credential references |
 | `jobs` | Long-running operations: queue, progress, cancellation, idempotency, rollback |
@@ -13,7 +14,7 @@ is deliberate: Homebase's stable, supported surface is the **HTTP API**
 | `containers` | Application lifecycle on top of the container runtime |
 | `storage` | Disk discovery, mounts, managed storage locations |
 
-Nothing here yet; these land in Milestone 2 and after.
+`hostd` is built. The rest land in Milestone 2 and after.
 
 ## Layering
 

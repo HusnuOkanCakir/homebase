@@ -7,6 +7,7 @@ units, real disks, real reboots.
 make vm-create     # create and boot one (~20s after the first run)
 make vm-ssh        # shell into it
 make vm-test       # the full end-to-end check
+make vm-test-hostd # hostd under real systemd
 make vm-destroy    # remove it
 ```
 

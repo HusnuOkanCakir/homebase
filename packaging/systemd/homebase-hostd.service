@@ -1,0 +1,58 @@
+[Unit]
+Description=Homebase privileged host service
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/security/privilege-boundaries.md
+After=network.target
+Requires=homebase-hostd.socket
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/libexec/homebase/hostd
+Restart=on-failure
+RestartSec=2s
+
+# hostd must be root: it mounts disks, controls containers and restarts the
+# machine. Everything below narrows what "root" means here.
+#
+# These are not performance settings. They are the difference between the
+# privilege split being an architectural intention and being something the
+# kernel enforces. Removing one to make a feature work is a security review.
+User=root
+Group=root
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/etc/homebase /var/lib/homebase /srv/homebase /run/homebase /var/log/homebase
+
+# AF_UNIX for the socket; AF_NETLINK for reading network state later. No
+# AF_INET: hostd never talks to the network, and should not be able to.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallFilter=~@obsolete @cpu-emulation
+SystemCallArchitectures=native
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+RemoveIPC=yes
+
+# The audit log is append-only by intent; the service opens it O_APPEND and
+# never truncates it.
+LogsDirectory=homebase
+LogsDirectoryMode=0750
+RuntimeDirectory=homebase
+RuntimeDirectoryMode=0755
+StateDirectory=homebase
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

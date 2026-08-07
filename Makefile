@@ -109,6 +109,32 @@ docs-build: $(STAMP) ## Build the documentation site, warnings are errors
 		echo "Docs: no mkdocs.yml yet (lands in the architecture PR)."; \
 	fi
 
+# --- Go --------------------------------------------------------------------
+
+.PHONY: go-build
+go-build: ## Build the Go binaries into bin/
+	@mkdir -p bin
+	@CGO_ENABLED=0 go build -trimpath -o bin/ ./cmd/...
+	@echo "Built: $$(ls bin/)"
+
+.PHONY: go-test
+go-test: ## Run the Go tests with the race detector
+	@go test ./... -race -cover
+
+.PHONY: go-lint
+go-lint: ## gofmt and go vet
+	@unformatted=$$(gofmt -l ./cmd ./internal); \
+	if [ -n "$$unformatted" ]; then \
+		echo "Not gofmt-formatted:"; echo "$$unformatted"; \
+		echo; echo "Run: gofmt -w ./cmd ./internal"; exit 1; \
+	fi
+	@go vet ./...
+	@echo "Go: formatted and vetted."
+
+.PHONY: hostd-describe
+hostd-describe: ## Print the privileged operation registry as JSON
+	@go run ./cmd/hostd --describe
+
 # --- VM lab --------------------------------------------------------------------
 # Disposable Ubuntu VMs, for testing what cannot be tested honestly anywhere else:
 # systemd units, real disks, real reboots. Raw QEMU and cloud images, no libvirt
@@ -148,6 +174,10 @@ vm-status: ## List VMs
 .PHONY: vm-test
 vm-test: ## End-to-end: create, install a service, reboot, verify, export, destroy
 	@python3 tests/vm/test_lifecycle.py
+
+.PHONY: vm-test-hostd
+vm-test-hostd: ## hostd under real systemd: socket permissions, sandbox, audit, reboot
+	@python3 tests/vm/test_hostd.py
 
 .PHONY: vm-destroy
 vm-destroy: ## Destroy the VM and its overlay
