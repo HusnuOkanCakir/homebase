@@ -340,7 +340,10 @@ fqdn: {vm.name}.local
 manage_etc_hosts: true
 
 users:
-  - name: homebase
+  # Deliberately not "homebase": that is the name of the service account the
+  # package creates, and a login user holding it makes `adduser --system` adopt
+  # an interactive account instead of creating the system one.
+  - name: dev
     groups: [sudo]
     shell: /bin/bash
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
@@ -527,7 +530,7 @@ def ssh_args(vm: VM) -> list[str]:
         "-o", "UserKnownHostsFile=/dev/null",
         "-o", "LogLevel=ERROR",
         "-o", f"ConnectTimeout={SSH_TIMEOUT_S}",
-        "homebase@127.0.0.1",
+        "dev@127.0.0.1",
     ]
 
 
@@ -612,7 +615,7 @@ def upload(vm: VM, local: Path, remote: str) -> None:
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "LogLevel=ERROR",
             str(local),
-            f"homebase@127.0.0.1:{remote}",
+            f"dev@127.0.0.1:{remote}",
         ],
         capture_output=True,
         text=True,

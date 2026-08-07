@@ -84,7 +84,18 @@ Rules:
     - [ ] Require conversation resolution
 - [ ] Require status checks to pass
     - [ ] Require branches to be up to date before merging
-    - Checks: `hygiene`, `docs`, `contracts`, `workflows`, `secrets`
+    - Checks: `hygiene`, `docs`, `contracts`, `workflows`, `secrets`, `go`,
+      `packages`, `dashboard`
+
+A check joins that list once it is meaningful and reliable, not when it is
+written. `go` and `packages` were added when there was Go code for them to
+check, and `dashboard` when there was a dashboard. Requiring a check that cannot
+yet pass is how a repository ends up with a ruleset people learn to route
+around.
+
+The path-filtered workflows (`go`, `packages`, `dashboard`) do not run on a
+documentation-only pull request. GitHub treats a required check that never
+reports on a filtered path as satisfied, so this does not block those.
 
 ### Zero required approvals
 

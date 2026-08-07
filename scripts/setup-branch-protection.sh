@@ -31,9 +31,21 @@ REPO="${HOMEBASE_REPO:-HusnuOkanCakir/homebase}"
 # ---------------------------------------------------------------------------
 REQUIRED_APPROVALS=0
 
-# Job names from .github/workflows/ci.yml. These must match exactly, or the
-# ruleset will wait forever for a check that never reports.
-REQUIRED_CHECKS=(hygiene docs contracts workflows secrets)
+# Job names, exactly as the workflows declare them. A name that does not match
+# leaves the ruleset waiting forever for a check that never reports.
+#
+# A check belongs here once it is meaningful and reliable. `go` and `packages`
+# were added when there was Go code to check; `dashboard` when there was a
+# dashboard. Adding one before it can pass is how a repository ends up with a
+# ruleset people route around.
+REQUIRED_CHECKS=(
+  # ci.yml
+  hygiene docs contracts workflows secrets
+  # go.yml
+  go packages
+  # dashboard.yml
+  dashboard
+)
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "error: the GitHub CLI (gh) is not installed." >&2
