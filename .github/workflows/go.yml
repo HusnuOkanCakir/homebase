@@ -171,6 +171,12 @@ jobs:
           echo "--- user data must survive purge ---"
           sudo touch /srv/homebase/user-file
           sudo apt-get remove -y --purge homebase-dashboard homebase-core homebase-hostd
-          test -f /srv/homebase/user-file \
+          # sudo, because /srv/homebase is 0750 homebase:homebase and this user
+          # cannot traverse it. Without it the check reports missing data on a
+          # machine where the data is perfectly fine — a false alarm about
+          # exactly the thing that must never produce one.
+          sudo test -f /srv/homebase/user-file \
             || { echo "purge removed user data"; exit 1; }
-          echo "user data survived purge"
+          sudo test -f /var/lib/homebase/homebase.db \
+            || { echo "purge removed the database"; exit 1; }
+          echo "user data and the database survived purge"
