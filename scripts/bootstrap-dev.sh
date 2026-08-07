@@ -65,18 +65,47 @@ fi
 # --- Later milestones -------------------------------------------------------
 
 echo
-echo "Milestone 1 — VM lab (not yet started)"
+echo "Milestone 1 — VM lab"
 
 if [[ "${avail_gb}" -ge 40 ]]; then
-  green "disk: ${avail_gb} GB free (40 GB needed for ISOs and qcow2 overlays)"
+  green "disk: ${avail_gb} GB free (40 GB needed for the base image and overlays)"
 else
   warn "disk: ${avail_gb} GB free — the VM lab needs about 40 GB"
 fi
 
-if command -v qemu-system-x86_64 >/dev/null 2>&1; then
-  green "$(version_of qemu-system-x86_64)"
+vm_missing=0
+for tool in qemu-system-x86_64 qemu-img; do
+  if command -v "${tool}" >/dev/null 2>&1; then
+    green "$(version_of "${tool}")"
+  else
+    warn "${tool} not installed"
+    vm_missing=1
+  fi
+done
+
+# cloud-init seed image. cloud-localds is the convenient one; the harness falls
+# back to genisoimage or xorriso if only those are present.
+if command -v cloud-localds >/dev/null 2>&1; then
+  green "cloud-localds"
+elif command -v genisoimage >/dev/null 2>&1 || command -v xorriso >/dev/null 2>&1; then
+  green "genisoimage/xorriso (cloud-localds absent; the harness falls back)"
 else
-  warn "qemu-system-x86_64 not installed (needed at Milestone 1)"
+  warn "no cloud-init seed builder (cloud-localds, genisoimage or xorriso)"
+  vm_missing=1
+fi
+
+# Homebase ships UEFI-only, so the lab boots UEFI. A lab booting legacy BIOS
+# would be testing a firmware path we do not ship.
+if ls /usr/share/OVMF/OVMF_CODE*.fd >/dev/null 2>&1 \
+   || ls /usr/share/edk2/ovmf/OVMF_CODE.fd >/dev/null 2>&1; then
+  green "OVMF (UEFI firmware)"
+else
+  warn "OVMF not installed — the VM lab boots UEFI, not legacy BIOS"
+  vm_missing=1
+fi
+
+if [[ "${vm_missing}" -eq 1 ]]; then
+  printf '      sudo apt install qemu-system-x86 qemu-utils cloud-image-utils ovmf\n'
 fi
 
 if [[ -r /dev/kvm && -w /dev/kvm ]]; then
@@ -85,7 +114,8 @@ elif [[ -e /dev/kvm ]]; then
   warn "/dev/kvm exists but is not accessible — add yourself to the kvm group:"
   printf '      sudo usermod -aG kvm "$USER"   # then log out and back in\n'
 else
-  warn "/dev/kvm not present — hardware virtualisation may be disabled in firmware"
+  warn "/dev/kvm not present — hardware virtualisation may be disabled in firmware."
+  printf '      VMs would fall back to emulation, roughly ten times slower.\n'
 fi
 
 echo

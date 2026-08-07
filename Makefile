@@ -109,6 +109,54 @@ docs-build: $(STAMP) ## Build the documentation site, warnings are errors
 		echo "Docs: no mkdocs.yml yet (lands in the architecture PR)."; \
 	fi
 
+# --- VM lab --------------------------------------------------------------------
+# Disposable Ubuntu VMs, for testing what cannot be tested honestly anywhere else:
+# systemd units, real disks, real reboots. Raw QEMU and cloud images, no libvirt
+# and no root — see docs/decisions/0010-vm-lab-qemu-cloud-image.md.
+
+VMCTL := tests/vm/vmctl.py
+
+.PHONY: vm-create
+vm-create: ## Create and boot a disposable VM
+	@python3 $(VMCTL) create
+
+.PHONY: vm-start
+vm-start: ## Boot an existing VM
+	@python3 $(VMCTL) start
+
+.PHONY: vm-ssh
+vm-ssh: ## Open a shell in the VM
+	@python3 $(VMCTL) ssh
+
+.PHONY: vm-reboot
+vm-reboot: ## Reboot the VM and wait for it to come back
+	@python3 $(VMCTL) reboot
+
+.PHONY: vm-reset
+vm-reset: ## Destroy and recreate the VM from the cached base image
+	@python3 $(VMCTL) destroy
+	@python3 $(VMCTL) create
+
+.PHONY: vm-logs
+vm-logs: ## Export serial console and guest journal
+	@python3 $(VMCTL) logs
+
+.PHONY: vm-status
+vm-status: ## List VMs
+	@python3 $(VMCTL) status
+
+.PHONY: vm-test
+vm-test: ## End-to-end: create, install a service, reboot, verify, export, destroy
+	@python3 tests/vm/test_lifecycle.py
+
+.PHONY: vm-destroy
+vm-destroy: ## Destroy the VM and its overlay
+	@python3 $(VMCTL) destroy
+
+.PHONY: vm-destroy-all
+vm-destroy-all: ## Destroy every VM
+	@python3 $(VMCTL) destroy --all
+
 # --- Housekeeping ------------------------------------------------------------
 
 .PHONY: clean
