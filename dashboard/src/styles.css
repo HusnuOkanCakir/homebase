@@ -1,0 +1,344 @@
+/*
+ * Plain CSS, no framework.
+ *
+ * Two reasons. The dashboard's npm tree is the largest supply-chain exposure in
+ * the project, so every dependency it does not have is one fewer thing to trust.
+ * And this runs on a ten-year-old laptop's browser over a local network — a
+ * stylesheet that is a few kilobytes is not a constraint worth engineering
+ * around.
+ */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #dfe3e8;
+  --text: #1a1d21;
+  --muted: #5c6670;
+  --accent: #2c5fd8;
+  --accent-text: #ffffff;
+  --danger: #c0392b;
+  --danger-bg: #fdf3f2;
+  --warning: #8a6100;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 4%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181c;
+    --surface: #1e2126;
+    --border: #2f343b;
+    --text: #e8eaed;
+    --muted: #9aa3ad;
+    --accent: #6c95ff;
+    --accent-text: #10131a;
+    --danger: #f07167;
+    --danger-bg: #2a1d1c;
+    --warning: #e0b050;
+    --shadow: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--bg);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* --- Layout --------------------------------------------------------------- */
+
+.centred {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.app {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.app-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* --- Cards ---------------------------------------------------------------- */
+
+.card {
+  width: 100%;
+  max-width: 30rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.app-main .card {
+  max-width: none;
+}
+
+.card-quiet {
+  background: transparent;
+  box-shadow: none;
+}
+
+.card-danger {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* --- Forms ---------------------------------------------------------------- */
+
+label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+input {
+  width: 100%;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.hint {
+  margin: -0.6rem 0 1rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.hint-warning {
+  color: var(--warning);
+}
+
+button {
+  padding: 0.6rem 1.1rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.primary {
+  width: 100%;
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.quiet {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+/* --- Facts ---------------------------------------------------------------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: minmax(7rem, auto) 1fr;
+  gap: 0.6rem 1.25rem;
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.facts-quiet {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.details {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.details summary {
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.meter {
+  height: 8px;
+  margin-bottom: 0.35rem;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+/* --- Messages ------------------------------------------------------------- */
+
+.message {
+  margin-bottom: 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.message p {
+  margin: 0;
+}
+
+.message-error {
+  border-left-color: var(--danger);
+}
+
+.message-warning {
+  border-left-color: var(--warning);
+}
+
+.message-info {
+  border-left-color: var(--accent);
+}
+
+.message-title {
+  font-weight: 500;
+}
+
+.message-recovery {
+  margin-top: 0.35rem !important;
+  font-size: 0.925rem;
+}
+
+/* Diagnostics: present for whoever needs them, quiet enough that they do not
+   compete with the sentence the user actually has to read. */
+.message-detail {
+  margin-top: 0.5rem !important;
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+/* --- Spinner -------------------------------------------------------------- */
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  margin: 1.5rem auto 0;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 3s;
+  }
+
+  .meter-fill {
+    transition: none;
+  }
+}

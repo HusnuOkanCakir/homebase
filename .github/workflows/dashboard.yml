@@ -1,0 +1,84 @@
+name: Dashboard
+
+# Typecheck, lint and build the web interface.
+#
+# The browser journey is deliberately not here: it needs a real VM with KVM,
+# which GitHub's hosted runners do not provide. It runs locally with
+# `make vm-test-dashboard`, and moves to CI when the VM lab has an ephemeral
+# self-hosted runner — see docs/security/ci-security.md for why that runner has
+# to be ephemeral and network-isolated before it is allowed near fork pull
+# requests.
+
+on:
+  pull_request:
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard.yml"
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard:
+    name: dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      # `npm ci` rather than `npm install`: it installs exactly what the lock
+      # file says and fails if the two disagree, so CI cannot quietly build
+      # against different dependencies from the ones that were reviewed.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # The dashboard runs on whatever old laptop the user had spare, over a
+      # local network. A bundle that creeps upward is a page that takes longer
+      # to become usable on exactly the hardware this project targets.
+      - name: Bundle size
+        run: |
+          set -euo pipefail
+          limit=400
+          total=$(find dist/assets -name '*.js' -exec cat {} + | gzip -9 | wc -c)
+          kb=$(( total / 1024 ))
+          echo "JavaScript: ${kb} kB gzipped (limit ${limit} kB)"
+          if [ "$kb" -gt "$limit" ]; then
+            echo
+            echo "The bundle has grown past ${limit} kB gzipped."
+            echo "Either justify the increase and raise the limit deliberately,"
+            echo "or find what was added. This runs on ten-year-old hardware."
+            exit 1
+          fi
+
+      # The dashboard's dependency tree is the largest supply-chain exposure in
+      # the project — it is the only part with a large third-party graph.
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate

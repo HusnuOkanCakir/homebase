@@ -114,6 +114,13 @@ unprivileged user being refused by the *kernel* rather than by our code, and the
 surviving the reboot it performed itself. Each of those is a property of the deployment, and
 each would pass a unit test while being wrong in production.
 
+**`make vm-test-dashboard`** drives the milestone's exit condition through a real browser
+against a real machine, including a real reboot. It is not a mocked API: the exit
+condition is phrased as something a person does, and a mock would let every assertion
+pass while the thing a user touches was broken. Two bugs were found this way that no
+unit test could have reached — `fetch` having no default timeout, so a half-restarted
+machine left the page spinning forever, and API responses carrying no `Cache-Control`.
+
 **VM tests (Milestone 1)** need QEMU/KVM and roughly 40 GB of free disk. `make vm-create`,
 `vm-test`, `vm-destroy`.
 

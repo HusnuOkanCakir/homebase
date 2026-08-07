@@ -57,6 +57,12 @@ Milestone 0 — contracts and project machinery. No product code.
   intended
 - `ci/go`: build, vet, race tests, govulncheck, and a check that fails if `hostd` ever
   acquires a non-standard-library dependency
+- **The dashboard** — first-run setup, sign-in, system overview and a restart that asks
+  you to name the machine. React and TypeScript, no UI framework, router or state
+  library; about 60 kB gzipped
+- A browser journey covering the milestone's exit condition, run against a real machine
+  in a VM including a real reboot
+- `ci/dashboard`: typecheck, lint, build, a bundle-size gate and `npm audit`
 
 ### Changed
 

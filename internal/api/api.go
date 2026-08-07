@@ -33,11 +33,19 @@ type Server struct {
 	log     *slog.Logger
 	version string
 	started time.Time
+	static  http.Handler
 }
 
 func NewServer(a *auth.Service, j *jobs.Manager, h *hostclient.Client, log *slog.Logger, version string) *Server {
 	return &Server{auth: a, jobs: j, host: h, log: log, version: version, started: time.Now()}
 }
+
+// SetStatic makes core serve the built dashboard alongside the API.
+//
+// Optional: core runs perfectly well without it, which is how it behaves
+// during development when the dashboard is served by Vite instead. A missing
+// dashboard is not a reason for the API to refuse to start.
+func (s *Server) SetStatic(h http.Handler) { s.static = h }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -59,6 +67,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/jobs", s.require(auth.PermSystemRead, s.handleListJobs))
 	mux.Handle("GET /api/v1/jobs/{id}", s.require(auth.PermSystemRead, s.handleGetJob))
 	mux.Handle("POST /api/v1/jobs/{id}/cancel", s.require(auth.PermSystemManage, s.handleCancelJob))
+
+	// The dashboard, when it is present. Registered last and at the root, so
+	// every API route above takes precedence.
+	if s.static != nil {
+		mux.Handle("/", s.static)
+	}
 
 	return s.withRequestID(s.withSecurityHeaders(mux))
 }
@@ -91,6 +105,15 @@ func (s *Server) withSecurityHeaders(next http.Handler) http.Handler {
 		// class of injection.
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'")
+
+		// API responses are never cacheable. They describe the machine right
+		// now, and a client polling a cached endpoint would watch a value that
+		// stopped changing — which looks identical to a value that is not
+		// changing. Static assets are handled separately and are cached hard.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
