@@ -39,10 +39,19 @@ jobs:
         with:
           persist-credentials: false
 
+      # `stable`, not go-version-file. The `go` directive in go.mod is a
+      # language-version floor for contributors, not a toolchain pin — reading it
+      # here made CI build with Go 1.23.12, which govulncheck correctly reported
+      # as carrying 19 standard-library vulnerabilities. Building with the current
+      # release is how those get fixed; pinning an old one and suppressing the
+      # scanner is how they get shipped.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: true
+
+      - name: Toolchain
+        run: go version
 
       - name: Formatting
         run: |
