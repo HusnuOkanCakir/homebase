@@ -179,6 +179,10 @@ vm-test: ## End-to-end: create, install a service, reboot, verify, export, destr
 vm-test-hostd: ## hostd under real systemd: socket permissions, sandbox, audit, reboot
 	@python3 tests/vm/test_hostd.py
 
+.PHONY: vm-test-core
+vm-test-core: ## The vertical slice: setup, sign in, read system, reboot, job resolves
+	@python3 tests/vm/test_core.py
+
 .PHONY: vm-destroy
 vm-destroy: ## Destroy the VM and its overlay
 	@python3 $(VMCTL) destroy

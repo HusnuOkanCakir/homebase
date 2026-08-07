@@ -45,14 +45,20 @@ ProtectControlGroups=yes
 ProtectKernelModules=yes
 RemoveIPC=yes
 
-# The audit log is append-only by intent; the service opens it O_APPEND and
-# never truncates it.
-LogsDirectory=homebase
-LogsDirectoryMode=0750
+# RuntimeDirectory only.
+#
+# StateDirectory and LogsDirectory are deliberately NOT declared here, even
+# though hostd writes to both. systemd chowns a declared directory to the unit's
+# User, and core declares the same two as the homebase user — so whichever
+# service started last would take ownership. That is how core's database ended
+# up root-owned and unwritable by the account meant to own it.
+#
+# One unit owns each directory. core owns /var/lib/homebase and
+# /var/log/homebase because it is the unprivileged service that must write
+# there; hostd is root and can write into them regardless. hostd owns
+# /run/homebase, because the socket is its own.
 RuntimeDirectory=homebase
 RuntimeDirectoryMode=0755
-StateDirectory=homebase
-StateDirectoryMode=0750
 
 [Install]
 WantedBy=multi-user.target
