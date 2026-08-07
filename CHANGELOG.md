@@ -43,6 +43,20 @@ Milestone 0 — contracts and project machinery. No product code.
 - `.gitleaks.toml`, allowlisting individual illustrative strings in documentation and
   fixtures rather than exempting paths — exempting `docs/` would let a real credential
   pasted into an example go unnoticed
+- **The disposable VM lab** — `make vm-create` / `vm-test` / `vm-destroy` and the rest.
+  Raw QEMU, UEFI, Ubuntu cloud images, no libvirt and no root
+  ([ADR-0010](docs/decisions/0010-vm-lab-qemu-cloud-image.md))
+- **`hostd`**, the privileged host service: a fixed registry of named typed operations over
+  a Unix socket, with peer credentials from the kernel, confirmation enforced before the
+  handler runs, and an audit record written *before* each action
+  ([ADR-0011](docs/decisions/0011-hostd-protocol.md))
+- **`core`**, the unprivileged service: HTTP API, first-run administrator setup, argon2id
+  passwords, sessions stored as hashes, SQLite state with forward-only migrations, and a
+  job system in which a reboot resolves itself on the next boot by comparing `boot_id`
+- systemd units for both, hardened so the privilege split is kernel-enforced rather than
+  intended
+- `ci/go`: build, vet, race tests, govulncheck, and a check that fails if `hostd` ever
+  acquires a non-standard-library dependency
 
 ### Changed
 

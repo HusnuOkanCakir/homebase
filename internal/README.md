@@ -7,18 +7,20 @@ is deliberate: Homebase's stable, supported surface is the **HTTP API**
 | Package | Owns |
 |---|---|
 | `hostd` | **Built.** The privileged service: operation registry, socket server, audit log |
-| `api` | HTTP handlers, routing, request/response types, error envelope |
-| `auth` | Sessions, password hashing, permission checks, credential references |
-| `jobs` | Long-running operations: queue, progress, cancellation, idempotency, rollback |
-| `system` | System inventory and resource readings (via `hostd`) |
+| `hostclient` | **Built.** The only thing in core permitted to open the privileged socket |
+| `store` | **Built.** SQLite state and forward-only migrations |
+| `api` | **Built.** HTTP handlers, routing, request/response types, error envelope |
+| `auth` | **Built.** Sessions, password hashing, permission checks |
+| `jobs` | **Built.** Long-running operations: progress, cancellation, idempotency |
 | `containers` | Application lifecycle on top of the container runtime |
 | `storage` | Disk discovery, mounts, managed storage locations |
 
-`hostd` is built. The rest land in Milestone 2 and after.
+`containers` and `storage` land in Milestones 3 and 4.
 
 ## Layering
 
-`api` → `jobs` → (`system` | `containers` | `storage`) → `hostd` client.
+`api` → `jobs` → (`containers` | `storage`) → `hostclient` → the privileged socket.
 
-No package below `api` may import `api`, and nothing except the `hostd` client may open the
-privileged socket. Enforced by review now, by a lint rule once the code exists.
+No package below `api` may import `api`, and **nothing except `hostclient` may open the
+privileged socket**. That is what makes `git grep 'hostclient\.'` a complete list of the
+privileged things core can do. Enforced by review; a lint rule would be better.

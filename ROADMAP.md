@@ -7,7 +7,8 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0 and 1 complete. Milestone 2 next.**
+**Current position: Milestones 0 and 1 complete. Milestone 2 in progress —
+`hostd` and `core` are built; the dashboard and packaging remain.**
 
 ---
 
@@ -62,17 +63,35 @@ building fixtures for a component that has not been written.
 Go and Node 20 were also expected here; they are only needed once there is code to build, so
 they move to Milestone 2 with it.
 
-### Milestone 2 — Core vertical slice ← *next*
+### Milestone 2 — Core vertical slice ← *in progress*
 
 The smallest complete product: dashboard → API → privileged operation → hardware.
 
-- [ ] `core` (unprivileged): `/health`, `/system`, `/events`, `/jobs`, `/jobs/{id}`
-- [ ] `hostd` (root): system inventory, resource usage, network info, reboot
+- [x] `hostd` (root): system inventory, resource usage, reboot — over a Unix socket, as
+      named typed operations with no generic execution path
+      ([ADR-0011](docs/decisions/0011-hostd-protocol.md))
+- [x] `core` (unprivileged): `/health`, `/setup`, `/auth/*`, `/system`, `/system/reboot`,
+      `/jobs`, `/jobs/{id}` — with SQLite state, argon2id passwords and sessions
+- [x] systemd units for both, and `ci/go` running build, vet, race tests, a
+      dependency guard and govulncheck
 - [ ] Dashboard: first-run admin setup, login, system overview, reboot with confirmation
-- [ ] systemd units, `.deb` packaging, `ci/go` and `ci/dashboard` as required checks
+- [ ] `.deb` packaging, `ci/go` and `ci/dashboard` as **required** checks
 
 **Done when:** a user opens the dashboard, creates an administrator, sees accurate system
 information, reboots the machine, and everything comes back by itself.
+
+The API half of that is done and verified in a VM (`make vm-test-core`, ~54s): setup, sign
+in, read live system information through `/proc` → `hostd` → socket → `core` → HTTP,
+restart the machine, and watch the reboot job resolve itself afterwards.
+
+**How a reboot job finishes.** Nothing can observe a reboot completing — the connection dies
+with the machine. Assuming success would make every job report a value nobody checked, so
+`core` records the kernel's `boot_id` when the job starts and settles it on the next boot: a
+different id is evidence the machine went down and came back. Anything else left running is
+marked failed with a message saying so, because a job showing "running, 65 %" with no process
+behind it is indistinguishable, to a user, from one still working.
+
+`/events` is deferred to Milestone 3, where there will be something to raise events about.
 
 ### Milestone 3 — Applications
 
