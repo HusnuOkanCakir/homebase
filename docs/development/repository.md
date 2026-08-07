@@ -38,12 +38,21 @@ Push protection blocks a recognised secret before it reaches the repository. On 
 repository a pushed secret is scraped within minutes, so blocking the push is worth
 considerably more than detecting it afterwards.
 
+The dependency graph is easy to overlook because nothing obviously depends on it — until
+`dependency-review` fails with "Dependency review is not supported on this repository",
+which reads like a broken workflow rather than a missing setting.
+
 **Settings → Actions → General**
 
 - [ ] Allow all actions (all are SHA-pinned, so mutability is not the exposure)
 - [ ] Workflow permissions: **read repository contents**
 - [ ] Do not allow GitHub Actions to create or approve pull requests
-- [ ] Require approval for **all outside collaborators**
+- [ ] Fork pull request workflows: require approval for **all external contributors**
+
+GitHub's default holds workflows only for *first-time* contributors, so after one merged
+pull request an author's later workflows run automatically. Workflow approval exists
+because fork pull requests execute untrusted code, and a contributor being familiar is not
+the same as their next branch being safe.
 
 **Settings → Pages**
 

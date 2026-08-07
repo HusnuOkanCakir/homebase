@@ -40,5 +40,29 @@ Milestone 0 — contracts and project machinery. No product code.
 - `schemas/app-manifest.schema.json` and `schemas/error.schema.json`, with valid *and*
   invalid fixtures; each invalid fixture asserts rejection by a named constraint
 - Repository automation for labels, branch protection and environment checks
+- `.gitleaks.toml`, allowlisting individual illustrative strings in documentation and
+  fixtures rather than exempting paths — exempting `docs/` would let a real credential
+  pasted into an example go unnoticed
+
+### Changed
+
+- Secret scanning runs the gitleaks **binary**, pinned by version and verified by
+  checksum, rather than `gitleaks/gitleaks-action`. The action is closed-source,
+  commercially licensed, and contacts a third-party service for licence validation on
+  every run — a poor trade for checking our own hygiene
+- Labels are applied through `gh api` rather than `gh label`, which does not exist before
+  gh 2.6. The scripts now work on whatever version a contributor happens to have
+- The setup script also enables GitHub Pages, the dependency graph, Dependabot alerts,
+  and requires workflow approval for **all** external contributors rather than only
+  first-time ones. All four were previously documented as manual steps that GitHub has
+  no API for, which was wrong
+
+### Removed
+
+- Documentation site deployment, until Milestone 6. `mkdocs build --strict` still runs on
+  every pull request; publishing waits for an audience that will not clone the repository.
+  A permanently failing workflow is how people learn to ignore failing workflows
+- The `gomod` and `npm` Dependabot ecosystems, until the first `go.mod` and `package.json`
+  exist. Dependabot does not ignore an ecosystem whose manifest is missing — it fails
 
 [Unreleased]: https://github.com/HusnuOkanCakir/homebase/commits/main

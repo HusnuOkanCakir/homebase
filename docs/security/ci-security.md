@@ -154,6 +154,23 @@ Signing keys live in a GitHub environment gated by manual approval. Only the rel
 can request them, and no workflow triggered by a pull request can reach that environment. See
 [update security](update-security.md).
 
+## When CI fails for reasons that are not yours
+
+Before investigating a failure, check whether the service is up:
+[githubstatus.com](https://www.githubstatus.com/).
+
+This is not a platitude. Both of the confusing CI failures this project has hit so far were
+GitHub incidents that presented as configuration errors — Pages deployments sitting in
+`deployment_queued` forever, and Actions jobs queued with zero steps and then cancelled.
+Each was investigated as a repository problem first, including a delete-and-recreate of the
+Pages site, before the incident appeared on the status page. Incidents are frequently
+posted *after* users notice them, so "the status page is green" is weak evidence early on.
+
+The signal worth recognising: **the job produced no output.** A misconfigured workflow fails
+loudly inside a step. A job that never starts, or that reports a timeout with no work done,
+is usually infrastructure. When every input is correct and it still fails, verify the
+service before rebuilding your own side of it.
+
 ## What this does not defend against
 
 - **A compromised pinned action.** Pinning ensures we run the same code, not that the code

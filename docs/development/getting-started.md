@@ -28,15 +28,24 @@ make check
 | 2 — Core slice | Go 1.23+, Node 20+ | `core`, `hostd`, the dashboard |
 | 3 — Applications | Docker Engine | Container lifecycle |
 
-Two warnings worth having in advance, because both have bitten this project already:
+Three things worth checking in advance rather than mid-task, because each has cost this
+project time already:
 
 **Disk space.** The VM lab needs roughly 40 GB — an Ubuntu ISO, a base image, and a qcow2
-overlay per test. The machine this project started on had 1.6 GB free, which is why
-Milestone 1 is sequenced after Milestone 0 rather than before it.
+overlay per test. Run `make vm-destroy` after each run: the overlays are what creep, and
+the base image should be the only long-lived artifact.
 
 **Node version.** The dashboard needs Node 20+. Node 12 is still the default on some
 long-lived Ubuntu installations and will fail in confusing ways. Check with `node --version`
 before Milestone 2, not during it.
+
+**GitHub CLI version.** `gh` is optional, but the repository scripts use `gh api` rather
+than newer subcommands so they work on old versions — Ubuntu 22.04 ships gh 2.4, which
+predates `gh label` and `gh run list --branch`. If you extend those scripts, stay on
+`gh api` for the same reason.
+
+`./scripts/bootstrap-dev.sh` checks all of this and reports what is missing for which
+milestone. It installs nothing.
 
 ## Everyday commands
 

@@ -21,9 +21,15 @@ It does not install system packages — a setup script that modifies someone's m
 asking is a bad neighbour, and this one runs on machines that are also somebody's daily
 driver.
 
-**Idempotent.** The `gh` scripts can be re-run safely. `setup-labels.sh` updates existing
-labels rather than failing, which is what makes the file the source of truth instead of
-whatever accumulated in the web UI.
+**Idempotent.** The `gh` scripts can be re-run safely. `setup-labels.sh` creates a label,
+and on the 422 that means it already exists, updates it instead — which is what makes this
+file the source of truth rather than whatever accumulated in the web UI.
+
+**`gh api`, not newer subcommands.** Ubuntu 22.04 ships gh 2.4, which predates `gh label`
+and `gh run list --branch`. `gh api` is a generic REST client and has been stable for
+years, so the scripts run on whatever version a contributor happens to have. Requiring a
+CLI upgrade in order to run a setup script is a poor first impression; keep new code on
+`gh api` for the same reason.
 
 **Documented equivalents.** `gh` is not installed everywhere, and API shapes change. Every
 setting these scripts apply is also written out as a web-UI checklist in

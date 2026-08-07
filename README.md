@@ -6,10 +6,10 @@ Homebase installs a complete server operating system onto a spare machine, then 
 the way behind a local web dashboard. You install applications, attach storage, and
 configure backups without ever opening a terminal or learning Linux.
 
-> **Status: pre-alpha, Milestone 0.**
+> **Status: pre-alpha. Milestone 0 complete; Milestone 1 next.**
 > There is no installable release yet, and nothing here should be pointed at data you care
-> about. This repository currently contains the architecture, contracts and project
-> machinery that the implementation will be built against. See the [roadmap](ROADMAP.md).
+> about. What exists is the architecture, contracts and project machinery the
+> implementation will be built against — no product code. See the [roadmap](ROADMAP.md).
 
 ## What it is
 
