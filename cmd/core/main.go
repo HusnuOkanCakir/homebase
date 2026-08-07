@@ -37,6 +37,7 @@ func main() {
 		addr        = flag.String("listen", "127.0.0.1:8080", "address to listen on")
 		dbPath      = flag.String("db", "/var/lib/homebase/homebase.db", "SQLite database")
 		socket      = flag.String("hostd-socket", hostclient.DefaultSocket, "hostd socket")
+		staticDir   = flag.String("dashboard", "/usr/share/homebase/dashboard", "built dashboard assets")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
@@ -48,13 +49,13 @@ func main() {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	if err := run(log, *addr, *dbPath, *socket); err != nil {
+	if err := run(log, *addr, *dbPath, *socket, *staticDir); err != nil {
 		log.Error("core failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, addr, dbPath, socket string) error {
+func run(log *slog.Logger, addr, dbPath, socket, staticDir string) error {
 	if os.Geteuid() == 0 {
 		// Not fatal — it is convenient during development — but worth saying
 		// loudly, because the whole design rests on this process not being root
@@ -118,6 +119,18 @@ func run(log *slog.Logger, addr, dbPath, socket string) error {
 	}
 
 	server := api.NewServer(authService, jobManager, host, log, version)
+
+	// The dashboard is optional. During development it is served by Vite on
+	// another port, and a missing build directory is not a reason for the API
+	// to refuse to start — a server nobody can reach is harder to diagnose
+	// than one with no interface.
+	if static, err := api.StaticHandler(staticDir); err != nil {
+		log.Warn("no dashboard to serve; the API is still available",
+			"path", staticDir, "reason", err)
+	} else {
+		server.SetStatic(static)
+		log.Info("serving the dashboard", "path", staticDir)
+	}
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {

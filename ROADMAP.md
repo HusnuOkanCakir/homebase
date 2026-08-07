@@ -8,7 +8,8 @@ be worth running — and the AI, when it arrives, is a client of the same APIs t
 uses, never a privileged part of the system.
 
 **Current position: Milestones 0 and 1 complete. Milestone 2 in progress —
-`hostd` and `core` are built; the dashboard and packaging remain.**
+`hostd`, `core` and the dashboard are built and the user journey passes end to end;
+`.deb` packaging remains.**
 
 ---
 
@@ -74,15 +75,20 @@ The smallest complete product: dashboard → API → privileged operation → ha
       `/jobs`, `/jobs/{id}` — with SQLite state, argon2id passwords and sessions
 - [x] systemd units for both, and `ci/go` running build, vet, race tests, a
       dependency guard and govulncheck
-- [ ] Dashboard: first-run admin setup, login, system overview, reboot with confirmation
+- [x] Dashboard: first-run admin setup, login, system overview, reboot with confirmation
 - [ ] `.deb` packaging, `ci/go` and `ci/dashboard` as **required** checks
 
 **Done when:** a user opens the dashboard, creates an administrator, sees accurate system
 information, reboots the machine, and everything comes back by itself.
 
-The API half of that is done and verified in a VM (`make vm-test-core`, ~54s): setup, sign
-in, read live system information through `/proc` → `hostd` → socket → `core` → HTTP,
-restart the machine, and watch the reboot job resolve itself afterwards.
+**That journey now passes in a real browser against a real machine** —
+`make vm-test-dashboard`, about 64 seconds: first-run setup, a refused second
+administrator, sign-in, live system information read through
+`/proc` → `hostd` → socket → `core` → HTTP → browser, a restart refused until the machine
+is named, a genuine reboot, and the dashboard noticing the server come back.
+
+The e2e suite is not in CI: it needs KVM, which GitHub's hosted runners do not provide.
+It moves there when the VM lab has an ephemeral, network-isolated self-hosted runner.
 
 **How a reboot job finishes.** Nothing can observe a reboot completing — the connection dies
 with the machine. Assuming success would make every job report a value nobody checked, so

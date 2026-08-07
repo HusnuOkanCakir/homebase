@@ -135,6 +135,25 @@ go-lint: ## gofmt and go vet
 hostd-describe: ## Print the privileged operation registry as JSON
 	@go run ./cmd/hostd --describe
 
+# --- Dashboard ---------------------------------------------------------------
+
+.PHONY: dash-install
+dash-install: ## Install dashboard dependencies
+	@cd dashboard && npm ci
+
+.PHONY: dash-build
+dash-build: ## Typecheck and build the dashboard
+	@cd dashboard && npm run build
+
+.PHONY: dash-lint
+dash-lint: ## Lint and typecheck the dashboard
+	@cd dashboard && npm run typecheck && npm run lint
+	@echo "Dashboard: typechecked and linted."
+
+.PHONY: dash-dev
+dash-dev: ## Serve the dashboard on :5173, proxying the API to a running core
+	@cd dashboard && npm run dev
+
 # --- VM lab --------------------------------------------------------------------
 # Disposable Ubuntu VMs, for testing what cannot be tested honestly anywhere else:
 # systemd units, real disks, real reboots. Raw QEMU and cloud images, no libvirt
@@ -182,6 +201,10 @@ vm-test-hostd: ## hostd under real systemd: socket permissions, sandbox, audit, 
 .PHONY: vm-test-core
 vm-test-core: ## The vertical slice: setup, sign in, read system, reboot, job resolves
 	@python3 tests/vm/test_core.py
+
+.PHONY: vm-test-dashboard
+vm-test-dashboard: ## The milestone's user journey, in a real browser against a real VM
+	@python3 tests/vm/test_dashboard.py
 
 .PHONY: vm-destroy
 vm-destroy: ## Destroy the VM and its overlay

@@ -596,16 +596,13 @@ def ssh(
     return subprocess.run(args)
 
 
-def copy_to(vm: VM, local: Path, remote: str, mode: str = "0755") -> None:
-    """Copy a local file into the guest as root.
+def upload(vm: VM, local: Path, remote: str) -> None:
+    """Copy a file into the guest as the login user.
 
-    Via scp to a staging path then `sudo install`, because scp itself connects as
-    the unprivileged user and cannot write to /usr or /etc. `install` sets the
-    mode in the same step, so the file is never briefly present with the wrong
-    permissions — which matters for anything that is about to run as root.
+    Use this for anything that does not need to be root-owned — a tarball being
+    unpacked, a fixture, a script the test runs. Installing such a file as root
+    makes it undeletable by the user afterwards, because /tmp is sticky.
     """
-    staged = f"/tmp/{Path(remote).name}"
-
     result = subprocess.run(
         [
             "scp",
@@ -615,7 +612,7 @@ def copy_to(vm: VM, local: Path, remote: str, mode: str = "0755") -> None:
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "LogLevel=ERROR",
             str(local),
-            f"homebase@127.0.0.1:{staged}",
+            f"homebase@127.0.0.1:{remote}",
         ],
         capture_output=True,
         text=True,
@@ -626,6 +623,21 @@ def copy_to(vm: VM, local: Path, remote: str, mode: str = "0755") -> None:
             (result.stderr or result.stdout).strip()[:400],
         )
 
+
+def copy_to(vm: VM, local: Path, remote: str, mode: str = "0755") -> None:
+    """Install a file into the guest as root.
+
+    Uploads to a staging path then `sudo install`s it, because scp connects as
+    the unprivileged user and cannot write to /usr or /etc. `install` sets the
+    mode in the same step, so the file is never briefly present with the wrong
+    permissions — which matters for anything about to run as root.
+    """
+    # A distinct staging name: staging to /tmp/<basename> collides when the
+    # destination is itself in /tmp, and `install` then refuses because source
+    # and target are the same file.
+    staged = f"/tmp/.homebase-upload-{Path(remote).name}"
+
+    upload(vm, local, staged)
     ssh(vm, ["sudo", "install", "-m", mode, "-o", "root", "-g", "root", staged, remote])
     ssh(vm, ["rm", "-f", staged])
 
