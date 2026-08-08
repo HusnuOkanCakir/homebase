@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/HusnuOkanCakir/homebase/internal/auth"
+	"github.com/HusnuOkanCakir/homebase/internal/events"
 	"github.com/HusnuOkanCakir/homebase/internal/hostclient"
 	"github.com/HusnuOkanCakir/homebase/internal/jobs"
 )
@@ -30,14 +31,15 @@ type Server struct {
 	auth    *auth.Service
 	jobs    *jobs.Manager
 	host    *hostclient.Client
+	events  *events.Recorder
 	log     *slog.Logger
 	version string
 	started time.Time
 	static  http.Handler
 }
 
-func NewServer(a *auth.Service, j *jobs.Manager, h *hostclient.Client, log *slog.Logger, version string) *Server {
-	return &Server{auth: a, jobs: j, host: h, log: log, version: version, started: time.Now()}
+func NewServer(a *auth.Service, j *jobs.Manager, h *hostclient.Client, e *events.Recorder, log *slog.Logger, version string) *Server {
+	return &Server{auth: a, jobs: j, host: h, events: e, log: log, version: version, started: time.Now()}
 }
 
 // SetStatic makes core serve the built dashboard alongside the API.
@@ -67,6 +69,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/jobs", s.require(auth.PermSystemRead, s.handleListJobs))
 	mux.Handle("GET /api/v1/jobs/{id}", s.require(auth.PermSystemRead, s.handleGetJob))
 	mux.Handle("POST /api/v1/jobs/{id}/cancel", s.require(auth.PermSystemManage, s.handleCancelJob))
+
+	s.registerAppRoutes(mux)
+	s.registerEventRoutes(mux)
 
 	// The dashboard, when it is present. Registered last and at the root, so
 	// every API route above takes precedence.

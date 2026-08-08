@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/HusnuOkanCakir/homebase/internal/auth"
 	"github.com/HusnuOkanCakir/homebase/internal/hostclient"
@@ -45,6 +46,39 @@ func (s *Server) decode(w http.ResponseWriter, r *http.Request, target any) bool
 		return false
 	}
 	return true
+}
+
+// expectNoBody rejects a request that carries fields the endpoint does not read.
+//
+// An endpoint taking no parameters is not the same as an endpoint that ignores
+// them. A client sending {"image": "..."} to an install endpoint believes it is
+// choosing an image; accepting the request and quietly installing something else
+// is the worst of the three possible answers. An absent or empty body is fine —
+// that is what a caller with nothing to say sends.
+func (s *Server) expectNoBody(w http.ResponseWriter, r *http.Request) bool {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes))
+	if err != nil {
+		s.writeError(w, r, http.StatusBadRequest, apiError{
+			Code:        "request.invalid_body",
+			Message:     "The request could not be read.",
+			Detail:      err.Error(),
+			Recoverable: false,
+		})
+		return false
+	}
+
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "{}" || trimmed == "null" {
+		return true
+	}
+
+	s.writeError(w, r, http.StatusBadRequest, apiError{
+		Code:        "request.unexpected_body",
+		Message:     "The request contained settings this operation does not accept.",
+		Detail:      "this endpoint takes no parameters beyond the application in its path",
+		Recoverable: false,
+	})
+	return false
 }
 
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, e apiError) {

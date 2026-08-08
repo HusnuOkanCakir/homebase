@@ -18,14 +18,16 @@ Run via `make validate` or directly.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
 try:
+    import yaml
     from jsonschema import Draft202012Validator
 except ImportError:  # pragma: no cover
     print(
-        "jsonschema is not installed. Run `make bootstrap` first.",
+        "jsonschema and PyYAML are needed. Run `make bootstrap` first.",
         file=sys.stderr,
     )
     sys.exit(2)
@@ -178,6 +180,88 @@ def check_catalogue(results: Results) -> None:
             results.ok(f"{path.name} is valid")
 
 
+def check_api_routes(results: Results) -> None:
+    """Every route core serves must be described in the OpenAPI document, and
+    every documented route must exist.
+
+    An OpenAPI file that has drifted from the code is worse than no OpenAPI file:
+    it is a contract that reads authoritatively and is wrong. The dashboard is
+    generated against it by hand today and the Stage 2 operator will read it to
+    learn what it can do, so a documented endpoint that does not exist is an
+    operator confidently attempting something impossible.
+
+    Path parameter names are ignored — the code says `{id}` where the document
+    says `{app_id}`, and that difference is not drift.
+    """
+    print("\nAPI routes (api/openapi.yaml vs internal/api/)")
+
+    spec_path = Path("api/openapi.yaml")
+    if not spec_path.exists():
+        results.fail("api/openapi.yaml", "not found")
+        return
+
+    spec = yaml.safe_load(spec_path.read_text())
+
+    documented = set()
+    for path, operations in (spec.get("paths") or {}).items():
+        for method in operations:
+            if method.lower() in {"get", "post", "put", "patch", "delete"}:
+                documented.add((method.upper(), anonymise(path)))
+
+    # mux.Handle("POST /api/v1/apps/{id}/install", …) and the HandleFunc form.
+    route = re.compile(r'mux\.Handle(?:Func)?\(\s*"([A-Z]+) (/api/v1[^"]*)"')
+
+    implemented = set()
+    for source in sorted(Path("internal/api").glob("*.go")):
+        if source.name.endswith("_test.go"):
+            continue
+        for method, path in route.findall(source.read_text()):
+            implemented.add((method, anonymise(path[len("/api/v1"):] or "/")))
+
+    if not implemented:
+        results.fail("route discovery", "found no routes in internal/api/; the pattern is wrong")
+        return
+
+    # Routes deliberately outside the documented contract.
+    exempt = {
+        # First-run setup and sign-in are described in the docs rather than here
+        # while the auth surface is still settling.
+        ("GET", "/setup"), ("POST", "/setup"),
+        ("POST", "/auth/login"), ("POST", "/auth/logout"), ("GET", "/auth/me"),
+    }
+
+    undocumented = sorted(implemented - documented - exempt)
+    if undocumented:
+        results.fail(
+            "every served route is documented",
+            "these exist in core but not in openapi.yaml:\n"
+            + "\n".join(f"{m} /api/v1{p}" for m, p in undocumented),
+        )
+    else:
+        results.ok(f"all {len(implemented)} served routes are documented")
+
+    # Documented but absent. Contract-ahead-of-implementation is legitimate for
+    # areas not built yet, so this lists only the ones claimed as implemented.
+    built = ("/health", "/system", "/jobs", "/events", "/apps")
+    missing = sorted(
+        route for route in documented - implemented
+        if any(route[1].startswith(prefix) for prefix in built)
+    )
+    if missing:
+        results.fail(
+            "every documented route in a built area exists",
+            "these are documented but not served:\n"
+            + "\n".join(f"{m} /api/v1{p}" for m, p in missing),
+        )
+    else:
+        results.ok("no documented route in a built area is missing")
+
+
+def anonymise(path: str) -> str:
+    """Replace path parameter names, which the code and the document spell differently."""
+    return re.sub(r"\{[^}]*\}", "{}", path)
+
+
 def main() -> int:
     if not EXPECTATIONS.exists():
         print(f"{EXPECTATIONS} not found.", file=sys.stderr)
@@ -192,6 +276,7 @@ def main() -> int:
         check_group(name, spec, results)
 
     check_catalogue(results)
+    check_api_routes(results)
 
     print()
     if results.failures:

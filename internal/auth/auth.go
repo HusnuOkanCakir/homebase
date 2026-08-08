@@ -114,6 +114,17 @@ func (s *Service) CreateAdministrator(ctx context.Context, username, password st
 	return s.createUser(ctx, username, password, AdministratorPermissions)
 }
 
+// CreateUser creates an account with exactly the permissions given.
+//
+// Not reachable through the API yet — additional accounts are a later milestone —
+// but the distinction between a reader and an administrator has to be real from
+// the start, because retrofitting it means auditing every handler again. The
+// permission set is the caller's choice on purpose: there is no "default user"
+// here that quietly turns out to be an administrator.
+func (s *Service) CreateUser(ctx context.Context, username, password string, permissions []string) (*User, error) {
+	return s.createUser(ctx, username, password, permissions)
+}
+
 func (s *Service) createUser(ctx context.Context, username, password string, permissions []string) (*User, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {

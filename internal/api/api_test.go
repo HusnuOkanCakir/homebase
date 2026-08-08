@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/HusnuOkanCakir/homebase/internal/auth"
+	"github.com/HusnuOkanCakir/homebase/internal/events"
 	"github.com/HusnuOkanCakir/homebase/internal/hostclient"
 	"github.com/HusnuOkanCakir/homebase/internal/jobs"
 	"github.com/HusnuOkanCakir/homebase/internal/store"
@@ -22,6 +23,7 @@ type harness struct {
 	server  *Server
 	handler http.Handler
 	auth    *auth.Service
+	events  *events.Recorder
 }
 
 func newHarness(t *testing.T) *harness {
@@ -41,8 +43,13 @@ func newHarness(t *testing.T) *harness {
 	// exercised rather than assumed.
 	host := hostclient.New(t.TempDir() + "/absent.sock")
 
-	server := NewServer(authService, jobs.NewManager(s.DB(), log), host, log, "test")
-	return &harness{server: server, handler: server.Handler(), auth: authService}
+	recorder := events.NewRecorder(s.DB(), log)
+
+	server := NewServer(authService, jobs.NewManager(s.DB(), log), host, recorder, log, "test")
+	return &harness{
+		server: server, handler: server.Handler(),
+		auth: authService, events: recorder,
+	}
 }
 
 func (h *harness) do(method, path, body string, headers map[string]string) *httptest.ResponseRecorder {

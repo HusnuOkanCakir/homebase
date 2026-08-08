@@ -25,6 +25,10 @@ yamllint==1.38.0
 check-jsonschema==0.37.4
 jsonschema==4.26.0
 openapi-spec-validator==0.9.0
+# Same reasoning as jsonschema: validate_contracts.py reads openapi.yaml itself to
+# compare it against the routes core actually serves, so PyYAML is a direct
+# dependency rather than something borrowed from yamllint.
+PyYAML==6.0.3
 
 # Workflow security analysis: unpinned actions, injection-prone template
 # expressions in run: blocks, over-broad permissions.

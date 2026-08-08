@@ -5,8 +5,8 @@ info:
   version: 1.0.0-draft
   summary: The only supported interface to a Homebase server.
   description: |
-    **This is a contract written ahead of its implementation.** Nothing here exists yet;
-    the endpoints below are the Milestone 2 target.
+    The system, job, event and application endpoints below are implemented. Storage,
+    networking, backup and update are still contract-only and are marked as such.
 
     The dashboard, `homebasectl` and — from Stage 2 — the local AI operator are all clients
     of this API. Nothing bypasses it, and nothing that uses it holds privilege of its own:
@@ -38,6 +38,8 @@ tags:
     description: System information and machine-level operations
   - name: jobs
     description: Long-running operations
+  - name: apps
+    description: Installing and running applications
   - name: events
     description: Structured events and the audit trail
 
@@ -215,6 +217,304 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /apps:
+    get:
+      tags: [apps]
+      summary: List applications
+      description: |
+        Every application this server can run, with its current state. Requires `apps.read`.
+
+        The list is the set of manifests installed on the machine — see
+        [ADR-0012](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0012-hostd-owns-the-catalogue.md).
+        There is no endpoint that adds to it, because adding an application is a package
+        change rather than a runtime one.
+
+        `docker_available: false` does not empty the list: a machine whose container runtime
+        is down still knows what it can install, and reporting nothing would look identical to
+        a machine with no applications.
+      operationId: listApps
+      responses:
+        "200":
+          description: The applications this server knows about
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, total, docker_available]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Application"
+                  total:
+                    type: integer
+                  docker_available:
+                    type: boolean
+                    description: |
+                      Whether the container runtime could be reached. When false, every
+                      application reports `not_installed` because its real state is unknown.
+                  unavailable:
+                    type: object
+                    description: |
+                      Manifests that failed to load, mapped to why. Reported rather than
+                      hidden: an application that is silently absent is harder to diagnose
+                      than one listed with a reason.
+                    additionalProperties:
+                      type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /apps/{app_id}:
+    get:
+      tags: [apps]
+      summary: Get one application
+      operationId: getApp
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+      responses:
+        "200":
+          description: The application
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+
+  /apps/{app_id}/logs:
+    get:
+      tags: [apps]
+      summary: Recent output from an application
+      description: |
+        The application's own log output, as text. Requires `apps.read`.
+
+        Returned as one string rather than parsed into lines: an application's log format is
+        the application's business, and pretending to understand it would make Homebase wrong
+        about every application that disagrees.
+      operationId: getAppLogs
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - name: lines
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2000
+            default: 200
+      responses:
+        "200":
+          description: The application's recent output
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [id, lines, logs]
+                properties:
+                  id:
+                    type: string
+                  lines:
+                    type: integer
+                  logs:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+
+  /apps/{app_id}/install:
+    post:
+      tags: [apps]
+      summary: Install an application
+      description: |
+        Requires `apps.manage`. Returns a job: installing means downloading an image, which on
+        a home connection can take minutes.
+
+        **This endpoint takes no parameters.** The container is built by `hostd` from the
+        manifest; there is no way for a client to influence the image, the mounts, the ports
+        or the environment. A request carrying such fields is rejected with `400` rather than
+        accepted and ignored — a client sending `{"image": …}` believes it chose, and quietly
+        installing something else is the worst of the three possible answers.
+      operationId: installApp
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "400":
+          description: The request carried settings this endpoint does not accept
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /apps/{app_id}/start:
+    post:
+      tags: [apps]
+      summary: Start an application
+      description: Requires `apps.manage`. Takes no parameters.
+      operationId: startApp
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "400":
+          description: The request carried settings this endpoint does not accept
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+
+  /apps/{app_id}/stop:
+    post:
+      tags: [apps]
+      summary: Stop an application
+      description: |
+        Requires `apps.manage` and a confirmation naming the application. Stopping takes a
+        service away from whoever is using it, who may be somebody else in the house.
+      operationId: stopApp
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppConfirmation"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "428":
+          $ref: "#/components/responses/ConfirmationRequired"
+
+  /apps/{app_id}/restart:
+    post:
+      tags: [apps]
+      summary: Restart an application
+      description: Requires `apps.manage` and a confirmation naming the application.
+      operationId: restartApp
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppConfirmation"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "428":
+          $ref: "#/components/responses/ConfirmationRequired"
+
+  /apps/{app_id}/uninstall:
+    post:
+      tags: [apps]
+      summary: Remove an application, keeping its data
+      description: |
+        Requires `apps.manage` and a confirmation naming the application.
+
+        **The application's data is left on disk.** Uninstalling is how a user frees space or
+        stops using something, and someone who wants their files gone has a different
+        intention — `POST /apps/{app_id}/data/remove`. Reinstalling afterwards finds the data
+        where it was.
+      operationId: uninstallApp
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppConfirmation"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "428":
+          $ref: "#/components/responses/ConfirmationRequired"
+
+  /apps/{app_id}/data/remove:
+    post:
+      tags: [apps]
+      summary: Delete an application's data irreversibly
+      description: |
+        Requires `apps.manage`. **There is no undo and no backup taken first.**
+
+        `confirm` must be the application's own id, typed rather than clicked: the
+        confirmation for an irreversible deletion has to be something a user cannot do by
+        reflex. The same check is made again by `hostd`, because a confirmation enforced in
+        one place is a confirmation one refactor away from being enforced nowhere.
+      operationId: removeAppData
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppConfirmation"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+        "428":
+          $ref: "#/components/responses/ConfirmationRequired"
+
   /events:
     get:
       tags: [events]
@@ -230,28 +530,61 @@ paths:
             $ref: "#/components/schemas/EventSeverity"
         - name: since
           in: query
+          description: |
+            Return only events after this instant. This is how a client that was disconnected
+            catches up, which is what makes the live stream safe to be lossy.
           schema:
             type: string
             format: date-time
-        - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
       responses:
         "200":
-          description: A page of events
+          description: Events, newest first
           content:
             application/json:
               schema:
-                type: object
-                required: [items]
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Event"
-                  next_cursor:
-                    type: [string, "null"]
+                $ref: "#/components/schemas/EventList"
+        "400":
+          description: An unparseable `since` or an unknown `severity`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /events/stream:
+    get:
+      tags: [events]
+      summary: Stream events as they happen
+      description: |
+        Server-sent events. One `data:` line per event, in the same shape as `GET /events`,
+        with comment lines as a heartbeat — a home network puts a router between the browser
+        and this server, and routers close idle connections without telling either end.
+
+        **The stream is a convenience, never the source of truth.** It is lossy by design: a
+        subscriber that stops reading is skipped rather than allowed to block the operation
+        that produced the event. A client that missed events while disconnected re-reads
+        `GET /events?since=…`, which is why that parameter exists.
+
+        SSE rather than a WebSocket: this is one-way, it inherits the session cookie, every
+        proxy in between already understands it, and the browser reconnects on its own.
+      operationId: streamEvents
+      responses:
+        "200":
+          description: An open event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Live updates are not available on this server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
 components:
   securitySchemes:
@@ -281,6 +614,16 @@ components:
       schema:
         type: string
         format: uuid
+    AppID:
+      name: app_id
+      in: path
+      required: true
+      description: |
+        The application's stable id, as it appears in its manifest. Also the name of the
+        directory its data lives in, which is why it is deliberately restrictive.
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{1,38}[a-z0-9]$"
     Cursor:
       name: cursor
       in: query
@@ -297,6 +640,31 @@ components:
         default: 50
 
   responses:
+    AppNotFound:
+      description: |
+        This server has no such application. Not "not installed" — the manifest is not on the
+        machine at all, and no package ships it.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ConfirmationRequired:
+      description: |
+        The request did not name what it was acting on. `428` rather than `400`: nothing is
+        wrong with the request's shape, a precondition simply is not met yet.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    HostUnavailable:
+      description: |
+        `hostd` could not be reached, so the machine's real state is unknown. Deliberately not
+        an empty result: "Homebase cannot see the server" and "the server has nothing" are
+        different facts and must not look the same.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     JobAccepted:
       description: Accepted. Poll the job for progress.
       content:
@@ -489,6 +857,81 @@ components:
     EventSeverity:
       type: string
       enum: [info, warning, error, critical]
+
+    Application:
+      type: object
+      additionalProperties: false
+      required: [id, name, state, installed, image, data_path]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{1,38}[a-z0-9]$"
+        name:
+          type: string
+          description: Display name, as the application calls itself.
+        summary:
+          type: string
+          description: One sentence, for someone deciding whether they want this.
+        state:
+          $ref: "#/components/schemas/ApplicationState"
+        installed:
+          type: boolean
+        health:
+          type: [string, "null"]
+          description: |
+            The application's own health result, or null where it declares no check or has not
+            been checked yet. **Null is not "unhealthy"** — conflating the two reports a
+            starting application as broken.
+          examples: ["healthy", "starting", "unhealthy"]
+        image:
+          type: string
+        version:
+          type: string
+        internal_port:
+          type: integer
+        started_at:
+          type: [string, "null"]
+          format: date-time
+        exit_code:
+          type: [integer, "null"]
+          description: Present when the application is not running, so a failure has a reason.
+        data_path:
+          type: string
+          description: |
+            Where this application's data lives, so a user can be told what uninstalling will
+            leave behind rather than having to trust that something was kept.
+
+    ApplicationState:
+      type: string
+      enum: [not_installed, stopped, running, failed]
+      description: |
+        `failed` means the container exited on its own, which is different from `stopped` —
+        somebody stopped that one deliberately.
+
+    AppConfirmation:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm:
+          type: string
+          description: |
+            The application's id. The name rather than a boolean, for the same reason the
+            reboot confirmation is the hostname: a `true` a client can send by default is not a
+            confirmation, and one that names its target cannot be replayed against a different
+            application.
+
+    EventList:
+      type: object
+      additionalProperties: false
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        total:
+          type: integer
 
     Event:
       type: object

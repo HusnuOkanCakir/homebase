@@ -25,6 +25,7 @@ import (
 
 	"github.com/HusnuOkanCakir/homebase/internal/api"
 	"github.com/HusnuOkanCakir/homebase/internal/auth"
+	"github.com/HusnuOkanCakir/homebase/internal/events"
 	"github.com/HusnuOkanCakir/homebase/internal/hostclient"
 	"github.com/HusnuOkanCakir/homebase/internal/jobs"
 	"github.com/HusnuOkanCakir/homebase/internal/store"
@@ -118,7 +119,9 @@ func run(log *slog.Logger, addr, dbPath, socket, staticDir string) error {
 		log.Warn("hostd is not reachable yet", "socket", socket)
 	}
 
-	server := api.NewServer(authService, jobManager, host, log, version)
+	eventRecorder := events.NewRecorder(db.DB(), log)
+
+	server := api.NewServer(authService, jobManager, host, eventRecorder, log, version)
 
 	// The dashboard is optional. During development it is served by Vite on
 	// another port, and a missing build directory is not a reason for the API
