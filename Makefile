@@ -17,12 +17,13 @@ YAML_PATHS := .github schemas app-store mkdocs.yml
 
 .PHONY: help
 help: ## Show this help
-	@echo "Homebase — Milestone 0 (contracts and project machinery)"
+	@echo "Homebase — a home server you can actually manage"
 	@echo
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 	@echo
-	@echo "Milestone 0 needs only Python 3.11+ and Git."
+	@echo "To see it working:  make run       (then open http://127.0.0.1:8080)"
+	@echo "To check the tree:  make check go-test dash-lint"
 
 # --- Environment -------------------------------------------------------------
 
@@ -153,6 +154,16 @@ dash-lint: ## Lint and typecheck the dashboard
 .PHONY: dash-dev
 dash-dev: ## Serve the dashboard on :5173, proxying the API to a running core
 	@cd dashboard && npm run dev
+
+# --- Running it --------------------------------------------------------------
+
+.PHONY: run
+run: go-build dash-build ## Run Homebase on this machine and open it in a browser
+	@python3 scripts/run-local.py
+
+.PHONY: run-fresh
+run-fresh: go-build dash-build ## Same, but discard the existing account and state first
+	@python3 scripts/run-local.py --fresh
 
 # --- Packaging ---------------------------------------------------------------
 

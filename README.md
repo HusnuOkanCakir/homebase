@@ -13,6 +13,58 @@ configure backups without ever opening a terminal or learning Linux.
 > installer, no applications, no storage management and no backups. See the
 > [roadmap](ROADMAP.md).
 
+## Try it
+
+There is no installer yet, so the way to see Homebase working is to run it from source.
+You need **Go 1.23+**, **Node 20+** and **Git**:
+
+```sh
+git clone https://github.com/HusnuOkanCakir/homebase.git
+cd homebase
+make run
+```
+
+Then open **<http://127.0.0.1:8080>**. It will ask you to create an administrator — any
+name, and a password of twelve characters or more — and then show you live information
+about the machine you are sitting at. `make run-fresh` starts over with an empty database.
+
+That is a development instance, not an installation. Both services run as you rather than
+as `root` and the `homebase` account, so the privilege boundary is not the real one, and
+restarting is refused on purpose — it would restart *your* machine.
+
+To see the real thing, install the Debian packages on a throwaway virtual machine. This
+needs QEMU with KVM and about 40 GB of free disk:
+
+```sh
+sudo apt install qemu-system-x86 qemu-utils cloud-image-utils ovmf
+make vm-test-packages
+```
+
+That builds the packages, installs them on a clean Ubuntu machine, creates an
+administrator, upgrades in place, reboots, and finally purges them — checking at every step
+that the account and the user's files are still there.
+
+### Everything else
+
+```sh
+./scripts/bootstrap-dev.sh   # what this machine has, and what it is missing
+make help                    # every target
+make check                   # docs, contracts, workflow security
+make go-test dash-lint       # the code
+make hostd-describe          # every privileged operation this build can perform
+```
+
+The tests worth knowing about run against real virtual machines, because that is the only
+place a reboot is a reboot:
+
+| | |
+|---|---|
+| `make vm-test` | The harness itself: create, install a service, reboot, verify, destroy |
+| `make vm-test-hostd` | `hostd` under real systemd — socket permissions, sandbox, audit log |
+| `make vm-test-core` | The API slice: setup, sign in, read the machine, restart it |
+| `make vm-test-dashboard` | The whole journey in a browser, including a real reboot |
+| `make vm-test-packages` | Install, upgrade, reboot and purge the `.deb`s |
+
 ## What it is
 
 - **Local-first.** Everything works on your own network. No account, no cloud dependency,
