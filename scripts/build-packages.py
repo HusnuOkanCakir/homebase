@@ -373,7 +373,16 @@ def build_apps(version: str) -> Path:
         package="homebase-apps",
         version=version,
         architecture="all",
-        depends=f"homebase-hostd (= {version})",
+        # The container runtime is a dependency of the *catalogue*, not of hostd.
+        # hostd's system operations work perfectly well without Docker; it is
+        # having applications to install that makes a runtime necessary. Putting
+        # it here keeps the dependency graph honest, and means a machine that
+        # only wants the system service does not pull in Docker.
+        #
+        # An alternative is accepted because a user who installed Docker from
+        # Docker's own repository has docker-ce, not docker.io, and refusing to
+        # install alongside a working Docker would be absurd.
+        depends=f"homebase-hostd (= {version}), docker.io | docker-ce",
         description=(
             "Homebase application catalogue\n"
             " The applications this server can install, as manifests read by\n"

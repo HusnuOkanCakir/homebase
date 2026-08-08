@@ -108,7 +108,9 @@ nav:
   - Release:
       - Process: release/process.md
       - Versioning: release/versioning.md
-  - User guide: user-guide/index.md
+  - User guide:
+      - Overview: user-guide/index.md
+      - Applications: user-guide/applications.md
 
 extra:
   social:

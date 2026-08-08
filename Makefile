@@ -136,6 +136,10 @@ go-lint: ## gofmt and go vet
 hostd-describe: ## Print the privileged operation registry as JSON
 	@go run ./cmd/hostd --describe
 
+.PHONY: hostd-check-operations
+hostd-check-operations: ## Check the destructive operations still require confirmation
+	@python3 scripts/check_operations.py
+
 # --- Dashboard ---------------------------------------------------------------
 
 .PHONY: dash-install
@@ -228,6 +232,10 @@ vm-test-dashboard: ## The milestone's user journey, in a real browser against a 
 .PHONY: vm-test-packages
 vm-test-packages: ## Install, upgrade and purge the .debs on a clean machine
 	@python3 tests/vm/test_packages.py
+
+.PHONY: vm-test-apps
+vm-test-apps: ## Install an application, use it, reboot, uninstall; data must survive
+	@python3 tests/vm/test_apps.py
 
 .PHONY: vm-destroy
 vm-destroy: ## Destroy the VM and its overlay

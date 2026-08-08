@@ -690,27 +690,19 @@ func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 			return nil, internalError("refusing to mount " + hostPath + ": outside the application data root")
 		}
 
-		if err := os.MkdirAll(hostPath, 0o750); err != nil {
+		// Every directory created below the data root is owned by the service
+		// account, not only the leaf. os.MkdirAll creates intermediates as the
+		// calling process — root — and chowning just the leaf leaves
+		// /srv/homebase/apps/<id> as 0750 root:root. core then cannot traverse
+		// into it, which means it cannot back the data up: a silent failure of
+		// the one thing a user would most notice missing.
+		if err := s.makeOwnedDir(hostPath); err != nil {
 			return nil, &Error{
 				Code:        "app.storage_unavailable",
 				Message:     "Homebase could not create somewhere for " + manifest.Name + " to keep its files.",
 				Detail:      err.Error(),
 				Recoverable: false,
 				Status:      500,
-			}
-		}
-
-		// Owned by the service account so core can include it in a backup, and
-		// so the container writing as a non-root user can use it.
-		//
-		// Skipped when hostd is not root, which only happens in development —
-		// there is no service account to chown to and no privilege to do it
-		// with. The failure it would otherwise produce is not informative about
-		// anything a developer can fix. On a real server hostd is root, so this
-		// branch is not reachable there.
-		if os.Geteuid() == 0 {
-			if err := chownToService(hostPath); err != nil {
-				return nil, internalError("setting ownership on " + hostPath + ": " + err.Error())
 			}
 		}
 
@@ -779,6 +771,51 @@ func (s *AppServices) requireInstalled(ctx context.Context, manifest Manifest) e
 			Status:      409,
 		}
 	}
+	return nil
+}
+
+// makeOwnedDir creates a directory under the data root, giving the service
+// account ownership of every level it creates.
+//
+// Directories that already exist are left alone: an existing one may have been
+// set up deliberately, and quietly rewriting ownership on a path somebody else
+// manages is not this function's business.
+func (s *AppServices) makeOwnedDir(path string) error {
+	relative, err := filepath.Rel(s.dataRoot, path)
+	if err != nil || strings.HasPrefix(relative, "..") {
+		return fmt.Errorf("%s is not under %s", path, s.dataRoot)
+	}
+
+	// The root itself first: on a fresh machine /srv/homebase/apps does not
+	// exist yet either.
+	current := s.dataRoot
+	for _, component := range append([]string{""}, strings.Split(relative, string(os.PathSeparator))...) {
+		if component != "" {
+			current = filepath.Join(current, component)
+		}
+
+		if _, err := os.Stat(current); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+
+		if err := os.Mkdir(current, 0o750); err != nil && !os.IsExist(err) {
+			return err
+		}
+
+		// Skipped when hostd is not root, which only happens in development:
+		// there is no service account to chown to and no privilege to do it
+		// with, and the failure would not be informative about anything a
+		// developer can fix. On a real server hostd is root.
+		if os.Geteuid() != 0 {
+			continue
+		}
+		if err := chownToService(current); err != nil {
+			return fmt.Errorf("setting ownership on %s: %w", current, err)
+		}
+	}
+
 	return nil
 }
 

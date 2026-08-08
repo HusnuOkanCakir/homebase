@@ -70,9 +70,51 @@ Milestone 0 — contracts and project machinery. No product code.
 - A package lifecycle test covering install, upgrade, reinstall, reboot and purge, with
   a real administrator account and a real file intact throughout — including after
   purge, which deliberately keeps user data
+- **Applications.** `hostd` reads root-owned manifests and builds the container itself;
+  `core` sends an application id and has no vocabulary for describing a container
+  ([ADR-0012](docs/decisions/0012-hostd-owns-the-catalogue.md)). Nine privileged
+  operations, a minimal Docker Engine API client written against `net/http` so `hostd`
+  still has no third-party dependencies, and a catalogue of three tested applications
+  shipped as its own package so that adding one is a change reviewable in a diff
+- Containers are built with every capability dropped, `no-new-privileges`, a read-only
+  root filesystem where the image tolerates it, and ports bound to `127.0.0.1` only
+- **Uninstalling keeps the data.** Deleting it is a separate, critical operation that
+  requires the application's id typed as confirmation, checked in `core` and again in
+  `hostd`. "I have stopped using this" and "delete my files" are not the same intention
+- `GET /events` and `GET /events/stream`, carried over from Milestone 2. Events are
+  structured facts with a machine-readable type and reason — nothing downstream should
+  ever parse prose to learn what happened. The stream is lossy by design: a subscriber
+  that stops reading is skipped rather than allowed to block the install that produced
+  the event, which is safe because the durable record is in the database
+- Application screens in the dashboard, and an `unknown` state distinct from
+  `not_installed` — "Homebase cannot look" and "there is nothing there" are different
+  answers and must not look the same
+- `make vm-test-apps`: install an application on a real machine, use it over HTTP,
+  restart the machine, and check both that it came back on its own and that a file
+  written into its data directory is still there after the application is removed. It
+  also reads `hostd`'s audit log to confirm nothing describing a container ever crossed
+  the socket — ADR-0012 is a claim about the socket, so that is where it is checked
+- CI now checks `api/openapi.yaml` against the routes `core` actually serves, in both
+  directions. A specification that has drifted is worse than none: it reads
+  authoritatively and is wrong
 
 ### Changed
 
+- The Docker Engine API version is negotiated rather than pinned. Pinning was chosen so
+  an upgraded Docker could not change a response shape underneath a root process, and
+  that reasoning was wrong about how the Engine works: it does not negotiate downwards,
+  it refuses anything below its own floor, and that floor rises. Docker 29 rejects the
+  pinned v1.43 outright. A pinned client is one that stops working when the user upgrades
+  Docker, on an appliance whose promise is that it keeps working
+- An image already on the machine satisfies an install when the registry is unreachable.
+  The image is pinned to a version or a digest, so the local copy is the same bytes;
+  refusing would make Homebase useless in exactly the situation a local server is for
+- `hostd` gives the service account ownership of every directory it creates under the
+  application data root, not only the leaf. `os.MkdirAll` creates intermediates as root,
+  which left `/srv/homebase/apps/<id>` unreadable by `core` — so it could not have backed
+  the data up, and would have failed silently. Found by the VM test on its first run
+- The schema's environment-variable names allow mixed case. It demanded all capitals,
+  which is a convention rather than a rule, and Jellyfin ships `JELLYFIN_PublishedServerUrl`
 - Secret scanning runs the gitleaks **binary**, pinned by version and verified by
   checksum, rather than `gitleaks/gitleaks-action`. The action is closed-source,
   commercially licensed, and contacts a third-party service for licence validation on

@@ -7,7 +7,7 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0, 1 and 2 complete. Milestone 3 next.**
+**Current position: Milestones 0–3 complete. Milestone 4 next.**
 
 ---
 
@@ -102,19 +102,38 @@ different id is evidence the machine went down and came back. Anything else left
 marked failed with a message saying so, because a job showing "running, 65 %" with no process
 behind it is indistinguishable, to a user, from one still working.
 
-`/events` is deferred to Milestone 3, where there will be something to raise events about.
+`/events` was deferred to Milestone 3, where there was something to raise events about. It
+shipped there, along with a live stream of them.
 
-### Milestone 3 — Applications ← *next*
+### Milestone 3 — Applications ✅
 
-- [ ] Manifest validation, image pull, container creation, port allocation
-- [ ] Health checks; start, stop, restart, uninstall
-- [ ] Data preservation across uninstall and reinstall; per-app logs; version pinning
-- [ ] Catalogue: `hello-homebase`, Jellyfin, File Browser
+- [x] Manifest validation, image pull, container creation, port allocation
+- [x] Health checks; start, stop, restart, uninstall
+- [x] Data preservation across uninstall and reinstall; per-app logs; version pinning
+- [x] Catalogue: `hello-homebase`, Jellyfin, File Browser
+- [x] `/events` and a live event stream, carried over from Milestone 2
+- [x] Application screens in the dashboard
 
 **Done when:** a user installs an app, uses it, reboots, finds it and its data intact, and
-uninstalls it without collateral damage.
+uninstalls it without collateral damage. ✅
 
-### Milestone 4 — Storage
+Verified as written: in a browser, against a real machine, across a real reboot. The two
+assertions that matter most are that the container comes back on its own afterwards, and
+that a file written into the application's data directory is still there once the
+application has been removed. A test that only checked the container was gone would pass
+on an implementation that wiped the disk.
+
+The load-bearing decision is [ADR-0012](docs/decisions/0012-hostd-owns-the-catalogue.md):
+`hostd` reads root-owned manifests and builds the container itself, so `core` sends an
+application id and has no vocabulary for describing a container. The VM test checks that
+against `hostd`'s audit log rather than against the source, because the claim is about
+what crosses the socket.
+
+That costs something real, and the ADR says so: **a user cannot install an application
+Homebase does not ship.** Widening the catalogue is a package change, which is what makes
+the set of installable applications reviewable in a diff.
+
+### Milestone 4 — Storage ← *next*
 
 Its own milestone because storage mistakes are the ones that destroy data.
 
