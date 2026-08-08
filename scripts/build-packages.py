@@ -243,6 +243,22 @@ fi
 exit 0
 """
 
+APPS_POSTINST = """#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # hostd reads the catalogue at startup, so a new or changed manifest needs it
+    # to restart. try-restart rather than restart: hostd is socket-activated and
+    # is frequently not running, and starting it here just to reload a catalogue
+    # it will re-read on its next activation would be pointless.
+    if [ -d /run/systemd/system ]; then
+        systemctl try-restart homebase-hostd.service >/dev/null 2>&1 || true
+    fi
+fi
+
+exit 0
+"""
+
 DASHBOARD_POSTINST = """#!/bin/sh
 set -e
 
@@ -329,6 +345,49 @@ def build_core(version: str, binaries: Path) -> Path:
     script(root, "postrm", CORE_POSTRM)
 
     return seal(root, "homebase-core", version, "amd64")
+
+
+def build_apps(version: str) -> Path:
+    """The application catalogue.
+
+    Its own package, because adding an application is a package change — that is
+    what makes the set of installable applications reviewable in a diff and
+    outside core's reach. See ADR-0012.
+    """
+    root = BUILD / "homebase-apps"
+    reset(root)
+
+    source = REPO_ROOT / "app-store"
+    target = root / "usr/share/homebase/apps"
+    target.mkdir(parents=True)
+
+    manifests = sorted(source.glob("*.json"))
+    if not manifests:
+        die("no manifests in app-store/")
+
+    for manifest in manifests:
+        install_file(manifest, target / manifest.name, 0o644)
+
+    control(
+        root,
+        package="homebase-apps",
+        version=version,
+        architecture="all",
+        depends=f"homebase-hostd (= {version})",
+        description=(
+            "Homebase application catalogue\n"
+            " The applications this server can install, as manifests read by\n"
+            " homebase-hostd.\n"
+            " .\n"
+            " The set of applications a machine can run is the set of manifests in this\n"
+            " package. Nothing at runtime can add to it, which is what keeps the\n"
+            " unprivileged service from being able to describe a container."
+        ),
+    )
+
+    script(root, "postinst", APPS_POSTINST)
+
+    return seal(root, "homebase-apps", version, "all")
 
 
 def build_dashboard(version: str, dist: Path) -> Path:
@@ -495,6 +554,7 @@ def main() -> int:
     packages = [
         build_hostd(args.version, binaries),
         build_core(args.version, binaries),
+        build_apps(args.version),
         build_dashboard(args.version, dashboard),
     ]
 

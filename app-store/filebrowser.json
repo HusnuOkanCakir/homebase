@@ -1,0 +1,100 @@
+{
+  "manifest_version": 1,
+  "revision": 1,
+  "id": "filebrowser",
+  "name": "File Browser",
+  "summary": "Put files on your server and get them back, from any device.",
+  "homepage": "https://filebrowser.org",
+  "license": "Apache-2.0",
+
+  "container": {
+    "image": "filebrowser/filebrowser",
+    "version": "v2.32.0",
+    "environment": {
+      "FB_DATABASE": "/config/filebrowser.db",
+      "FB_ROOT": "/files"
+    }
+  },
+
+  "network": {
+    "internal_port": 80,
+    "protocol": "http",
+    "path": "/"
+  },
+
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config",
+      "access": "read-write",
+      "description": "File Browser's own settings and user list.",
+      "backup": true
+    },
+    {
+      "id": "files",
+      "type": "user-selected",
+      "mount_path": "/files",
+      "access": "read-write",
+      "description": "The folder you want to browse and share.",
+      "backup": true
+    }
+  ],
+
+  "health": {
+    "type": "http",
+    "path": "/health",
+    "interval_seconds": 30,
+    "start_period_seconds": 20
+  },
+
+  "permissions": {
+    "read_only_root": false
+  },
+
+  "resources": {
+    "memory_limit_bytes": 268435456,
+    "memory_minimum_bytes": 134217728,
+    "disk_minimum_bytes": 104857600
+  },
+
+  "credentials": [
+    {
+      "ref": "filebrowser-admin",
+      "description": "Administrator account for File Browser.",
+      "generate": true
+    }
+  ],
+
+  "capabilities": [
+    {
+      "name": "files.get_status",
+      "description": "Whether File Browser is running.",
+      "risk": "read",
+      "confirmation": "none",
+      "rollback": null
+    },
+    {
+      "name": "files.restart",
+      "description": "Restart File Browser.",
+      "risk": "medium",
+      "confirmation": "required",
+      "rollback": null
+    }
+  ],
+
+  "events": [
+    {
+      "type": "storage_unavailable",
+      "severity": "error",
+      "description": "The folder File Browser was given is not reachable.",
+      "recoverable": true
+    }
+  ],
+
+  "sensitive_fields": ["admin_password"],
+
+  "requires": {
+    "architectures": ["amd64", "arm64"]
+  }
+}

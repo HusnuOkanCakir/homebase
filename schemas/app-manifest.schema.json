@@ -67,10 +67,10 @@
           "items": { "type": "string" }
         },
         "environment": {
-          "description": "Environment variables. Values must never contain a secret — reference one with credential_ref instead.",
+          "description": "Environment variables. Values must never contain a secret — reference one with credential_ref instead. Names allow mixed case: the all-caps convention is a convention, and real applications do not follow it — Jellyfin uses JELLYFIN_PublishedServerUrl. The pattern still excludes anything a shell would treat specially.",
           "type": "object",
           "patternProperties": {
-            "^[A-Z][A-Z0-9_]*$": { "type": "string" }
+            "^[A-Za-z_][A-Za-z0-9_]*$": { "type": "string" }
           },
           "additionalProperties": false
         }

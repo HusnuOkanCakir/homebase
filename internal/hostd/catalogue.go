@@ -1,0 +1,450 @@
+package hostd
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+)
+
+// The application catalogue.
+//
+// Manifests are files on disk, installed by Debian packages, owned by root and
+// not writable by core. hostd reads them and constructs containers itself —
+// core never sends a container specification. See ADR-0012.
+//
+// The consequence worth keeping in mind while reading this file: the set of
+// containers this machine can run is exactly the set of manifests in this
+// directory. Nothing at runtime can add to it.
+
+// DefaultCatalogueDir is where packages install manifests.
+const DefaultCatalogueDir = "/usr/share/homebase/apps"
+
+// Manifest is an installable application, as described by
+// schemas/app-manifest.schema.json.
+//
+// Decoding is strict: an unknown field is an error rather than being ignored. A
+// manifest with a misspelled key is a manifest whose author intended something
+// we did not read, and the safe reading of that ambiguity is to refuse.
+type Manifest struct {
+	ManifestVersion int    `json:"manifest_version"`
+	Revision        int    `json:"revision,omitempty"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Summary         string `json:"summary,omitempty"`
+	Homepage        string `json:"homepage,omitempty"`
+	License         string `json:"license,omitempty"`
+
+	Container ManifestContainer `json:"container"`
+	Network   ManifestNetwork   `json:"network,omitempty"`
+	Storage   []ManifestStorage `json:"storage"`
+	Health    ManifestHealth    `json:"health"`
+
+	Permissions ManifestPermissions `json:"permissions,omitempty"`
+	Resources   ManifestResources   `json:"resources,omitempty"`
+
+	Credentials     []ManifestCredential `json:"credentials,omitempty"`
+	Capabilities    []ManifestCapability `json:"capabilities,omitempty"`
+	Events          []ManifestEvent      `json:"events,omitempty"`
+	SensitiveFields []string             `json:"sensitive_fields,omitempty"`
+	Requires        ManifestRequires     `json:"requires,omitempty"`
+}
+
+type ManifestContainer struct {
+	Image       string            `json:"image"`
+	Version     string            `json:"version,omitempty"`
+	Digest      string            `json:"digest,omitempty"`
+	Command     []string          `json:"command,omitempty"`
+	Environment map[string]string `json:"environment,omitempty"`
+}
+
+// Reference is what to pull: the digest when the manifest pins one, otherwise
+// the tag.
+//
+// A digest is authoritative because it names the bytes rather than a label
+// somebody can move. Where a manifest gives both, the digest wins — the tag is
+// then documentation.
+func (c ManifestContainer) Reference() string {
+	if c.Digest != "" {
+		return c.Image + "@" + c.Digest
+	}
+	if c.Version != "" {
+		return c.Image + ":" + c.Version
+	}
+	return c.Image
+}
+
+type ManifestNetwork struct {
+	InternalPort int      `json:"internal_port,omitempty"`
+	Protocol     string   `json:"protocol,omitempty"`
+	Path         string   `json:"path,omitempty"`
+	HostNetwork  bool     `json:"host_network,omitempty"`
+	Discovery    []string `json:"discovery,omitempty"`
+}
+
+type ManifestStorage struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	MountPath   string `json:"mount_path"`
+	Access      string `json:"access,omitempty"`
+	Description string `json:"description,omitempty"`
+	Backup      *bool  `json:"backup,omitempty"`
+}
+
+// ReadOnly reports whether this location is mounted read-only.
+func (s ManifestStorage) ReadOnly() bool { return s.Access == "read-only" }
+
+type ManifestHealth struct {
+	Type                    string `json:"type"`
+	Path                    string `json:"path,omitempty"`
+	ExpectedStatus          int    `json:"expected_status,omitempty"`
+	IntervalSeconds         int    `json:"interval_seconds,omitempty"`
+	TimeoutSeconds          int    `json:"timeout_seconds,omitempty"`
+	StartPeriodSeconds      int    `json:"start_period_seconds,omitempty"`
+	FailuresBeforeUnhealthy int    `json:"failures_before_unhealthy,omitempty"`
+}
+
+type ManifestPermissions struct {
+	GPU          string   `json:"gpu,omitempty"`
+	Devices      []string `json:"devices,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Privileged   bool     `json:"privileged,omitempty"`
+	ReadOnlyRoot *bool    `json:"read_only_root,omitempty"`
+}
+
+type ManifestResources struct {
+	MemoryLimitBytes   int64 `json:"memory_limit_bytes,omitempty"`
+	MemoryMinimumBytes int64 `json:"memory_minimum_bytes,omitempty"`
+	CPUShares          int   `json:"cpu_shares,omitempty"`
+	DiskMinimumBytes   int64 `json:"disk_minimum_bytes,omitempty"`
+}
+
+type ManifestCredential struct {
+	Ref                 string `json:"ref"`
+	Description         string `json:"description"`
+	Generate            *bool  `json:"generate,omitempty"`
+	EnvironmentVariable string `json:"environment_variable,omitempty"`
+}
+
+type ManifestCapability struct {
+	Name         string  `json:"name"`
+	Description  string  `json:"description,omitempty"`
+	Risk         string  `json:"risk"`
+	Confirmation string  `json:"confirmation,omitempty"`
+	Rollback     *string `json:"rollback,omitempty"`
+}
+
+type ManifestEvent struct {
+	Type        string `json:"type"`
+	Severity    string `json:"severity"`
+	Description string `json:"description,omitempty"`
+	Recoverable *bool  `json:"recoverable,omitempty"`
+}
+
+type ManifestRequires struct {
+	MinHomebaseVersion string   `json:"min_homebase_version,omitempty"`
+	Architectures      []string `json:"architectures,omitempty"`
+}
+
+// Catalogue holds the manifests this machine can install.
+type Catalogue struct {
+	mu        sync.RWMutex
+	dir       string
+	manifests map[string]Manifest
+	// rejected records manifests that failed to load, so a broken catalogue
+	// entry is visible in diagnostics rather than merely absent.
+	rejected map[string]string
+}
+
+func NewCatalogue(dir string) *Catalogue {
+	if dir == "" {
+		dir = DefaultCatalogueDir
+	}
+	return &Catalogue{
+		dir:       dir,
+		manifests: make(map[string]Manifest),
+		rejected:  make(map[string]string),
+	}
+}
+
+// Load reads every manifest in the catalogue directory.
+//
+// A manifest that fails validation is skipped and recorded, not fatal. One
+// malformed entry must not stop a machine's other applications from being
+// manageable — but it also must not disappear silently, because "Jellyfin is
+// missing from the list" is a much harder thing to diagnose than "Jellyfin's
+// manifest is invalid, here is why".
+func (c *Catalogue) Load() error {
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No catalogue is a legitimate state: hostd runs perfectly well on a
+			// machine with no applications installed.
+			return nil
+		}
+		return fmt.Errorf("reading the catalogue at %s: %w", c.dir, err)
+	}
+
+	manifests := make(map[string]Manifest)
+	rejected := make(map[string]string)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+
+		path := filepath.Join(c.dir, entry.Name())
+		manifest, err := loadManifest(path)
+		if err != nil {
+			rejected[entry.Name()] = err.Error()
+			continue
+		}
+
+		// The id is the directory name under /srv/homebase/apps and an API path
+		// segment. A manifest whose id disagrees with its filename is ambiguous
+		// about which one identifies it.
+		expected := strings.TrimSuffix(entry.Name(), ".json")
+		if manifest.ID != expected {
+			rejected[entry.Name()] = fmt.Sprintf(
+				"id %q does not match the filename", manifest.ID)
+			continue
+		}
+
+		if existing, clash := manifests[manifest.ID]; clash {
+			rejected[entry.Name()] = fmt.Sprintf(
+				"id %q is already provided by %s", manifest.ID, existing.Name)
+			continue
+		}
+
+		manifests[manifest.ID] = manifest
+	}
+
+	c.mu.Lock()
+	c.manifests = manifests
+	c.rejected = rejected
+	c.mu.Unlock()
+
+	return nil
+}
+
+// loadManifest reads and validates one manifest file.
+func loadManifest(path string) (Manifest, error) {
+	var manifest Manifest
+
+	// Manifests are small. A file this size being large means something is
+	// wrong with it, and reading it into a root process regardless would be the
+	// wrong response.
+	info, err := os.Stat(path)
+	if err != nil {
+		return manifest, err
+	}
+	const maxManifestBytes = 256 * 1024
+	if info.Size() > maxManifestBytes {
+		return manifest, fmt.Errorf("%d bytes exceeds the %d byte limit",
+			info.Size(), maxManifestBytes)
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return manifest, err
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&manifest); err != nil {
+		return manifest, fmt.Errorf("invalid manifest: %w", err)
+	}
+	if dec.More() {
+		return manifest, fmt.Errorf("unexpected content after the manifest")
+	}
+
+	if err := manifest.Validate(); err != nil {
+		return manifest, err
+	}
+
+	return manifest, nil
+}
+
+// Validate enforces the parts of the schema that matter to a running system.
+//
+// The JSON Schema is checked in CI against every manifest and fixture; this is
+// the same rules again at the point of use, because a manifest reaching hostd
+// has come off disk on somebody's machine and CI is not there. The three
+// constraints ADR-0012 and the schema call out — no privileged containers, no
+// floating tags, no host paths — are re-checked here for that reason.
+func (m Manifest) Validate() error {
+	switch {
+	case m.ManifestVersion != 1:
+		return fmt.Errorf("unsupported manifest_version %d", m.ManifestVersion)
+	case m.ID == "":
+		return fmt.Errorf("no id")
+	case m.Name == "":
+		return fmt.Errorf("no name")
+	case m.Container.Image == "":
+		return fmt.Errorf("no container image")
+	case m.Health.Type == "":
+		return fmt.Errorf("no health check; an application that cannot be checked cannot be managed")
+	}
+
+	if !validAppID(m.ID) {
+		return fmt.Errorf("id %q is not a valid application id", m.ID)
+	}
+
+	// A privileged container is a root shell on the host. The schema pins this
+	// to false; so does this.
+	if m.Permissions.Privileged {
+		return fmt.Errorf("privileged containers are not permitted")
+	}
+
+	// "latest" moves. An application that silently changes version underneath a
+	// user is an application that silently breaks, and the user has no way to
+	// know why.
+	if m.Container.Version == "latest" {
+		return fmt.Errorf(`container.version must not be "latest"`)
+	}
+	if m.Container.Version == "" && m.Container.Digest == "" {
+		return fmt.Errorf("container needs a version or a digest; an unpinned image is not reproducible")
+	}
+
+	switch m.Health.Type {
+	case "http":
+		if m.Health.Path == "" {
+			return fmt.Errorf("an http health check needs a path")
+		}
+	case "tcp", "command", "none":
+	default:
+		return fmt.Errorf("unknown health check type %q", m.Health.Type)
+	}
+
+	if len(m.Storage) == 0 {
+		return fmt.Errorf("no storage declared")
+	}
+
+	seen := map[string]bool{}
+	for _, storage := range m.Storage {
+		switch {
+		case storage.ID == "":
+			return fmt.Errorf("a storage entry has no id")
+		case seen[storage.ID]:
+			return fmt.Errorf("duplicate storage id %q", storage.ID)
+		case storage.MountPath == "" || !strings.HasPrefix(storage.MountPath, "/"):
+			return fmt.Errorf("storage %q needs an absolute mount_path", storage.ID)
+		}
+		seen[storage.ID] = true
+
+		switch storage.Type {
+		case "private", "user-selected":
+		default:
+			return fmt.Errorf("storage %q has unknown type %q", storage.ID, storage.Type)
+		}
+
+		// A mount path is where the container sees the directory. `..` in it
+		// would let a manifest reach outside where hostd intends to place it.
+		if strings.Contains(storage.MountPath, "..") {
+			return fmt.Errorf("storage %q mount_path must not contain ..", storage.ID)
+		}
+	}
+
+	for _, capability := range m.Capabilities {
+		switch capability.Risk {
+		case "read", "low", "medium", "high", "critical":
+		default:
+			return fmt.Errorf("capability %q has unknown risk %q", capability.Name, capability.Risk)
+		}
+	}
+
+	for _, event := range m.Events {
+		switch event.Severity {
+		case "info", "warning", "error", "critical":
+		default:
+			return fmt.Errorf("event %q has unknown severity %q", event.Type, event.Severity)
+		}
+	}
+
+	return nil
+}
+
+// validAppID mirrors the schema's pattern. The id becomes a directory name and
+// a container name, so anything outside this set is refused rather than escaped.
+func validAppID(id string) bool {
+	if len(id) < 3 || len(id) > 40 {
+		return false
+	}
+	if id[0] < 'a' || id[0] > 'z' {
+		return false
+	}
+	last := id[len(id)-1]
+	if !(last >= 'a' && last <= 'z') && !(last >= '0' && last <= '9') {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		ch := id[i]
+		switch {
+		case ch >= 'a' && ch <= 'z', ch >= '0' && ch <= '9', ch == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// Lookup returns a manifest by id. Exact match only.
+func (c *Catalogue) Lookup(id string) (Manifest, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	manifest, ok := c.manifests[id]
+	return manifest, ok
+}
+
+// IDs returns every installable application id, sorted.
+func (c *Catalogue) IDs() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	ids := make([]string, 0, len(c.manifests))
+	for id := range c.manifests {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// All returns every manifest, sorted by id.
+func (c *Catalogue) All() []Manifest {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	manifests := make([]Manifest, 0, len(c.manifests))
+	for _, id := range c.sortedIDsLocked() {
+		manifests = append(manifests, c.manifests[id])
+	}
+	return manifests
+}
+
+func (c *Catalogue) sortedIDsLocked() []string {
+	ids := make([]string, 0, len(c.manifests))
+	for id := range c.manifests {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// Rejected returns the manifests that failed to load, by filename.
+//
+// Surfaced rather than logged and forgotten: a missing application is far harder
+// to diagnose than a rejected one with a reason attached.
+func (c *Catalogue) Rejected() map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make(map[string]string, len(c.rejected))
+	for name, reason := range c.rejected {
+		out[name] = reason
+	}
+	return out
+}
+
+// Dir is where this catalogue reads from.
+func (c *Catalogue) Dir() string { return c.dir }

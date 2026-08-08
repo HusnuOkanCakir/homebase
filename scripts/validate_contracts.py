@@ -133,6 +133,51 @@ def check_group(name: str, spec: dict, results: Results) -> None:
             )
 
 
+def check_catalogue(results: Results) -> None:
+    """Every shipped manifest must satisfy the schema.
+
+    The fixtures prove the schema works; this proves the catalogue does. A
+    manifest that ships invalid is an application that silently does not appear
+    on somebody's server, and "Jellyfin is missing" is a much harder thing to
+    diagnose than "Jellyfin's manifest is invalid, here is why".
+
+    This check earned its place immediately: it caught the Jellyfin manifest on
+    the first run, because the schema demanded all-caps environment variable
+    names and Jellyfin genuinely uses JELLYFIN_PublishedServerUrl. The schema was
+    the thing that was wrong.
+    """
+    catalogue = Path("app-store")
+    manifests = sorted(catalogue.glob("*.json"))
+
+    print(f"\ncatalogue ({catalogue})")
+
+    if not manifests:
+        results.ok("no manifests yet")
+        return
+
+    schema = load_json(SCHEMAS_DIR / "app-manifest.schema.json")
+    validator = Draft202012Validator(schema)
+
+    for path in manifests:
+        errors = sorted(validator.iter_errors(load_json(path)), key=str)
+        if errors:
+            detail = "\n".join(
+                f"at {pointer(e) or '<root>'}: {e.message}" for e in errors[:3]
+            )
+            results.fail(path.name, f"does not satisfy the schema:\n{detail}")
+            continue
+
+        # The id is a directory name and an API path segment; hostd rejects a
+        # manifest whose id disagrees with its filename, so catching it here
+        # saves finding out on a user's machine.
+        manifest = load_json(path)
+        expected = path.stem
+        if manifest.get("id") != expected:
+            results.fail(path.name, f"id is {manifest.get('id')!r}, expected {expected!r}")
+        else:
+            results.ok(f"{path.name} is valid")
+
+
 def main() -> int:
     if not EXPECTATIONS.exists():
         print(f"{EXPECTATIONS} not found.", file=sys.stderr)
@@ -145,6 +190,8 @@ def main() -> int:
         if name.startswith("_"):
             continue  # Commentary.
         check_group(name, spec, results)
+
+    check_catalogue(results)
 
     print()
     if results.failures:
