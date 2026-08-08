@@ -20,15 +20,21 @@ const (
 	AppStopped      AppState = "stopped"
 	AppRunning      AppState = "running"
 	AppFailed       AppState = "failed"
+	// AppUnknown means the container runtime could not be asked. Not the same as
+	// not_installed: one of those means a working application Homebase cannot see.
+	AppUnknown AppState = "unknown"
 )
 
 // App is one application's manifest and current state, as hostd reports it.
 type App struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Summary   string   `json:"summary,omitempty"`
-	State     AppState `json:"state"`
-	Installed bool     `json:"installed"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Summary string   `json:"summary,omitempty"`
+	State   AppState `json:"state"`
+
+	// Installed is null where the state is unknown — false would be a claim
+	// nobody is in a position to make.
+	Installed *bool `json:"installed"`
 
 	// Health is the container's own health result, or null where the application
 	// declares no check or has not been checked yet. Null is not "unhealthy";

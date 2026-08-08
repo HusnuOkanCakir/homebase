@@ -41,6 +41,7 @@ func main() {
 		peerUser   = flag.String("peer-user", defaultPeerUser, "the unprivileged user permitted to connect")
 		catalogue  = flag.String("catalogue", hostd.DefaultCatalogueDir, "directory of application manifests")
 		dockerSock = flag.String("docker-socket", "", "Docker socket (default /var/run/docker.sock)")
+		appData    = flag.String("app-data", hostd.DefaultAppDataRoot, "directory holding application data")
 		describe   = flag.Bool("describe", false, "print the operation registry as JSON and exit")
 		version    = flag.Bool("version", false, "print the version and exit")
 	)
@@ -57,7 +58,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "hostd: "+err.Error())
 		os.Exit(1)
 	}
-	hostd.RegisterAppOperations(registry, hostd.NewAppServices(apps, *dockerSock))
+	hostd.RegisterAppOperations(registry, hostd.NewAppServices(apps, *dockerSock, *appData))
 
 	// --describe needs no socket, no root and no audit log. It exists so that
 	// the privileged surface can be inspected — by a reviewer, by the docs

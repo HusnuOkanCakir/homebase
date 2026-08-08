@@ -269,6 +269,167 @@ button:focus-visible {
   transition: width 0.4s ease;
 }
 
+.meter-indeterminate {
+  position: relative;
+}
+
+.meter-indeterminate::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: slide 1.4s ease-in-out infinite;
+}
+
+@keyframes slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+/* --- Tabs ----------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  width: 100%;
+  max-width: 30rem;
+  margin: 0 auto 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  padding: 0.6rem 0.9rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.tab-current {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.back {
+  align-self: flex-start;
+  padding-left: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+}
+
+/* --- Applications --------------------------------------------------------- */
+
+.app-list {
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.app-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.app-row:hover {
+  border-color: var(--accent);
+}
+
+.app-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.app-row-name {
+  font-weight: 500;
+}
+
+.app-row .muted {
+  font-size: 0.85rem;
+}
+
+.row-between {
+  justify-content: space-between;
+  align-items: center;
+  margin: 0.75rem 0 1rem;
+}
+
+/* Badges say what state something is in. Colour is never the only signal —
+   the words carry the meaning on their own, because roughly one man in twelve
+   cannot rely on the colour. */
+.badge {
+  flex-shrink: 0;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.badge-ok {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.badge-error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.badge-warning {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.badge-info {
+  color: var(--muted);
+}
+
+.badge-quiet {
+  color: var(--muted);
+}
+
+.progress {
+  margin: 1rem 0;
+}
+
+.progress p {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.logs {
+  max-height: 20rem;
+  margin-top: 1rem;
+  padding: 0.75rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
 /* --- Messages ------------------------------------------------------------- */
 
 .message {
@@ -340,5 +501,11 @@ button:focus-visible {
 
   .meter-fill {
     transition: none;
+  }
+
+  .meter-indeterminate::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.4;
   }
 }

@@ -19,8 +19,8 @@ import (
 // machine can run is therefore the set of manifests on disk. See ADR-0012.
 
 const (
-	// appDataRoot is where an application's private directories live.
-	appDataRoot = "/srv/homebase/apps"
+	// DefaultAppDataRoot is where an application's private directories live.
+	DefaultAppDataRoot = "/srv/homebase/apps"
 
 	// containerPrefix namespaces the containers Homebase owns, so nothing here
 	// can act on a container somebody else created.
@@ -39,11 +39,26 @@ const (
 // AppServices is what the application operations need from their environment.
 type AppServices struct {
 	Catalogue *Catalogue
-	docker    *docker
+
+	// dataRoot is where application data lives. Configurable so that development
+	// can run without root, and so the VM tests can prove data survives a reboot
+	// somewhere other than a hard-coded path — but every path handed to a
+	// container or to RemoveAll is still checked to be under it. The check is
+	// against escaping this root, not against the root being chosen.
+	dataRoot string
+
+	docker *docker
 }
 
-func NewAppServices(catalogue *Catalogue, dockerSocketPath string) *AppServices {
-	return &AppServices{Catalogue: catalogue, docker: newDocker(dockerSocketPath)}
+func NewAppServices(catalogue *Catalogue, dockerSocketPath, dataRoot string) *AppServices {
+	if dataRoot == "" {
+		dataRoot = DefaultAppDataRoot
+	}
+	return &AppServices{
+		Catalogue: catalogue,
+		dataRoot:  filepath.Clean(dataRoot),
+		docker:    newDocker(dockerSocketPath),
+	}
 }
 
 // RegisterAppOperations adds the app domain to a registry.
@@ -163,19 +178,32 @@ type AppState string
 
 const (
 	// StateNotInstalled means the manifest exists but nothing has been created.
+	// This is a positive answer: the runtime was asked and said so.
 	StateNotInstalled AppState = "not_installed"
 	StateStopped      AppState = "stopped"
 	StateRunning      AppState = "running"
 	// StateFailed means the container exited on its own.
 	StateFailed AppState = "failed"
+
+	// StateUnknown means the container runtime could not be asked.
+	//
+	// Deliberately not folded into not_installed, which is what this code did
+	// first. The two look identical in an interface and are entirely different
+	// facts: one of them means a user's application is fine and Homebase cannot
+	// see it. Reporting "not installed" there invites somebody to install it
+	// again on top of a running one.
+	StateUnknown AppState = "unknown"
 )
 
 type AppStatus struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Summary   string   `json:"summary,omitempty"`
-	State     AppState `json:"state"`
-	Installed bool     `json:"installed"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Summary string   `json:"summary,omitempty"`
+	State   AppState `json:"state"`
+
+	// Installed is null where the state is unknown. false is a claim that it is
+	// not there, which is not something we know when the runtime did not answer.
+	Installed *bool `json:"installed"`
 
 	// Health is the container's own health check result, or null when the
 	// application declares none or has not been checked yet. Null is not
@@ -229,11 +257,11 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 		ID:           manifest.ID,
 		Name:         manifest.Name,
 		Summary:      manifest.Summary,
-		State:        StateNotInstalled,
+		State:        StateUnknown,
 		Image:        manifest.Container.Image,
 		Version:      manifest.Container.Version,
 		InternalPort: manifest.Network.InternalPort,
-		DataPath:     appDataDir(manifest.ID),
+		DataPath:     s.appDataDir(manifest.ID),
 	}
 
 	if !dockerUp {
@@ -241,11 +269,20 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 	}
 
 	state, err := s.docker.inspectContainer(ctx, containerName(manifest.ID))
-	if err != nil || state == nil {
+	if err != nil {
+		// The runtime answered something other than "no such container". We do
+		// not know what is on this machine, and saying "not installed" would be
+		// a confident guess.
+		return status
+	}
+	if state == nil {
+		// A 404: asked and answered. This one really is not installed.
+		status.State = StateNotInstalled
+		status.Installed = boolPtr(false)
 		return status
 	}
 
-	status.Installed = true
+	status.Installed = boolPtr(true)
 	switch {
 	case state.State.Running:
 		status.State = StateRunning
@@ -298,11 +335,20 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 		}, nil
 	}
 
-	if err := s.docker.pullImage(ctx, manifest.Container.Reference(), nil); err != nil {
-		return nil, wrapDockerError(err,
-			"pull_failed",
-			"Homebase could not download "+manifest.Name+".",
-			"Check that the server is connected to the internet, then try again.")
+	reference := manifest.Container.Reference()
+	if err := s.docker.pullImage(ctx, reference, nil); err != nil {
+		// A failed pull is not the end of it. The image is pinned to a version or
+		// a digest, so one already on disk is the same bytes the pull would have
+		// fetched — and a home server whose broadband is down, or which is
+		// behind a captive portal, or whose DNS has stopped answering, should
+		// still be able to install something it already has. Refusing here would
+		// make Homebase useless in exactly the situation a local server is for.
+		if !s.docker.hasImage(ctx, reference) {
+			return nil, wrapDockerError(err,
+				"pull_failed",
+				"Homebase could not download "+manifest.Name+".",
+				"Check that the server is connected to the internet, then try again.")
+		}
 	}
 
 	// Private directories are created before the container so the bind mounts
@@ -416,7 +462,7 @@ func (s *AppServices) uninstall(ctx context.Context, params AppRef) (any, error)
 			"Homebase could not remove "+manifest.Name+".", "")
 	}
 
-	dataPath := appDataDir(manifest.ID)
+	dataPath := s.appDataDir(manifest.ID)
 	kept := false
 	if info, err := os.Stat(dataPath); err == nil && info.IsDir() {
 		kept = true
@@ -474,13 +520,13 @@ func (s *AppServices) removeData(ctx context.Context, params AppRemoveDataParams
 		}
 	}
 
-	dataPath := appDataDir(manifest.ID)
+	dataPath := s.appDataDir(manifest.ID)
 
 	// A last check that the path is what this code intends to delete. Belt and
 	// braces against a future change to appDataDir: this is the one operation in
 	// Homebase that destroys data a user cannot get back, and the cost of the
 	// check is nothing compared with the cost of being wrong.
-	if !strings.HasPrefix(dataPath, appDataRoot+"/") || strings.Contains(dataPath, "..") {
+	if !strings.HasPrefix(dataPath, s.dataRoot+"/") || strings.Contains(dataPath, "..") {
 		return nil, internalError("refusing to delete " + dataPath + ": outside the application data root")
 	}
 
@@ -636,11 +682,11 @@ func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 			continue
 		}
 
-		hostPath := filepath.Join(appDataDir(manifest.ID), storage.ID)
+		hostPath := filepath.Join(s.appDataDir(manifest.ID), storage.ID)
 
 		// Constructed from an id the catalogue validated, but checked anyway:
 		// this path is about to be handed to a container as a bind mount.
-		if !strings.HasPrefix(hostPath, appDataRoot+"/") || strings.Contains(hostPath, "..") {
+		if !strings.HasPrefix(hostPath, s.dataRoot+"/") || strings.Contains(hostPath, "..") {
 			return nil, internalError("refusing to mount " + hostPath + ": outside the application data root")
 		}
 
@@ -656,8 +702,16 @@ func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 
 		// Owned by the service account so core can include it in a backup, and
 		// so the container writing as a non-root user can use it.
-		if err := chownToService(hostPath); err != nil {
-			return nil, internalError("setting ownership on " + hostPath + ": " + err.Error())
+		//
+		// Skipped when hostd is not root, which only happens in development —
+		// there is no service account to chown to and no privilege to do it
+		// with. The failure it would otherwise produce is not informative about
+		// anything a developer can fix. On a real server hostd is root, so this
+		// branch is not reachable there.
+		if os.Geteuid() == 0 {
+			if err := chownToService(hostPath); err != nil {
+				return nil, internalError("setting ownership on " + hostPath + ": " + err.Error())
+			}
 		}
 
 		mode := "rw"
@@ -728,9 +782,11 @@ func (s *AppServices) requireInstalled(ctx context.Context, manifest Manifest) e
 	return nil
 }
 
+func boolPtr(v bool) *bool { return &v }
+
 func containerName(id string) string { return containerPrefix + id }
 
-func appDataDir(id string) string { return filepath.Join(appDataRoot, id) }
+func (s *AppServices) appDataDir(id string) string { return filepath.Join(s.dataRoot, id) }
 
 // wrapDockerError turns a daemon failure into something a person can read,
 // keeping the daemon's own words in the detail for whoever is diagnosing.

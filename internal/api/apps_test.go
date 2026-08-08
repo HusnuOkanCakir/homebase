@@ -617,6 +617,19 @@ func TestApplicationOperationsAreRecordedAsEvents(t *testing.T) {
 			if event.Subject == nil || *event.Subject != "hello-homebase" {
 				t.Errorf("subject = %v", event.Subject)
 			}
+			// An event is read by a person in a history list weeks later. The
+			// operation name is in `type`; `message` is an account of what
+			// happened, and "hello-homebase: app.install" is neither.
+			if event.Message == nil {
+				t.Fatal("the event carried no message")
+			}
+			if strings.Contains(*event.Message, "app.install") {
+				t.Errorf("the message is a function name, not a sentence: %q", *event.Message)
+			}
+			if !strings.Contains(*event.Message, "Hello Homebase") {
+				t.Errorf("the message does not name the application as the user knows it: %q",
+					*event.Message)
+			}
 			return
 		}
 	}

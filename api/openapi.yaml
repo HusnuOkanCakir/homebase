@@ -861,7 +861,7 @@ components:
     Application:
       type: object
       additionalProperties: false
-      required: [id, name, state, installed, image, data_path]
+      required: [id, name, state, image, data_path]
       properties:
         id:
           type: string
@@ -875,7 +875,10 @@ components:
         state:
           $ref: "#/components/schemas/ApplicationState"
         installed:
-          type: boolean
+          type: [boolean, "null"]
+          description: |
+            Null where `state` is `unknown`. `false` is a claim that the application is not
+            there, which is not something anybody knows when the runtime did not answer.
         health:
           type: [string, "null"]
           description: |
@@ -903,10 +906,16 @@ components:
 
     ApplicationState:
       type: string
-      enum: [not_installed, stopped, running, failed]
+      enum: [not_installed, stopped, running, failed, unknown]
       description: |
         `failed` means the container exited on its own, which is different from `stopped` —
         somebody stopped that one deliberately.
+
+        `unknown` means the container runtime could not be asked. It is deliberately not
+        folded into `not_installed`: the two look identical in an interface and are entirely
+        different facts, and one of them means a user's application is running fine while
+        Homebase cannot see it. Reporting "not installed" there invites somebody to install
+        it again on top of a working one.
 
     AppConfirmation:
       type: object

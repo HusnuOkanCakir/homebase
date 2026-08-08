@@ -108,6 +108,7 @@ func (s *Server) handleInstallApp(w http.ResponseWriter, r *http.Request, user *
 	s.submitAppJob(w, r, user, appJob{
 		operation: "app.install",
 		app:       app,
+		recorded:  app.Name + " was installed.",
 		// Cancelling an install mid-pull would leave a partial image and a
 		// half-created container, and hostd has no operation to tidy that up
 		// yet. Offering a cancel button that does not work is worse than not
@@ -136,6 +137,7 @@ func (s *Server) handleStartApp(w http.ResponseWriter, r *http.Request, user *au
 	s.submitAppJob(w, r, user, appJob{
 		operation:   "app.start",
 		app:         app,
+		recorded:    app.Name + " was started.",
 		event:       "application_started",
 		failedEvent: "application_start_failed",
 		stages:      []appStage{{"starting", 50, "Starting " + app.Name + "…"}},
@@ -157,6 +159,7 @@ func (s *Server) handleStopApp(w http.ResponseWriter, r *http.Request, user *aut
 	s.submitAppJob(w, r, user, appJob{
 		operation:   "app.stop",
 		app:         app,
+		recorded:    app.Name + " was stopped.",
 		event:       "application_stopped",
 		failedEvent: "application_stop_failed",
 		stages:      []appStage{{"stopping", 50, "Stopping " + app.Name + "…"}},
@@ -175,6 +178,7 @@ func (s *Server) handleRestartApp(w http.ResponseWriter, r *http.Request, user *
 	s.submitAppJob(w, r, user, appJob{
 		operation:   "app.restart",
 		app:         app,
+		recorded:    app.Name + " was restarted.",
 		event:       "application_restarted",
 		failedEvent: "application_restart_failed",
 		stages:      []appStage{{"restarting", 50, "Restarting " + app.Name + "…"}},
@@ -193,6 +197,7 @@ func (s *Server) handleUninstallApp(w http.ResponseWriter, r *http.Request, user
 	s.submitAppJob(w, r, user, appJob{
 		operation:   "app.uninstall",
 		app:         app,
+		recorded:    app.Name + " was removed. Its data was kept.",
 		event:       "application_uninstalled",
 		failedEvent: "application_uninstall_failed",
 		stages:      []appStage{{"removing", 50, "Removing " + app.Name + "…"}},
@@ -237,6 +242,7 @@ func (s *Server) handleRemoveAppData(w http.ResponseWriter, r *http.Request, use
 	s.submitAppJob(w, r, user, appJob{
 		operation:   "app.remove_data",
 		app:         app,
+		recorded:    app.Name + "'s data was deleted permanently.",
 		event:       "application_data_removed",
 		failedEvent: "application_data_removal_failed",
 		severity:    events.SeverityWarning,
@@ -268,10 +274,14 @@ type appJob struct {
 	cancellable bool
 	event       string
 	failedEvent string
-	severity    events.Severity
-	stages      []appStage
-	run         func(context.Context) error
-	done        func(*jobs.Reporter)
+	// recorded is what the event says happened, as a sentence. An event is part
+	// of the API and somebody reads it in a history list weeks later; "app.stop"
+	// is a function name, not an account of what became of their media server.
+	recorded string
+	severity events.Severity
+	stages   []appStage
+	run      func(context.Context) error
+	done     func(*jobs.Reporter)
 }
 
 func (s *Server) submitAppJob(w http.ResponseWriter, r *http.Request, user *auth.User, spec appJob) {
@@ -305,7 +315,7 @@ func (s *Server) submitAppJob(w http.ResponseWriter, r *http.Request, user *auth
 			if severity == "" {
 				severity = events.SeverityInfo
 			}
-			s.recordAppEvent(ctx, spec.event, severity, app.ID, "", app.Name+": "+spec.operation)
+			s.recordAppEvent(ctx, spec.event, severity, app.ID, "", spec.recorded)
 			return nil
 		},
 	})

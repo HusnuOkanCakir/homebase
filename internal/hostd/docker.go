@@ -9,7 +9,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,16 +29,35 @@ import (
 const (
 	dockerSocket = "/var/run/docker.sock"
 
-	// Pinned rather than "latest". The Engine negotiates down to a version it
-	// supports, and pinning means an upgraded Docker cannot change the shape of
-	// a response underneath a root process.
-	dockerAPIVersion = "v1.43"
+	// The API version is negotiated, not pinned, and these are the bounds.
+	//
+	// A pinned version was the first attempt, on the reasoning that an upgraded
+	// Docker then cannot change a response shape underneath a root process. It
+	// does not work: the Engine does *not* negotiate downwards. It refuses
+	// anything below its own floor, and that floor rises — Docker 29 rejects
+	// v1.43 outright with "minimum supported API version is 1.44". A pinned
+	// client is a client that stops working when the user's Docker is upgraded,
+	// on an appliance whose whole promise is that it keeps working.
+	//
+	// So: ask the daemon what it supports and choose within these bounds.
+	//
+	// dockerMaxAPIVersion is the newest version whose responses hostd has been
+	// written against. dockerMinAPIVersion is the oldest it will speak; below
+	// this the create-container payload differs enough to matter.
+	dockerMinAPIVersion = "1.41"
+	dockerMaxAPIVersion = "1.52"
 )
 
 // docker is a minimal Engine API client.
 type docker struct {
 	http   *http.Client
 	socket string
+
+	// The negotiated version, resolved on first use and then reused. Guarded
+	// because operations run concurrently.
+	versionOnce sync.Once
+	version     string
+	versionErr  error
 }
 
 func newDocker(socket string) *docker {
@@ -74,7 +95,119 @@ var ErrDockerUnavailable = &Error{
 	Status:      503,
 }
 
+// apiVersion returns the version prefix to use, negotiating on first call.
+//
+// /version is itself unversioned, which is what makes this possible: there is
+// one endpoint that answers regardless of what the client would have guessed.
+func (d *docker) apiVersion(ctx context.Context) (string, error) {
+	d.versionOnce.Do(func() {
+		d.version, d.versionErr = d.negotiate(ctx)
+	})
+	return d.version, d.versionErr
+}
+
+func (d *docker) negotiate(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/version", nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := d.http.Do(req)
+	if err != nil {
+		return "", ErrDockerUnavailable
+	}
+	defer resp.Body.Close()
+
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return "", ErrDockerUnavailable
+	}
+
+	var info struct {
+		Version    string `json:"Version"`
+		APIVersion string `json:"ApiVersion"`
+		MinAPI     string `json:"MinAPIVersion"`
+	}
+	if err := json.Unmarshal(payload, &info); err != nil || info.APIVersion == "" {
+		return "", &Error{
+			Code:        "docker.unreadable_version",
+			Message:     "Homebase could not work out which version of Docker this server has.",
+			Detail:      truncateDetail(string(payload)),
+			Recoverable: false,
+			Status:      500,
+		}
+	}
+
+	chosen := info.APIVersion
+	if compareAPIVersions(chosen, dockerMaxAPIVersion) > 0 {
+		chosen = dockerMaxAPIVersion
+	}
+
+	// The daemon's floor wins over our ceiling. Speaking a version newer than
+	// hostd was written against is a risk; refusing to run at all on a Docker
+	// newer than this release is a certainty, and on an appliance the certainty
+	// is worse. The endpoints used here — create, start, stop, inspect, logs,
+	// pull — have been stable across every version in this range.
+	if info.MinAPI != "" && compareAPIVersions(chosen, info.MinAPI) < 0 {
+		chosen = info.MinAPI
+	}
+
+	if compareAPIVersions(chosen, dockerMinAPIVersion) < 0 {
+		return "", &Error{
+			Code:    "docker.unsupported_version",
+			Message: "This server's version of Docker is too old for Homebase.",
+			Detail: fmt.Sprintf("Docker %s speaks API %s at newest; Homebase needs %s or later",
+				info.Version, info.APIVersion, dockerMinAPIVersion),
+			Recoverable: false,
+			Recovery:    "Update Docker on this server.",
+			Status:      500,
+		}
+	}
+
+	return "v" + chosen, nil
+}
+
+// compareAPIVersions orders two dotted Engine API versions.
+//
+// Not a string comparison: "1.9" sorts after "1.10" alphabetically and before it
+// numerically, and getting that backwards would pick a version the daemon
+// rejects.
+func compareAPIVersions(a, b string) int {
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+
+	for i := 0; i < len(aParts) || i < len(bParts); i++ {
+		var x, y int
+		if i < len(aParts) {
+			x, _ = strconv.Atoi(aParts[i])
+		}
+		if i < len(bParts) {
+			y, _ = strconv.Atoi(bParts[i])
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+func truncateDetail(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 200 {
+		return s[:200] + "…"
+	}
+	return s
+}
+
 func (d *docker) do(ctx context.Context, method, path string, body any, out any) error {
+	version, err := d.apiVersion(ctx)
+	if err != nil {
+		return err
+	}
+
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -85,7 +218,7 @@ func (d *docker) do(ctx context.Context, method, path string, body any, out any)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method,
-		"http://docker/"+dockerAPIVersion+path, reader)
+		"http://docker/"+version+path, reader)
 	if err != nil {
 		return err
 	}
@@ -162,6 +295,11 @@ func (d *docker) ping(ctx context.Context) error {
 func (d *docker) pullImage(ctx context.Context, reference string, progress func(status string)) error {
 	// A reference is split into name and tag by the API rather than passed
 	// whole, so nothing in it can be read as another query parameter.
+	version, err := d.apiVersion(ctx)
+	if err != nil {
+		return err
+	}
+
 	name, tag := splitReference(reference)
 
 	query := url.Values{}
@@ -171,7 +309,7 @@ func (d *docker) pullImage(ctx context.Context, reference string, progress func(
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"http://docker/"+dockerAPIVersion+"/images/create?"+query.Encode(), nil)
+		"http://docker/"+version+"/images/create?"+query.Encode(), nil)
 	if err != nil {
 		return err
 	}
@@ -277,6 +415,20 @@ type createResponse struct {
 	Warnings []string `json:"Warnings"`
 }
 
+// hasImage reports whether an image is already on this machine.
+//
+// This is what makes an install possible with the internet unplugged. A home
+// server whose broadband is down, or which is behind a captive portal, or whose
+// DNS has stopped answering, should still be able to start an application whose
+// bytes are already on its disk.
+func (d *docker) hasImage(ctx context.Context, reference string) bool {
+	var out struct {
+		ID string `json:"Id"`
+	}
+	err := d.do(ctx, http.MethodGet, "/images/"+url.PathEscape(reference)+"/json", nil, &out)
+	return err == nil && out.ID != ""
+}
+
 func (d *docker) createContainer(ctx context.Context, name string, config containerConfig) (string, error) {
 	query := url.Values{}
 	query.Set("name", name)
@@ -368,6 +520,11 @@ func (d *docker) inspectContainer(ctx context.Context, name string) (*containerS
 
 // containerLogs returns the last n lines, combined stdout and stderr.
 func (d *docker) containerLogs(ctx context.Context, name string, lines int) (string, error) {
+	version, err := d.apiVersion(ctx)
+	if err != nil {
+		return "", err
+	}
+
 	query := url.Values{}
 	query.Set("stdout", "true")
 	query.Set("stderr", "true")
@@ -375,7 +532,7 @@ func (d *docker) containerLogs(ctx context.Context, name string, lines int) (str
 	query.Set("timestamps", "true")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"http://docker/"+dockerAPIVersion+"/containers/"+url.PathEscape(name)+
+		"http://docker/"+version+"/containers/"+url.PathEscape(name)+
 			"/logs?"+query.Encode(), nil)
 	if err != nil {
 		return "", err
