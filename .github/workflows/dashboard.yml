@@ -9,16 +9,24 @@ name: Dashboard
 # to be ephemeral and network-isolated before it is allowed near fork pull
 # requests.
 
+# No path filters.
+#
+# A required check that never reports blocks the merge — GitHub does not treat
+# it as satisfied, which an earlier version of docs/development/repository.md
+# wrongly claimed. With filters, any pull request not touching these paths
+# (a documentation change, for instance) waited forever for a check that was
+# never going to run.
+#
+# The standard alternative is a companion workflow on the inverse paths that
+# reports the same check name and immediately succeeds. That works, and it means
+# two workflows can produce a check called `dashboard`, one of which tests
+# nothing. For a build this size — under two minutes — running it on every pull
+# request is simpler and harder to get wrong.
+
 on:
   pull_request:
-    paths:
-      - "dashboard/**"
-      - ".github/workflows/dashboard.yml"
   push:
     branches: [main]
-    paths:
-      - "dashboard/**"
-      - ".github/workflows/dashboard.yml"
 
 permissions:
   contents: read

@@ -93,9 +93,17 @@ check, and `dashboard` when there was a dashboard. Requiring a check that cannot
 yet pass is how a repository ends up with a ruleset people learn to route
 around.
 
-The path-filtered workflows (`go`, `packages`, `dashboard`) do not run on a
-documentation-only pull request. GitHub treats a required check that never
-reports on a filtered path as satisfied, so this does not block those.
+**A required check must be able to report on every pull request.** GitHub does
+*not* treat a check that never runs as satisfied — it waits for it, and the
+merge is blocked indefinitely. This was learned the hard way: `go`, `packages`
+and `dashboard` were path-filtered when they became required, which blocked the
+next pull request that did not touch those paths.
+
+The workflows therefore have no path filters. The usual alternative is a
+companion workflow on the inverse paths reporting the same check name and
+succeeding immediately; it works, and it means two workflows can produce a check
+called `dashboard`, one of which tests nothing. For a build under two minutes,
+running it on every pull request is simpler and harder to get wrong.
 
 ### Zero required approvals
 
