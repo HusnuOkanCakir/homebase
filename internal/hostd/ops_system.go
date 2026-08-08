@@ -189,6 +189,27 @@ func systemReboot(ctx context.Context, params RebootParams) (any, error) {
 		}
 	}
 
+	// Checked after the confirmation, deliberately. The confirmation is the
+	// security control, and running it first means it is exercised in
+	// development too — which is where a bug in it would be found.
+	//
+	// This guard is a safety measure rather than a permissions check: on a
+	// desktop with polkit, `systemctl reboot` from a logged-in session succeeds,
+	// so without it a developer clicking "Restart this server" in a local
+	// dashboard reboots the laptop they are working on, mid-edit, with no
+	// warning.
+	if os.Geteuid() != 0 {
+		return nil, &Error{
+			Code:    "system.not_privileged",
+			Message: "This server cannot be restarted from here.",
+			Detail: "hostd is not running as root, so this is a development " +
+				"instance rather than a real server. Refusing, because the " +
+				"machine it would restart is the one you are working on.",
+			Recoverable: false,
+			Status:      501,
+		}
+	}
+
 	// systemctl rather than reboot(2): systemd stops units in order, flushes
 	// filesystems and lets services shut down cleanly. Calling the syscall
 	// directly is how a machine holding somebody's photographs loses a write

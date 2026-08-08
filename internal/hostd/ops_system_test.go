@@ -93,6 +93,42 @@ func TestPowerReportsUnknownRatherThanZero(t *testing.T) {
 	}
 }
 
+// hostd refuses to reboot when it is not root.
+//
+// This guard exists because of a specific hazard, not for tidiness: a developer
+// running the stack locally has hostd as their own user, and on a desktop with
+// polkit `systemctl reboot` from a logged-in session succeeds. Without this,
+// clicking "Restart this server" in a development dashboard reboots the laptop
+// you are working on, mid-edit, with no warning.
+func TestRebootRefusesWhenNotRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root, where rebooting is the intended behaviour")
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A *correct* confirmation, so the only thing standing between this test and
+	// a reboot of the machine running it is the guard.
+	_, err = systemReboot(context.Background(), RebootParams{Confirm: hostname})
+	if err == nil {
+		t.Fatal("reboot was accepted while unprivileged; THIS MACHINE WOULD HAVE REBOOTED")
+	}
+
+	var e *Error
+	if !asError(err, &e) {
+		t.Fatalf("unexpected error type: %T", err)
+	}
+	if e.Code != "system.not_privileged" {
+		t.Errorf("code = %q, want system.not_privileged", e.Code)
+	}
+	if e.Recoverable {
+		t.Error("this is not recoverable by retrying — hostd will still not be root")
+	}
+}
+
 // The confirmation must name the machine. A confirmation that is just "yes" can
 // be obtained for one server and spent on another — which matters once a Stage 2
 // operator is the thing proposing reboots.
