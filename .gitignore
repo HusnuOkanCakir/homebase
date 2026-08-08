@@ -33,6 +33,12 @@ yarn-error.log*
 tests/vm/run/
 tests/vm/cache/
 
+# --- Local run ---------------------------------------------------------------
+# `make run` scratch state: database, socket, logs. Not test fixtures — a real
+# database with a real account in it, which is exactly what should never be
+# committed.
+/run/
+
 # --- Packaging ---------------------------------------------------------------
 *.deb
 /build/
