@@ -4,6 +4,7 @@ import { describeError } from "../App";
 import { Message } from "../components/Message";
 import { Overview } from "./Overview";
 import { Applications } from "./Applications";
+import { Storage } from "./Storage";
 import { Restarting } from "./Restarting";
 
 /**
@@ -17,7 +18,7 @@ import { Restarting } from "./Restarting";
 
 const REFRESH_MS = 5000;
 
-type Tab = "overview" | "applications";
+type Tab = "overview" | "applications" | "storage";
 
 interface Props {
   user: User;
@@ -87,6 +88,13 @@ export function Dashboard({ user, onSignOut }: Props) {
         >
           Applications
         </button>
+        <button
+          className={tab === "storage" ? "tab tab-current" : "tab"}
+          aria-current={tab === "storage" ? "page" : undefined}
+          onClick={() => setTab("storage")}
+        >
+          Storage
+        </button>
       </nav>
 
       <main className="app-main">
@@ -105,8 +113,10 @@ export function Dashboard({ user, onSignOut }: Props) {
           ) : (
             !error && <p className="muted">Reading your server…</p>
           )
-        ) : (
+        ) : tab === "applications" ? (
           <Applications canManage={user.permissions.includes("apps.manage")} />
+        ) : (
+          <Storage canManage={user.permissions.includes("storage.modify")} />
         )}
       </main>
     </div>
