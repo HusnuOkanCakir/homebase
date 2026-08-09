@@ -94,6 +94,15 @@ Milestone 0 — contracts and project machinery. No product code.
   written into its data directory is still there after the application is removed. It
   also reads `hostd`'s audit log to confirm nothing describing a container ever crossed
   the socket — ADR-0012 is a claim about the socket, so that is where it is checked
+- **Storage.** Disks are identified by filesystem UUID and mounted with systemd units
+  rather than `/etc/fstab` ([ADR-0013](docs/decisions/0013-storage-identity-and-mounting.md)).
+  Nine operations in `hostd`, nine endpoints in `core`, a dashboard screen, and the ability
+  to give a disk to an application — which then refuses to start without it rather than
+  writing to the system disk
+- `make vm-test-storage`: a real disk, hot-plugged over QEMU's monitor and pulled out
+  without warning. It checks that the disk is found again after being unplugged even though
+  the kernel gave it a different name, that a managed mount survives a reboot, and that
+  **not even root can write into the mount point while the disk is absent**
 - CI now checks `api/openapi.yaml` against the routes `core` actually serves, in both
   directions. A specification that has drifted is worse than none: it reads
   authoritatively and is wrong

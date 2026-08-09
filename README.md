@@ -71,6 +71,7 @@ place a reboot is a reboot:
 | `make vm-test-core` | The API slice: setup, sign in, read the machine, restart it |
 | `make vm-test-dashboard` | The whole journey in a browser, including a real reboot |
 | `make vm-test-apps` | Install an application, use it, reboot, remove it — the data must survive |
+| `make vm-test-storage` | Add a real USB disk, reboot, pull it out, plug it back in — nothing may corrupt |
 | `make vm-test-packages` | Install, upgrade, reboot and purge the `.deb`s |
 
 ## What it is
