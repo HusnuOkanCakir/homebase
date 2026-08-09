@@ -166,3 +166,34 @@ What it does not prevent, stated plainly:
   rather than relaxing this
 - Rootless Podman becoming viable ([ADR-0005](0005-container-runtime.md)), which would change
   the calculus for how much trust the container runtime needs
+
+## What implementing it changed
+
+Recorded here rather than silently folded into the text above, because three of these
+contradict something this document originally asserted.
+
+**The Engine API does not negotiate downwards.** The first implementation pinned
+`v1.43`, reasoning that a pinned version stops an upgraded Docker changing a response
+shape underneath a root process. The Engine does not work that way: it refuses anything
+below its own floor, and that floor rises — Docker 29 rejects `v1.43` outright. A pinned
+client is a client that stops working when the user upgrades Docker, which on an
+appliance is worse than the risk it was avoiding. The version is now negotiated within a
+bounded range.
+
+**`hostd` keeps state.** This decision was written as though the privileged service were
+stateless: manifests in, containers out. It cannot be. Docker keeps no record of which
+containers were stopped deliberately, and the exit code cannot stand in for one — a
+program terminated by `SIGTERM` chooses its own, so a non-zero code read as a crash
+reported every deliberate stop as a fault. Homebase performs the stop, so Homebase is
+what can know, which means `hostd` has a state directory. It is root-owned: `core` must
+not be able to rewrite `hostd`'s account of what it did.
+
+**An unreachable registry does not prevent an install.** The image is pinned to a version
+or a digest, so a copy already on the machine is the same bytes the pull would have
+fetched. A failed pull therefore falls back to the local image rather than refusing —
+refusing would make Homebase useless exactly when a local server is most use.
+
+The cost this document names as real turned out to be real in a smaller way too: the
+catalogue is now its own package, `homebase-apps`, and it is what depends on a container
+runtime. `hostd`'s system operations work perfectly well without Docker, and a machine
+that only wants those should not have to install it.
