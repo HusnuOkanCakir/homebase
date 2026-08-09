@@ -328,7 +328,11 @@ def write_something_to_it(vm: VM) -> str:
     marker = "a film the user would be upset to lose"
     path = f"{STORAGE_ROOT}/{LOCATION}/film.txt"
     ssh(vm, ["sudo", "sh", "-c", f"echo '{marker}' > {path}"])
-    ok("written")
+
+    # Flushed, so what follows tests persistence rather than the kernel's
+    # flushing schedule. See the note in verify_it_runs_from_the_disk.
+    ssh(vm, ["sudo", "sync"])
+    ok("written, and flushed to the disk")
     return marker
 
 
@@ -552,7 +556,20 @@ def verify_it_runs_from_the_disk(vm: VM) -> str:
     marker = "a file the user put there through the application"
     ssh(vm, ["sudo", "sh", "-c",
              f"echo '{marker}' > {STORAGE_ROOT}/{LOCATION}/{APP}/mine.txt"])
-    ok("a file written through its storage")
+
+    # Flushed to the disk before it is pulled out.
+    #
+    # Not a workaround. A write that has not left the page cache when the device
+    # is yanked is gone, and no server can promise otherwise — which is exactly
+    # why the interface has a "prepare to unplug" button and the user guide says
+    # to use it. What is being tested here is the guarantee Homebase can actually
+    # make: data that reached the disk survives a surprise unplug.
+    #
+    # Without this the test asserted something physically impossible, and would
+    # have failed intermittently depending on when the kernel felt like
+    # flushing.
+    ssh(vm, ["sudo", "sync"])
+    ok("a file written through its storage, and flushed to it")
     return marker
 
 
