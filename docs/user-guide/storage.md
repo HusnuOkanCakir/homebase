@@ -63,8 +63,15 @@ refuse rather than pull the disk out from underneath something.
 
 **If you unplug it without asking first**, Homebase copes: it notices the disk has gone,
 says so, and refuses to write anything to where it used to be. Applications using it will
-stop, and will start again by themselves once you plug it back in. It is still better to
-ask first, because an application part-way through writing a file has no way to finish.
+stop, and start again by themselves once you plug it back in.
+
+It is still better to ask first, and the reason is worth knowing. When something saves a
+file, the computer does not necessarily write it to the disk straight away — it can sit in
+memory for a few seconds first, which is what makes computers feel fast. Pulling the plug in
+those few seconds loses it, and nothing can prevent that. **Prepare to unplug** exists to
+make sure everything has actually reached the disk before you pull it out.
+
+Anything written more than a moment ago is safe either way.
 
 ## When a disk is not connected
 
@@ -97,7 +104,8 @@ somewhere else.
 
 - **No backups.** This is Milestone 5, and it is the reason nothing here should hold the
   only copy of anything.
-- **No warnings when a disk is nearly full.** Still to come in this milestone.
+- **Warnings when a disk is nearly full** arrive as events in the history, not yet as
+  anything on screen.
 - **Nothing spanning several disks.** No pooling, no mirroring, no RAID. One disk is one
   place.
 - **Encrypted disks cannot be opened.** Homebase will tell you a disk is encrypted rather
