@@ -12,6 +12,11 @@ run the tests. The tests are not optional here: `hostd` runs as root and `core` 
 only copy of somebody's configuration, so both are verified in a real VM rather than only
 in unit tests.
 
+**Applications** — additionally Docker. Any version whose Engine API is 1.41 or newer;
+`hostd` negotiates against whatever the machine has rather than pinning, so there is nothing
+to match. `make run` will list the catalogue without Docker and say plainly that it cannot
+see the container runtime, but it cannot install anything.
+
 `./scripts/bootstrap-dev.sh` reports what this machine has and what it is missing, per
 milestone. It installs nothing.
 
@@ -30,8 +35,9 @@ make check
 | Milestone | Adds | Why |
 |---|---|---|
 | 1 — VM lab ✅ | QEMU/KVM, OVMF, cloud-image-utils, **~40 GB free disk** | Booting real Ubuntu VMs for tests |
-| 2 — Core slice | Go 1.23+, Node 20+ | `core`, `hostd`, the dashboard |
-| 3 — Applications | Docker Engine | Container lifecycle |
+| 2 — Core slice ✅ | Go 1.23+, Node 20+ | `core`, `hostd`, the dashboard |
+| 3 — Applications ✅ | Docker (Engine API 1.41+) | Container lifecycle |
+| 4 — Storage | A spare USB disk, or a second qcow2 attached to a VM | Nothing about disks can be tested without one |
 
 Three things worth checking in advance rather than mid-task, because each has cost this
 project time already:
@@ -53,19 +59,33 @@ predates `gh label` and `gh run list --branch`. If you extend those scripts, sta
 ## Everyday commands
 
 ```sh
-make help              # list targets
-make check             # everything CI runs for docs and contracts
-make go-lint go-test   # Go: gofmt, vet, race tests
-make dash-lint         # dashboard: typecheck and lint
-make docs              # serve the documentation site on :8000
+make help                    # list targets
+make run                     # run Homebase on this machine, in a browser
+make run-fresh               # the same, discarding the existing account and state
 
-make vm-create         # a disposable VM
-make vm-test           # the harness itself
-make vm-test-hostd     # hostd under real systemd
-make vm-test-core      # the API vertical slice
-make vm-test-dashboard # the user journey, in a browser
+make check                   # everything CI runs for docs and contracts
+make go-lint go-test         # Go: gofmt, vet, race tests
+make dash-lint               # dashboard: typecheck and lint
+make docs                    # serve the documentation site on :8000
+
+make packages                # build the .debs
+make hostd-describe          # every privileged operation this build can perform
+make hostd-check-operations  # …and that the destructive ones still ask permission
+
+make vm-create               # a disposable VM
+make vm-test                 # the harness itself
+make vm-test-hostd           # hostd under real systemd
+make vm-test-core            # the API vertical slice
+make vm-test-dashboard       # the user journey, in a browser
+make vm-test-apps            # install an app, reboot, remove it; data must survive
+make vm-test-packages        # install, upgrade, reboot and purge the .debs
 make vm-destroy
 ```
+
+`make run` starts both services against a scratch directory under `./run/`. It is a
+development instance rather than an installation: both run as you rather than as `root` and
+the `homebase` account, application data goes under `./run/` instead of `/srv/homebase`, and
+restarting the server is refused on purpose — it would restart *your* machine.
 
 The `vm-test-*` targets each create a VM, exercise it, and destroy it — including on
 failure, after collecting diagnostics. A failing test that leaves a 20 GB disk image behind
