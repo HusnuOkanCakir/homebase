@@ -12,7 +12,8 @@ import { test, expect, type Page } from "@playwright/test";
  * the words on screen say what actually happened, and that the destructive
  * buttons cannot be reached by reflex.
  *
- * Runs after journey.spec.ts, which creates the administrator.
+ * Runs after 1-first-run.spec.ts, which creates the administrator this signs in
+ * as. The numbered filenames are what orders them — see playwright.config.ts.
  */
 
 const ADMIN = "okan";

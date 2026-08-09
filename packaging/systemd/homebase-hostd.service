@@ -45,19 +45,27 @@ ProtectControlGroups=yes
 ProtectKernelModules=yes
 RemoveIPC=yes
 
-# RuntimeDirectory only.
+# One unit owns each directory.
 #
-# StateDirectory and LogsDirectory are deliberately NOT declared here, even
-# though hostd writes to both. systemd chowns a declared directory to the unit's
-# User, and core declares the same two as the homebase user — so whichever
-# service started last would take ownership. That is how core's database ended
-# up root-owned and unwritable by the account meant to own it.
+# hostd deliberately does NOT declare StateDirectory=homebase or
+# LogsDirectory=homebase, even though it writes to both. systemd chowns a
+# declared directory to the unit's User, and core declares those same two as the
+# homebase user — so whichever service started last would take ownership. That
+# is how core's database ended up root-owned and unwritable by the account meant
+# to own it.
 #
-# One unit owns each directory. core owns /var/lib/homebase and
-# /var/log/homebase because it is the unprivileged service that must write
-# there; hostd is root and can write into them regardless. hostd owns
-# /run/homebase, because the socket is its own.
+# core owns /var/lib/homebase and /var/log/homebase because it is the
+# unprivileged service that must write there; hostd is root and can write into
+# them regardless.
+#
+# hostd owns /run/homebase, because the socket is its own, and
+# /var/lib/homebase-hostd, which is its private bookkeeping — currently which
+# applications were stopped deliberately. Declaring that one is safe precisely
+# because no other unit names it. 0700 and root-owned: core must not be able to
+# rewrite hostd's record of what it did.
 RuntimeDirectory=homebase
+StateDirectory=homebase-hostd
+StateDirectoryMode=0700
 RuntimeDirectoryMode=0755
 
 [Install]

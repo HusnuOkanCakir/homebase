@@ -13,8 +13,15 @@ const baseURL = process.env["HOMEBASE_URL"] ?? "http://127.0.0.1:8080";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  // Serial: these tests restart the server they run against, so nothing else
-  // can be talking to it at the time.
+  // Serial, and in a deliberate order. These are one continuous journey against
+  // one machine: the first file creates the administrator that the rest sign in
+  // as, and several of them restart the server, so nothing else can be talking
+  // to it at the time.
+  //
+  // Playwright orders files alphabetically and offers no other cross-file
+  // ordering, which is why the names are numbered. That is not decoration —
+  // when the applications spec came before the first-run spec it failed on the
+  // setup screen, and the reason was invisible.
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env["CI"],

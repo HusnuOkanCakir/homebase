@@ -67,8 +67,13 @@ def build(version: str) -> list[Path]:
         raise VMError("make packages failed", (result.stderr or result.stdout)[-800:])
 
     packages = sorted((REPO_ROOT / "dist").glob(f"*_{version}_*.deb"))
-    if len(packages) != 3:
-        raise VMError(f"expected 3 packages, found {len(packages)}")
+    # hostd, core, apps, dashboard. Named rather than counted, so a package that
+    # silently stops being built is a failure here rather than a surprise on
+    # somebody's machine.
+    expected = {"homebase-hostd", "homebase-core", "homebase-apps", "homebase-dashboard"}
+    built = {p.name.split("_")[0] for p in packages}
+    if built != expected:
+        raise VMError(f"expected {sorted(expected)}, built {sorted(built)}")
     for p in packages:
         ok(p.name)
     return packages
@@ -96,11 +101,15 @@ def install(vm: VM, packages: list[Path], what: str) -> None:
     for package in packages:
         upload(vm, package, f"/tmp/{package.name}")
 
-    # One dpkg invocation so inter-package dependencies resolve. `set -e` in the
-    # maintainer scripts means any failure surfaces here rather than silently.
+    # apt rather than dpkg, because homebase-apps depends on a container runtime
+    # and dpkg does not resolve dependencies — it would report them unmet and
+    # stop. This is also closer to what a user does, and it is the path where an
+    # unsatisfiable dependency actually shows up.
     names = " ".join(f"/tmp/{p.name}" for p in packages)
-    result = ssh(vm, ["sudo", "sh", "-c", f"DEBIAN_FRONTEND=noninteractive dpkg -i {names}"],
-                 check=False)
+    result = ssh(vm, ["sudo", "sh", "-c",
+                      "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
+                      f"--allow-downgrades {names}"],
+                 check=False, timeout=1200)
     if result.returncode != 0:
         raise TestFailure(f"dpkg failed\n{result.stdout}\n{result.stderr}")
 
@@ -279,6 +288,13 @@ def main() -> int:
         start(vm)
         wait_for_ssh(vm)
         wait_for_boot_complete(vm)
+
+        # homebase-apps depends on a container runtime, so apt needs an index to
+        # resolve it from. Refreshed once, here, rather than on every install.
+        step("Refreshing the package index")
+        ssh(vm, ["sudo", "sh", "-c",
+                 "DEBIAN_FRONTEND=noninteractive apt-get update -qq"], timeout=900)
+        ok("apt is ready")
 
         install(vm, first, "Installing on a clean machine")
         verify_installed(vm)

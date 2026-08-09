@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Build the Homebase Debian packages.
 
-Three packages, staged and sealed with `dpkg-deb --build`:
+Four packages, staged and sealed with `dpkg-deb --build`:
 
     homebase-hostd      the privileged host service
     homebase-core       the unprivileged service
+    homebase-apps       the application catalogue (architecture-independent)
     homebase-dashboard  the web interface (architecture-independent)
 
 Deliberately not debhelper. Not because debhelper is wrong — it is the right
-tool for a package with anything complicated in it — but because these three
-have no build system to invoke, no libraries to shlibdeps, and nothing to
+tool for a package with anything complicated in it — but because these have
+no build system to invoke, no libraries to shlibdeps, and nothing to
 compile at package time. What they do have is a privilege boundary expressed in
 file ownership and modes, and that is worth being able to read in one file
 rather than inferring from a dozen debhelper defaults.
@@ -120,6 +121,11 @@ fi
 
 if [ "$1" = "purge" ]; then
     rm -f /var/log/homebase/audit.log
+
+    # hostd's own bookkeeping — which applications were stopped deliberately.
+    # Not user data: with hostd gone there is nothing left for it to describe,
+    # and unlike /var/lib/homebase there is nothing in it somebody would miss.
+    rm -rf /var/lib/homebase-hostd
 
     # The homebase group is left in place. homebase-core may still be installed
     # and still own files with that group, and removing a group whose gid is

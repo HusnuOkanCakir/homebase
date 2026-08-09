@@ -9,7 +9,7 @@ import (
 
 func appServices(t *testing.T) *AppServices {
 	t.Helper()
-	return NewAppServices(NewCatalogue(t.TempDir()), "", t.TempDir()+"/apps")
+	return NewAppServices(NewCatalogue(t.TempDir()), "", t.TempDir()+"/apps", t.TempDir()+"/state")
 }
 
 // Every directory created for an application must be created, not only the leaf.
@@ -166,6 +166,81 @@ func TestRequestedCapabilitiesDoNotUndoTheDrop(t *testing.T) {
 	}
 	if len(config.HostConfig.CapAdd) != 1 || config.HostConfig.CapAdd[0] != "NET_ADMIN" {
 		t.Errorf("CapAdd = %v, want [NET_ADMIN]", config.HostConfig.CapAdd)
+	}
+}
+
+// --- Remembering a deliberate stop -------------------------------------------
+
+// An application somebody stopped must not be reported as having crashed.
+//
+// Docker keeps no record of who stopped a container: a deliberately stopped one
+// and a crashed one are identical afterwards, because a program terminated by
+// SIGTERM chooses its own exit code. traefik/whoami chooses 2, which made every
+// deliberate stop read as "stopped unexpectedly" — found by the browser test.
+func TestADeliberateStopIsRememberedAsOne(t *testing.T) {
+	s := appServices(t)
+
+	if s.stoppedDeliberately("jellyfin") {
+		t.Fatal("an application nobody has stopped is recorded as stopped")
+	}
+
+	s.rememberStopped("jellyfin")
+	if !s.stoppedDeliberately("jellyfin") {
+		t.Error("the stop was not remembered")
+	}
+
+	// One application's state must not answer for another's.
+	if s.stoppedDeliberately("filebrowser") {
+		t.Error("stopping one application marked another as stopped")
+	}
+
+	s.forgetStopped("jellyfin")
+	if s.stoppedDeliberately("jellyfin") {
+		t.Error("starting it again did not clear the record")
+	}
+}
+
+// It has to survive a restart of the machine: an application the user stopped
+// stays stopped across a reboot, and must still read as stopped rather than as
+// having crashed while nobody was looking.
+func TestTheStopRecordSurvivesARestart(t *testing.T) {
+	catalogue := NewCatalogue(t.TempDir())
+	dataRoot := t.TempDir() + "/apps"
+	stateDir := t.TempDir() + "/state"
+
+	before := NewAppServices(catalogue, "", dataRoot, stateDir)
+	before.rememberStopped("jellyfin")
+
+	// A second instance, as though hostd had been restarted with the machine.
+	after := NewAppServices(catalogue, "", dataRoot, stateDir)
+	if !after.stoppedDeliberately("jellyfin") {
+		t.Error("the record did not survive hostd restarting")
+	}
+}
+
+// Clearing a record that was never written is the ordinary case — every start of
+// an application that was already running goes through it — and must not be
+// noisy or fail.
+func TestForgettingAnUnrecordedStopIsFine(t *testing.T) {
+	s := appServices(t)
+	s.forgetStopped("never-stopped")
+	if s.stoppedDeliberately("never-stopped") {
+		t.Error("forgetting created a record")
+	}
+}
+
+// The marker is hostd's, not the user's, and not core's. core running as the
+// service account must not be able to rewrite hostd's account of what it did.
+func TestTheStopRecordIsNotReadableByOtherAccounts(t *testing.T) {
+	s := appServices(t)
+	s.rememberStopped("jellyfin")
+
+	info, err := os.Stat(filepath.Dir(s.stopMarker("jellyfin")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o700 {
+		t.Errorf("the state directory is %o, want 700", mode)
 	}
 }
 

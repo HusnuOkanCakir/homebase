@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
+  isTerminal,
   watchJob,
   type Application,
   type ApplicationList,
@@ -42,6 +43,14 @@ export function Applications({ canManage }: Props) {
   // once on a home connection makes both slow and neither explicable.
   const [job, setJob] = useState<{ app: string; job: Job } | null>(null);
 
+  // How to stop watching it. Held in a ref rather than state because losing it
+  // is the bug: a poll nobody cancelled keeps running after the user navigates
+  // away, calling setState on a component that is gone, for as long as the tab
+  // is open.
+  const stopWatching = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => stopWatching.current?.(), []);
+
   const refresh = useCallback(async () => {
     try {
       setList(await api.apps());
@@ -72,14 +81,17 @@ export function Applications({ canManage }: Props) {
 
         setJob({ app: appId, job: submitted });
 
-        watchJob(
+        // Whatever was being watched before is not what the user is waiting for
+        // now.
+        stopWatching.current?.();
+        stopWatching.current = watchJob(
           submitted.job_id,
           (update) => {
             setJob({ app: appId, job: update });
             // Refresh as soon as it finishes: the list is polled every five
             // seconds, and a state that lags the thing the user just did by
             // several seconds reads as the action having failed.
-            if (update.state === "succeeded" || update.state === "failed") {
+            if (isTerminal(update.state)) {
               void refresh();
             }
           },
@@ -217,7 +229,7 @@ function ApplicationDetail({
   const [confirming, setConfirming] = useState<null | "stop" | "uninstall" | "remove-data">(null);
   const [logs, setLogs] = useState<string | null>(null);
 
-  const busy = job !== null && job.state !== "succeeded" && job.state !== "failed";
+  const busy = job !== null && !isTerminal(job.state);
 
   return (
     <>

@@ -760,10 +760,17 @@ def install_docker(vm: VM, prepull: list[str] | None = None) -> str:
         raise VMError("installing docker.io failed",
                       (result.stderr or result.stdout).strip()[-600:])
 
-    version = ssh(vm, ["docker", "version", "--format",
+    # sudo: the login user is not in the docker group, and without it this
+    # reports "<unknown>" — which reads like Docker failing to install rather
+    # than the query failing to authenticate.
+    version = ssh(vm, ["sudo", "docker", "version", "--format",
                        "{{.Server.APIVersion}} (minimum {{.Server.MinAPIVersion}})"],
                   check=False).stdout.strip()
-    ok(f"Docker speaks API {version or '<unknown>'}")
+    if not version:
+        raise VMError("Docker installed but would not report its version",
+                      "hostd negotiates the API version against this, so a daemon "
+                      "that will not answer is a daemon Homebase cannot use.")
+    ok(f"Docker speaks API {version}")
 
     for image in prepull or []:
         result = ssh(vm, ["sudo", "docker", "pull", image], check=False, timeout=900)

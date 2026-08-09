@@ -94,6 +94,20 @@ func (s *Server) handleStreamEvents(w http.ResponseWriter, r *http.Request, _ *a
 		return
 	}
 
+	// core sets a WriteTimeout, which protects it from a client that accepts a
+	// response one byte at a time. A stream that stays open for hours is exactly
+	// what that timeout is built to kill, so it is cleared for this connection
+	// and this connection only.
+	//
+	// Without this the stream dies after WriteTimeout — silently, and looking
+	// from the browser like a server that has stopped having anything to say.
+	// The heartbeat below does not help: writing to a connection past its
+	// deadline is what fails.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		s.log.Warn("could not clear the write deadline for an event stream",
+			"error", err)
+	}
+
 	stream, unsubscribe := s.events.Subscribe()
 	defer unsubscribe()
 

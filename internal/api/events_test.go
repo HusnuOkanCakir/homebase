@@ -132,6 +132,59 @@ func TestEventStreamDeliversAnEventAsItHappens(t *testing.T) {
 	}
 }
 
+// core sets a WriteTimeout to protect itself from a client that accepts a
+// response one byte at a time. A stream that stays open for hours is exactly
+// what that timeout kills — silently, and looking from the browser like a
+// server that has stopped having anything to say.
+//
+// The timeout here is deliberately short so the test finishes; the real one is
+// sixty seconds, which means an event stream would have died every minute.
+func TestTheStreamOutlivesTheServerWriteTimeout(t *testing.T) {
+	h, _ := newAppHarness(t)
+	headers := h.signedIn(t)
+
+	server := httptest.NewUnstartedServer(h.handler)
+	server.Config.WriteTimeout = 250 * time.Millisecond
+	server.Start()
+	defer server.Close()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+		server.URL+"/api/v1/events/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("reading the greeting: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for h.events.Subscribers() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Well past the write timeout, so a stream that had not cleared its deadline
+	// is already dead by now.
+	time.Sleep(600 * time.Millisecond)
+
+	h.events.Info(t.Context(), "still_alive", "", "The stream is still open.")
+
+	payload := readSSEData(t, reader)
+	if !strings.Contains(payload, "still_alive") {
+		t.Errorf("got %q", payload)
+	}
+}
+
 // A closed client must not leave a subscriber behind. Every dashboard reload
 // opens a new stream, so a leak here is unbounded on a machine left running for
 // months.

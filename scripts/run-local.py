@@ -147,7 +147,8 @@ def main() -> int:
          # Application data under ./run rather than /srv/homebase, so
          # installing something here needs no root and touches nothing outside
          # the repository. The packaged service uses the real path.
-         "--app-data", str(RUN_DIR / "apps")],
+         "--app-data", str(RUN_DIR / "apps"),
+         "--state-dir", str(RUN_DIR / "hostd-state")],
         stdout=(RUN_DIR / "hostd.log").open("w"),
         stderr=subprocess.STDOUT,
     ))

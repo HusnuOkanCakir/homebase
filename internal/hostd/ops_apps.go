@@ -3,6 +3,7 @@ package hostd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -21,6 +22,11 @@ import (
 const (
 	// DefaultAppDataRoot is where an application's private directories live.
 	DefaultAppDataRoot = "/srv/homebase/apps"
+
+	// DefaultStateDir is hostd's own bookkeeping, kept away from both the user's
+	// data and core's state directory. root-owned: core must not be able to
+	// rewrite hostd's record of what it did.
+	DefaultStateDir = "/var/lib/homebase-hostd"
 
 	// containerPrefix namespaces the containers Homebase owns, so nothing here
 	// can act on a container somebody else created.
@@ -47,16 +53,32 @@ type AppServices struct {
 	// against escaping this root, not against the root being chosen.
 	dataRoot string
 
+	// stateDir holds hostd's own record of what it has done — currently which
+	// applications were stopped deliberately.
+	//
+	// That record has to exist because Docker does not keep one. A container that
+	// somebody stopped and a container that crashed are byte-for-byte identical
+	// afterwards: status "exited", and an exit code that says nothing, because a
+	// program terminated by SIGTERM chooses its own. traefik/whoami exits 2 when
+	// asked to stop, which made every deliberate stop read as "stopped
+	// unexpectedly". Homebase is the one doing the stopping, so Homebase is the
+	// one that can know.
+	stateDir string
+
 	docker *docker
 }
 
-func NewAppServices(catalogue *Catalogue, dockerSocketPath, dataRoot string) *AppServices {
+func NewAppServices(catalogue *Catalogue, dockerSocketPath, dataRoot, stateDir string) *AppServices {
 	if dataRoot == "" {
 		dataRoot = DefaultAppDataRoot
+	}
+	if stateDir == "" {
+		stateDir = DefaultStateDir
 	}
 	return &AppServices{
 		Catalogue: catalogue,
 		dataRoot:  filepath.Clean(dataRoot),
+		stateDir:  filepath.Clean(stateDir),
 		docker:    newDocker(dockerSocketPath),
 	}
 }
@@ -286,10 +308,19 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 	switch {
 	case state.State.Running:
 		status.State = StateRunning
-	case state.State.ExitCode != 0:
-		status.State = StateFailed
-	default:
+
+	// Whether Homebase was the one that stopped it, rather than what it exited
+	// with. The exit code cannot answer this: a program terminated by SIGTERM
+	// chooses its own, and traefik/whoami chooses 2 — so reading a non-zero code
+	// as a crash reported every deliberate stop as a fault.
+	case s.stoppedDeliberately(manifest.ID):
 		status.State = StateStopped
+
+	default:
+		// Nobody asked it to stop and it stopped. That is unexpected whatever it
+		// exited with: a long-running service exiting cleanly on its own is still
+		// a service that is no longer there.
+		status.State = StateFailed
 	}
 
 	if state.State.StartedAt != "" && state.State.Running {
@@ -373,6 +404,9 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 			"Try starting it from the applications list.")
 	}
 
+	// A freshly created container carries none of the previous one's history.
+	s.forgetStopped(manifest.ID)
+
 	return map[string]any{
 		"id":        manifest.ID,
 		"installed": true,
@@ -393,12 +427,15 @@ func (s *AppServices) start(ctx context.Context, params AppRef) (any, error) {
 		// Already running is the desired state.
 		var dockerErr *dockerError
 		if asDockerError(err, &dockerErr) && dockerErr.Status == 304 {
+			s.forgetStopped(manifest.ID)
 			return map[string]any{"id": manifest.ID, "running": true}, nil
 		}
 		return nil, wrapDockerError(err, "start_failed",
 			manifest.Name+" would not start.",
 			"Check the application's logs for the reason.")
 	}
+
+	s.forgetStopped(manifest.ID)
 	return map[string]any{"id": manifest.ID, "running": true}, nil
 }
 
@@ -414,11 +451,16 @@ func (s *AppServices) stop(ctx context.Context, params AppRef) (any, error) {
 	if err := s.docker.stopContainer(ctx, containerName(manifest.ID), stopGraceSeconds); err != nil {
 		var dockerErr *dockerError
 		if asDockerError(err, &dockerErr) && dockerErr.Status == 304 {
+			// Already stopped is the desired state, and it was still Homebase
+			// being asked for it.
+			s.rememberStopped(manifest.ID)
 			return map[string]any{"id": manifest.ID, "running": false}, nil
 		}
 		return nil, wrapDockerError(err, "stop_failed",
 			manifest.Name+" would not stop.", "")
 	}
+
+	s.rememberStopped(manifest.ID)
 	return map[string]any{"id": manifest.ID, "running": false}, nil
 }
 
@@ -436,6 +478,8 @@ func (s *AppServices) restart(ctx context.Context, params AppRef) (any, error) {
 			manifest.Name+" would not restart.",
 			"Check the application's logs for the reason.")
 	}
+
+	s.forgetStopped(manifest.ID)
 	return map[string]any{"id": manifest.ID, "running": true}, nil
 }
 
@@ -461,6 +505,11 @@ func (s *AppServices) uninstall(ctx context.Context, params AppRef) (any, error)
 		return nil, wrapDockerError(err, "uninstall_failed",
 			"Homebase could not remove "+manifest.Name+".", "")
 	}
+
+	// The container is gone, so there is no state left to describe. Leaving the
+	// marker would make a fresh install of the same application report itself as
+	// stopped before anybody had stopped it.
+	s.forgetStopped(manifest.ID)
 
 	dataPath := s.appDataDir(manifest.ID)
 	kept := false
@@ -817,6 +866,56 @@ func (s *AppServices) makeOwnedDir(path string) error {
 	}
 
 	return nil
+}
+
+// --- Remembering a deliberate stop -------------------------------------------
+//
+// Docker keeps no record of who stopped a container, and the exit code cannot
+// be read as one: a program terminated by SIGTERM chooses what to exit with, and
+// plenty choose something other than zero. So the only place this can be known
+// is here, at the moment Homebase does the stopping.
+//
+// The consequence of getting it wrong is not cosmetic. "Stopped unexpectedly"
+// on an application somebody deliberately stopped is Homebase reporting a fault
+// that did not happen — and once it has done that, no status it reports is worth
+// reading.
+
+func (s *AppServices) stopMarker(id string) string {
+	return filepath.Join(s.stateDir, "stopped", id)
+}
+
+// rememberStopped records that Homebase stopped this application.
+//
+// A failure here is logged rather than returned: the application really has
+// stopped, which is what the user asked for, and turning a successful stop into
+// an error because a marker file could not be written would be the worse
+// outcome. The cost of the missing marker is that the application reads as
+// having stopped on its own.
+func (s *AppServices) rememberStopped(id string) {
+	path := s.stopMarker(id)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		slog.Warn("could not record that an application was stopped deliberately",
+			"application", id, "error", err)
+		return
+	}
+	if err := os.WriteFile(path, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600); err != nil {
+		slog.Warn("could not record that an application was stopped deliberately",
+			"application", id, "error", err)
+	}
+}
+
+// forgetStopped clears the record, because the application is running again.
+func (s *AppServices) forgetStopped(id string) {
+	if err := os.Remove(s.stopMarker(id)); err != nil && !os.IsNotExist(err) {
+		slog.Warn("could not clear an application's stopped marker",
+			"application", id, "error", err)
+	}
+}
+
+// stoppedDeliberately reports whether Homebase is the one that stopped it.
+func (s *AppServices) stoppedDeliberately(id string) bool {
+	_, err := os.Stat(s.stopMarker(id))
+	return err == nil
 }
 
 func boolPtr(v bool) *bool { return &v }
