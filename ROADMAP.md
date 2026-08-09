@@ -133,17 +133,29 @@ That costs something real, and the ADR says so: **a user cannot install an appli
 Homebase does not ship.** Widening the catalogue is a package change, which is what makes
 the set of installable applications reviewable in a diff.
 
-### Milestone 4 — Storage ← *next*
+### Milestone 4 — Storage ← *in progress*
 
 Its own milestone because storage mistakes are the ones that destroy data.
 
-- [ ] Disk discovery, model/size/filesystem display, mounting supported filesystems
-- [ ] Managed storage locations; assigning them to applications
-- [ ] Disconnected-disk handling, space alerts, read-only fallback
-- [ ] Explicit confirmation before any format; never auto-select between disks
+- [x] Disk discovery, model/size/filesystem display, mounting supported filesystems
+- [x] Managed storage locations; assigning them to applications
+- [x] Disconnected-disk handling; read-only reporting
+- [x] Explicit confirmation before any format; never auto-select between disks
+- [ ] Space alerts
+- [ ] The browser journey
 
 **Done when:** a USB disk can be added as Jellyfin's media storage, removed and reconnected
 without corrupting anything.
+
+The load-bearing decision is
+[ADR-0013](docs/decisions/0013-storage-identity-and-mounting.md): a disk is identified by
+its filesystem UUID, and mounting is done with systemd units rather than `/etc/fstab`.
+
+Both halves were settled by evidence rather than argument. A disk unplugged from a running
+VM as `/dev/sda` came back as `/dev/sdb` — same filesystem, same UUID — so anything storing
+a device path was by then pointing at nothing. And a malformed `fstab` entry stops the boot
+and drops the machine to an emergency shell, which on a laptop in a cupboard is a brick
+caused by a disk somebody unplugged. Every unit Homebase writes carries `nofail`.
 
 ### Milestone 5 — Backup and restore
 

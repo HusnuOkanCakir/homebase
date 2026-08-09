@@ -380,11 +380,15 @@ def verify_nothing_can_write_while_it_is_absent(vm: VM) -> None:
     # system disk.
     ssh(vm, ["sudo", "umount", "-l", f"{STORAGE_ROOT}/{LOCATION}"], check=False)
 
+    # As root, deliberately. A mode of 0555 does not stop root, and an
+    # application container frequently runs as root — so a test that wrote as an
+    # ordinary user would pass while the protection did nothing for the most
+    # likely writer.
     result = ssh(vm, ["sudo", "sh", "-c",
                       f"echo x > {STORAGE_ROOT}/{LOCATION}/written-while-absent.txt"],
                  check=False)
     check(result.returncode != 0,
-          "a write into the empty mount point fails",
+          "even root cannot write into the empty mount point",
           "Otherwise an application carries on writing to the system disk, "
           "filling it with files that vanish behind the disk the moment it is "
           "reconnected. Nothing reports an error, and the user sees an "
@@ -393,6 +397,12 @@ def verify_nothing_can_write_while_it_is_absent(vm: VM) -> None:
     mode = ssh(vm, ["stat", "-c", "%a %U", f"{STORAGE_ROOT}/{LOCATION}"],
                check=False).stdout.strip()
     check(mode.startswith("555"), f"the empty mount point is {mode}")
+
+    attributes = ssh(vm, ["sudo", "lsattr", "-d", f"{STORAGE_ROOT}/{LOCATION}"],
+                     check=False).stdout.strip()
+    check("i" in attributes.split()[0] if attributes else False,
+          f"and immutable ({attributes.split()[0] if attributes else 'unknown'})",
+          "The mode alone does not stop root; the immutable flag does.")
 
 
 def verify_reconnecting_finds_it_again(vm: VM, uuid: str, marker: str) -> None:

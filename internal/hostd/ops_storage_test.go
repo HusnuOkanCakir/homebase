@@ -373,3 +373,49 @@ func TestFreeSpaceExcludesTheRootReserve(t *testing.T) {
 		t.Errorf("available (%d) exceeds total (%d)", available, total)
 	}
 }
+
+// The immutable flag is what makes an empty mount point genuinely unwritable.
+//
+// A mode of 0555 does not stop root, and an application container frequently
+// runs as root — so the mode alone protects against every writer except the most
+// likely one. This was found by the VM test writing as root into what was
+// supposed to be an unwritable directory, and succeeding.
+func TestAnEmptyMountPointIsImmutableNotJustUnwritable(t *testing.T) {
+	s := storageServices(t)
+	mountPoint := s.mountPointFor("media")
+
+	if err := s.prepareMountPoint(mountPoint); err != nil {
+		t.Fatal(err)
+	}
+
+	// Setting the flag needs CAP_LINUX_IMMUTABLE. hostd is root and has it; a
+	// test process usually is not, and prepareMountPoint deliberately treats
+	// that as a warning rather than a failure — a development instance should
+	// still work. So the assertion only holds where the capability exists, and
+	// the VM test is where this is really checked.
+	if os.Geteuid() != 0 {
+		if err := setImmutable(mountPoint, true); err == nil {
+			t.Error("the flag was set without privilege, which should not be possible")
+		}
+		t.Skip("not root: the immutable flag cannot be set, so this is checked in the VM test")
+	}
+
+	immutable, err := isImmutable(mountPoint)
+	if err != nil {
+		// tmpfs does not support these flags. That is a fact about where the
+		// test happens to run rather than about the code.
+		t.Skipf("this filesystem does not support the immutable flag: %v", err)
+	}
+	if !immutable {
+		t.Error("the mount point is not immutable, so root can write into it while " +
+			"the disk is absent")
+	}
+
+	// And it can be undone, or a location could never be removed.
+	if err := setImmutable(mountPoint, false); err != nil {
+		t.Fatalf("clearing the flag: %v", err)
+	}
+	if immutable, _ := isImmutable(mountPoint); immutable {
+		t.Error("the flag could not be cleared")
+	}
+}

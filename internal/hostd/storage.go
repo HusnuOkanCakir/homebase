@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unsafe"
 )
 
 // Block device discovery, read from the kernel rather than from a subprocess.
@@ -593,4 +594,75 @@ func diskUsage(path string) (total, available uint64, err error) {
 	}
 	size := uint64(stat.Bsize)
 	return stat.Blocks * size, stat.Bavail * size, nil
+}
+
+// --- Making a directory genuinely unwritable -----------------------------------
+
+// Linux flags for FS_IOC_SETFLAGS. Defined here because hostd depends only on
+// the standard library, and these two constants are stable kernel ABI.
+const (
+	// FS_IMMUTABLE_FL: not even root may write, rename or delete.
+	fsImmutableFlag = 0x00000010
+
+	// The ioctls that read and write those flags. The values differ by pointer
+	// size; Homebase targets 64-bit only.
+	fsIoctlGetFlags = 0x80086601
+	fsIoctlSetFlags = 0x40086602
+)
+
+// setImmutable marks a directory unwritable by everybody, root included.
+//
+// A mode of 0555 does not stop root, and an application container frequently
+// runs as root — so on its own, the inert mount point protects against every
+// writer except the most likely one. The immutable flag is the version of that
+// protection that actually holds.
+//
+// Mounting over an immutable directory is unaffected: a mount does not modify
+// the directory it covers.
+//
+// Not every filesystem supports the flag. Where it is unsupported the mode is
+// still applied and the failure is reported, because silently having no
+// protection is worse than knowing there is none.
+func setImmutable(path string, immutable bool) error {
+	// O_RDONLY is enough for the ioctl, and is the only thing that will open a
+	// directory that is already immutable.
+	file, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var flags uint32
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, file.Fd(),
+		fsIoctlGetFlags, uintptr(unsafe.Pointer(&flags))); errno != 0 {
+		return fmt.Errorf("reading the flags of %s: %w", path, errno)
+	}
+
+	if immutable {
+		flags |= fsImmutableFlag
+	} else {
+		flags &^= fsImmutableFlag
+	}
+
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, file.Fd(),
+		fsIoctlSetFlags, uintptr(unsafe.Pointer(&flags))); errno != 0 {
+		return fmt.Errorf("setting the flags of %s: %w", path, errno)
+	}
+	return nil
+}
+
+// isImmutable reports whether the flag is set, for tests and diagnostics.
+func isImmutable(path string) (bool, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+
+	var flags uint32
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, file.Fd(),
+		fsIoctlGetFlags, uintptr(unsafe.Pointer(&flags))); errno != 0 {
+		return false, errno
+	}
+	return flags&fsImmutableFlag != 0, nil
 }

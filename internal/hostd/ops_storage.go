@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -416,6 +417,10 @@ func (s *StorageServices) removeLocation(ctx context.Context, params LocationRef
 		return nil, err
 	}
 
+	// The immutable flag has to come off first, or the directory cannot be
+	// removed — not even by root, which is the whole point of it.
+	_ = setImmutable(mountPoint, false)
+
 	// The directory goes, but only if it is empty — which it is once unmounted.
 	// Never RemoveAll: if the unmount somehow failed, that would delete the
 	// contents of the user's disk.
@@ -509,8 +514,9 @@ func (s *StorageServices) unmount(ctx context.Context, params LocationRef) (any,
 		}
 	}
 
-	// Back to inert. See prepareMountPoint.
+	// Back to inert, both ways. See prepareMountPoint.
 	_ = os.Chmod(mountPoint, 0o555)
+	_ = setImmutable(mountPoint, true)
 
 	return map[string]any{
 		"id":      location.ID,
@@ -900,15 +906,20 @@ func (s *StorageServices) LocationByID(id string) (LocationState, bool) {
 // prepareMountPoint creates the directory a location mounts on, and makes it
 // inert while nothing is mounted there.
 //
-// The mode is the point. When a disk is unplugged the mountpoint reverts to an
-// ordinary empty directory on the root filesystem, and an application still
-// writing to it fills the system disk with files that vanish behind the disk the
-// moment it is reconnected. The user sees an application that lost their data
-// and a server out of space, and nothing anywhere reported an error.
+// This is the disconnected-disk protection. When a disk is unplugged the
+// mountpoint reverts to an ordinary empty directory on the root filesystem, and
+// anything still writing to it fills the system disk with files that vanish
+// behind the disk the moment it is reconnected. The user sees an application
+// that lost their data and a server out of space, and nothing anywhere reported
+// an error.
 //
-// 0555 turns that silent corruption into an immediate write failure. systemd
-// mounts over it regardless — the mode of a mountpoint has no bearing on the
-// mode of what is mounted on it.
+// Both a mode of 0555 and the immutable flag, because the mode alone does not
+// hold: root ignores it, and an application container frequently runs as root.
+// The VM test found exactly that, by writing as root into what was supposed to
+// be an unwritable directory and succeeding.
+//
+// Mounting over it is unaffected either way — a mount does not modify the
+// directory it covers.
 func (s *StorageServices) prepareMountPoint(mountPoint string) error {
 	if err := underStorageRoot(s.root, mountPoint); err != nil {
 		return internalError(err.Error())
@@ -917,14 +928,26 @@ func (s *StorageServices) prepareMountPoint(mountPoint string) error {
 	if err := os.MkdirAll(s.root, 0o755); err != nil {
 		return internalError("creating " + s.root + ": " + err.Error())
 	}
+	// Cleared first: an immutable directory cannot be chmod'ed, and this runs
+	// again on every mount.
+	_ = setImmutable(mountPoint, false)
+
 	if err := os.MkdirAll(mountPoint, 0o555); err != nil {
 		return internalError("creating " + mountPoint + ": " + err.Error())
 	}
 	// MkdirAll leaves an existing directory's mode alone, so it is set
-	// explicitly — this runs again on every mount, and a directory that was
-	// writable once must not stay writable.
+	// explicitly — a directory that was writable once must not stay writable.
 	if err := os.Chmod(mountPoint, 0o555); err != nil {
 		return internalError("securing " + mountPoint + ": " + err.Error())
+	}
+
+	// The part that holds against root. Not fatal if the filesystem does not
+	// support it — but logged, because a protection that silently is not there
+	// is worse than one known to be absent.
+	if err := setImmutable(mountPoint, true); err != nil {
+		slog.Warn("could not make a mount point immutable; a stray write while the "+
+			"disk is absent would land on the system disk",
+			"path", mountPoint, "error", err)
 	}
 	return nil
 }
