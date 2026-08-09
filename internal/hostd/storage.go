@@ -83,10 +83,21 @@ type Disk struct {
 	Model     string `json:"model,omitempty"`
 	Vendor    string `json:"vendor,omitempty"`
 	SizeBytes uint64 `json:"size_bytes"`
-	Removable bool   `json:"removable"`
 
-	// Transport is how it is attached: usb, sata, nvme, virtio. Used to tell a
-	// user which disk is which, since "the USB one" is how people think.
+	// Removable is the kernel's flag, and it does not mean what it sounds like.
+	// It reports that the *medium* can be removed from the drive — a card
+	// reader, an optical drive, a floppy — not that the drive can be unplugged.
+	// A USB hard disk reports false, and so does the USB stick QEMU presents to
+	// the VM tests.
+	//
+	// Reported because it is true information, and never used to answer "can
+	// this be unplugged". Transport answers that.
+	Removable bool `json:"removable"`
+
+	// Transport is how it is attached: usb, sata, nvme, virtio. This is what
+	// tells a user which disk is which — "the USB one" is how people think about
+	// their disks — and it is the honest signal for whether a disk is one that
+	// comes and goes.
 	Transport string `json:"transport,omitempty"`
 
 	// System is true for the disk the running system is on. Homebase will not
@@ -125,6 +136,19 @@ type Volume struct {
 
 	// ReadOnly reports how it is mounted, not what the disk supports.
 	ReadOnly bool `json:"read_only"`
+}
+
+// Pluggable reports whether this disk is one that comes and goes.
+//
+// Transport rather than the kernel's Removable flag, which is about the medium
+// rather than the drive: a USB hard disk is unplugged constantly and reports
+// removable=false.
+func (d Disk) Pluggable() bool {
+	switch d.Transport {
+	case "usb", "sd-card":
+		return true
+	}
+	return d.Removable
 }
 
 // Assignable reports whether this volume can be given to an application.

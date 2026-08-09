@@ -481,3 +481,32 @@ func TestScanningThisMachineFindsItsSystemDisk(t *testing.T) {
 		t.Error("no disk was identified as holding the running system")
 	}
 }
+
+// The kernel's `removable` flag does not answer "can this be unplugged".
+//
+// It reports that the medium can be removed from the drive — a card reader, an
+// optical drive — not that the drive itself comes and goes. A USB hard disk
+// reports false, and so does the USB stick QEMU presents to the VM tests, which
+// is how this was found.
+func TestPluggableUsesTransportRatherThanTheRemovableFlag(t *testing.T) {
+	cases := []struct {
+		name string
+		disk Disk
+		want bool
+	}{
+		{"a USB disk that does not claim to be removable",
+			Disk{Transport: "usb", Removable: false}, true},
+		{"a USB stick that does", Disk{Transport: "usb", Removable: true}, true},
+		{"an SD card", Disk{Transport: "sd-card"}, true},
+		{"an internal NVMe drive", Disk{Transport: "nvme"}, false},
+		{"an internal SATA drive", Disk{Transport: "sata"}, false},
+		{"a virtio disk in a VM", Disk{Transport: "virtio"}, false},
+		{"an optical drive with removable media", Disk{Removable: true}, true},
+	}
+
+	for _, tc := range cases {
+		if got := tc.disk.Pluggable(); got != tc.want {
+			t.Errorf("%s: Pluggable() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

@@ -199,7 +199,11 @@ def verify_the_disk_is_seen(vm: VM) -> None:
     step("What hostd makes of a freshly plugged-in disk")
 
     disk = find_removable_volume(vm)
-    check(disk["removable"], f"{disk['device']} is reported as removable")
+    check(disk["transport"] == "usb",
+          f"{disk['device']} is reported as a USB disk",
+          "Transport is what says a disk comes and goes. The kernel's removable "
+          "flag is about the medium rather than the drive, and a USB hard disk "
+          "reports it as false — as does the stick QEMU presents here.")
     check(disk["size_bytes"] > 0, f"its size is known ({disk['size_bytes']} bytes)")
 
     volume = disk["volumes"][0]
