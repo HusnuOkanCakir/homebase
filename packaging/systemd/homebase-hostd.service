@@ -64,6 +64,25 @@ RemoveIPC=yes
 # because no other unit names it. 0700 and root-owned: core must not be able to
 # rewrite hostd's record of what it did.
 RuntimeDirectory=homebase
+
+# Without this, restarting hostd destroys the socket.
+#
+# systemd removes a RuntimeDirectory when the service stops — and the socket the
+# *socket unit* owns lives inside it. So stopping hostd for a moment deletes
+# /run/homebase/hostd.sock, while homebase-hostd.socket carries on reporting
+# "active (running)" and "Listen: /run/homebase/hostd.sock" against a path that
+# no longer exists. Nothing can connect again until the socket unit itself is
+# restarted, and nothing says so: core simply reports that it cannot reach the
+# part of itself that manages the server, for ever.
+#
+# Every upgrade restarts hostd. This was found when the homebase-apps package
+# started doing the same thing to reload the catalogue.
+#
+# `yes` rather than `restart`: the directory's lifetime belongs to the socket
+# unit, which outlives any individual run of the service. /run is a tmpfs, so it
+# still goes away when the machine does.
+RuntimeDirectoryPreserve=yes
+
 StateDirectory=homebase-hostd
 StateDirectoryMode=0700
 RuntimeDirectoryMode=0755

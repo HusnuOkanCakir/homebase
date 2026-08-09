@@ -162,6 +162,41 @@ def verify_installed(vm: VM) -> None:
         state = ssh(vm, ["systemctl", "is-enabled", service], check=False).stdout.strip()
         check(state == "enabled", f"{service} is enabled at boot ({state})")
 
+    verify_socket_survives_a_restart(vm)
+
+
+def verify_socket_survives_a_restart(vm: VM) -> None:
+    """Restarting hostd must not destroy the socket.
+
+    systemd removes a RuntimeDirectory when a service stops, and the socket the
+    *socket unit* owns lives inside hostd's. So stopping hostd for a moment
+    deleted /run/homebase/hostd.sock while homebase-hostd.socket carried on
+    reporting "active (running)" against a path that no longer existed — nothing
+    could connect again, and nothing said so.
+
+    Every upgrade restarts hostd, so this is not a corner. It is checked here
+    rather than only in the upgrade step because the failure is silent: the units
+    all look healthy afterwards, and the only symptom is core reporting that it
+    cannot reach the part of itself that manages the server, for ever.
+    """
+    # Activate it first: the directory is only at risk once the service has run.
+    ssh(vm, ["curl", "--silent", "--max-time", "10", "-o", "/dev/null",
+             "http://127.0.0.1:8080/api/v1/health"], check=False)
+    ssh(vm, ["sudo", "systemctl", "restart", "homebase-hostd.service"], check=False)
+
+    perms = ssh(vm, ["stat", "-c", "%a %U %G", "/run/homebase/hostd.sock"],
+                check=False)
+    check(perms.returncode == 0 and perms.stdout.strip() == "660 root homebase",
+          f"the socket survives restarting hostd ({perms.stdout.strip() or 'gone'})",
+          "systemd removed the RuntimeDirectory and the socket inside it. "
+          "The socket unit still reports itself as listening, so nothing looks "
+          "wrong — but the privilege boundary is unreachable until it is "
+          "restarted. See RuntimeDirectoryPreserve in homebase-hostd.service.")
+
+    # And it still works, which is the property the mode is a proxy for.
+    status, _ = api(vm, "/setup")
+    check(status == 200, f"and core can still reach hostd through it ({status})")
+
 
 def create_data(vm: VM) -> None:
     step("Putting real data on the machine")

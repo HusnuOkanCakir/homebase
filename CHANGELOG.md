@@ -109,6 +109,14 @@ Milestone 0 — contracts and project machinery. No product code.
 - An image already on the machine satisfies an install when the registry is unreachable.
   The image is pinned to a version or a digest, so the local copy is the same bytes;
   refusing would make Homebase useless in exactly the situation a local server is for
+- **Restarting `hostd` no longer destroys its socket.** systemd removes a
+  `RuntimeDirectory` when the service stops, and the socket the *socket unit* owns lives
+  inside `hostd`'s — so a momentary stop deleted `/run/homebase/hostd.sock` while
+  `homebase-hostd.socket` carried on reporting itself active and listening on a path that
+  no longer existed. Nothing could connect again, nothing said so, and every upgrade
+  restarts `hostd`. Found when the new `homebase-apps` package started restarting it to
+  reload the catalogue; the package test now restarts `hostd` deliberately and checks the
+  socket is still there and still works
 - An application somebody stopped is no longer reported as having crashed. Docker keeps no
   record of who stopped a container, and the exit code cannot stand in for one — a program
   terminated by `SIGTERM` chooses its own, and `traefik/whoami` chooses 2. Homebase does the
