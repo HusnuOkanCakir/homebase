@@ -109,6 +109,20 @@ Milestone 0 — contracts and project machinery. No product code.
 - An image already on the machine satisfies an install when the registry is unreachable.
   The image is pinned to a version or a digest, so the local copy is the same bytes;
   refusing would make Homebase useless in exactly the situation a local server is for
+- An application somebody stopped is no longer reported as having crashed. Docker keeps no
+  record of who stopped a container, and the exit code cannot stand in for one — a program
+  terminated by `SIGTERM` chooses its own, and `traefik/whoami` chooses 2. Homebase does the
+  stopping, so `hostd` records it, in a root-owned state directory `core` cannot rewrite
+- The event stream clears its write deadline. `core` sets a 60-second `WriteTimeout`, which
+  is exactly what kills a connection meant to stay open for hours — silently, and looking
+  from the browser like a server with nothing to say
+- A failed Docker version negotiation is no longer remembered. `sync.Once` cached the
+  failure as readily as the success, so a `hostd` asked for something before Docker had
+  finished starting would have refused every application operation for the rest of its life
+- `core` no longer logs a client that went away as an error. Every poll cancelled by a
+  navigation, and every request in flight when the machine reboots, was an error-level
+  entry — and a journal full of entries nobody can act on is how people learn to scroll
+  past the ones they can
 - `hostd` gives the service account ownership of every directory it creates under the
   application data root, not only the leaf. `os.MkdirAll` creates intermediates as root,
   which left `/srv/homebase/apps/<id>` unreadable by `core` — so it could not have backed
