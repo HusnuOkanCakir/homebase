@@ -8,12 +8,13 @@ are only keepable if every component agrees on them from the beginning — retro
 directory layout onto software that already has users means migrating live data, which is
 the single most dangerous thing this project could do to itself.
 
-## The four locations
+## The locations
 
 | Path | Owner | Contents | Backed up | Survives reinstall |
 |---|---|---|---|---|
 | `/etc/homebase/` | `root:homebase` | Configuration | Config backup | Restored |
 | `/var/lib/homebase/` | `homebase:homebase` | System state, database | Config backup | Restored |
+| `/var/lib/homebase-hostd/` | `root:root` | `hostd`'s own bookkeeping | No | No |
 | `/srv/homebase/` | `homebase:homebase` | User and application data | Data backup | **In place** |
 | `/var/log/homebase/` | `homebase:homebase` | Logs | No | No |
 
@@ -57,6 +58,25 @@ restore.
 
 `/var/lib/homebase/secrets/` holds credentials encrypted at rest, mode `0700`, owned by
 `homebase`.
+
+## `/var/lib/homebase-hostd/` — the privileged service's own record
+
+```text
+/var/lib/homebase-hostd/
+└── stopped/<app-id>        # This application was stopped deliberately
+```
+
+Separate from `/var/lib/homebase/` and owned by `root`, because `core` must not be able to
+rewrite `hostd`'s account of what it did.
+
+It exists at all because Docker does not keep one. A container somebody stopped and a
+container that crashed are identical afterwards — status `exited`, and an exit code that
+answers nothing, since a program terminated by `SIGTERM` chooses its own. Homebase performs
+the stop, so Homebase is what can know. Without this, every deliberate stop was reported to
+the user as "stopped unexpectedly".
+
+Not backed up and not restored: it describes containers that exist on one machine, and it is
+rebuilt by ordinary use.
 
 Nothing outside the secrets service reads it. Components ask for a credential by reference:
 
@@ -142,6 +162,7 @@ backwards.
 | `/etc/homebase/*.yaml` | `root:homebase` | `0640` |
 | `/var/lib/homebase/` | `homebase:homebase` | `0750` |
 | `/var/lib/homebase/secrets/` | `homebase:homebase` | `0700` |
+| `/var/lib/homebase-hostd/` | `root:root` | `0700` |
 | `/srv/homebase/` | `homebase:homebase` | `0750` |
 | `/srv/homebase/apps/<id>/` | `homebase:homebase` | `0750` |
 | `/run/homebase/hostd.sock` | `root:homebase` | `0660` |
