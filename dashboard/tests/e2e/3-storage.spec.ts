@@ -125,9 +125,20 @@ test("an application says it needs a disk, and takes the one it is given", async
   await chooser.getByRole("button", { name: DISK_NAME }).click();
 
   await expect(page.getByText(/will use that disk/i)).toBeVisible({ timeout: 60_000 });
-  // Said on screen, not only in a job that scrolls away: existing files do not
-  // move, and it takes effect at the next start.
-  await expect(page.getByText(/stays where it is/i)).toBeVisible();
+
+  // Said twice, deliberately: once in the job that reports what happened, and
+  // once as a standing note on the screen. A job message scrolls away, and
+  // somebody coming back later still needs to know their existing files did not
+  // move. Both are asserted so that removing either one fails here.
+  await expect(page.getByText(/stays where it is/i)).toHaveCount(2);
+  await expect(
+    page.locator("p.message-title", { hasText: /stays where it is/i }),
+    "the job that reports the change does not say existing files stay put",
+  ).toBeVisible();
+  await expect(
+    page.locator("p.muted", { hasText: /stays where it is/i }),
+    "the screen does not say it once the job's message has gone",
+  ).toBeVisible();
 
   await expect(page.getByText(/needs somewhere to keep your files/i)).toBeHidden({
     timeout: 30_000,
