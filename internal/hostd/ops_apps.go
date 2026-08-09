@@ -455,6 +455,9 @@ func (s *AppServices) start(ctx context.Context, params AppRef) (any, error) {
 	if err := s.requireInstalled(ctx, manifest); err != nil {
 		return nil, err
 	}
+	if err := s.requireStorage(manifest); err != nil {
+		return nil, err
+	}
 
 	if err := s.docker.startContainer(ctx, containerName(manifest.ID)); err != nil {
 		// Already running is the desired state.
@@ -503,6 +506,9 @@ func (s *AppServices) restart(ctx context.Context, params AppRef) (any, error) {
 		return nil, err
 	}
 	if err := s.requireInstalled(ctx, manifest); err != nil {
+		return nil, err
+	}
+	if err := s.requireStorage(manifest); err != nil {
 		return nil, err
 	}
 
@@ -809,6 +815,34 @@ func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 	}
 
 	return binds, nil
+}
+
+// requireStorage refuses to start an application whose disk is not there.
+//
+// Checked before Docker is asked, because Docker's answer is not one anybody can
+// act on. Without this, starting an application with its disk unplugged failed
+// with "error while creating mount source path … operation not permitted" and a
+// message telling the user to check the application's logs — when Homebase knew
+// perfectly well that the disk was unplugged and which one it was.
+//
+// The immutable mount point does stop the container being created, so nothing
+// was ever going to be written to the system disk. This is about the difference
+// between refusing and refusing comprehensibly.
+func (s *AppServices) requireStorage(manifest Manifest) error {
+	assignments := map[string]Assignment{}
+	if s.storage != nil {
+		assignments = s.storage.Assignments(manifest.ID)
+	}
+
+	for _, storage := range manifest.Storage {
+		if storage.Type != "user-selected" {
+			continue
+		}
+		if _, err := s.prepareUserSelected(manifest, storage, assignments); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // prepareUserSelected resolves storage the user chose a disk for.

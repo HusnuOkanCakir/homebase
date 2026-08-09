@@ -233,6 +233,14 @@ vm-test-dashboard: ## The milestone's user journey, in a real browser against a 
 vm-test-packages: ## Install, upgrade and purge the .debs on a clean machine
 	@python3 tests/vm/test_packages.py
 
+.PHONY: vm-run
+vm-run: ## Run Homebase on a throwaway VM and leave it running, to click around in
+	@python3 scripts/vm-demo.py
+
+.PHONY: vm-run-destroy
+vm-run-destroy: ## Destroy the machine `make vm-run` created
+	@python3 scripts/vm-demo.py --destroy
+
 .PHONY: vm-test-storage
 vm-test-storage: ## Add a real USB disk, unplug it, reconnect it; nothing may corrupt
 	@python3 tests/vm/test_storage.py

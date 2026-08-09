@@ -123,6 +123,12 @@ func run(log *slog.Logger, addr, dbPath, socket, staticDir string) error {
 
 	server := api.NewServer(authService, jobManager, host, eventRecorder, log, version)
 
+	// Notice a disk filling up before applications start failing to write.
+	// A server that runs out of space does not announce it: applications fail in
+	// whatever way each of them fails, and the common cause is visible only to
+	// somebody who thinks to look.
+	go api.NewSpaceWatcher(host, eventRecorder).Watch(ctx)
+
 	// The dashboard is optional. During development it is served by Vite on
 	// another port, and a missing build directory is not a reason for the API
 	// to refuse to start — a server nobody can reach is harder to diagnose

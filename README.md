@@ -16,12 +16,40 @@ configure backups without ever opening a terminal or learning Linux.
 
 ## Try it
 
-There is no installer yet, so the way to see Homebase working is to run it from source.
-You need **Go 1.23+**, **Node 20+** and **Git**:
+There is no installer yet. There are two ways to see Homebase working, and they answer
+different questions.
+
+### On a throwaway virtual machine — the closest thing to the real product
+
+This installs Homebase from its own Debian packages onto a clean Ubuntu machine, plugs a
+blank 2 GB disk into it, and leaves it running for you to use. Needs QEMU with KVM and
+about 40 GB of free disk:
 
 ```sh
+sudo apt install qemu-system-x86 qemu-utils cloud-image-utils ovmf
 git clone https://github.com/HusnuOkanCakir/homebase.git
 cd homebase
+make vm-run
+```
+
+It prints a URL when it is ready — open it and create an administrator. From there you can
+install an application and use it, prepare the blank disk and give it to File Browser, and
+restart the whole server and watch the page notice.
+
+This is the real thing: `hostd` runs as root, `core` runs as the unprivileged `homebase`
+account, the socket between them is `root:homebase 0660`, and restarting the server restarts
+the VM rather than your laptop.
+
+```sh
+make vm-run-destroy    # when you are finished
+```
+
+### On your own machine — quicker, for developing
+
+Runs both services as you, against a scratch directory under `./run/`. You need **Go 1.23+**,
+**Node 20+** and **Git**:
+
+```sh
 make run
 ```
 
@@ -34,22 +62,11 @@ your machine; without it the list still appears and says it cannot see the conta
 runtime, which is deliberate — "Homebase cannot look" and "there is nothing there" are
 different answers and must not look the same.
 
-That is a development instance, not an installation. Both services run as you rather than
-as `root` and the `homebase` account, so the privilege boundary is not the real one.
-Application data goes under `./run/` instead of `/srv/homebase`, and restarting the server
-is refused on purpose — it would restart *your* machine.
-
-To see the real thing, install the Debian packages on a throwaway virtual machine. This
-needs QEMU with KVM and about 40 GB of free disk:
-
-```sh
-sudo apt install qemu-system-x86 qemu-utils cloud-image-utils ovmf
-make vm-test-packages
-```
-
-That builds the packages, installs them on a clean Ubuntu machine, creates an
-administrator, upgrades in place, reboots, and finally purges them — checking at every step
-that the account and the user's files are still there.
+That is a development instance, not an installation. Both services run as you rather than as
+`root` and the `homebase` account, so the privilege boundary is not the real one. Application
+data goes under `./run/` instead of `/srv/homebase`, restarting the server is refused on
+purpose — it would restart *your* machine — and storage is largely untestable, because
+managing disks needs root.
 
 ### Everything else
 
