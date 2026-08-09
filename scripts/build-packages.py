@@ -90,6 +90,16 @@ if ! getent group homebase >/dev/null; then
 fi
 
 if [ "$1" = "configure" ]; then
+    # The directories hostd itself needs, created here rather than relying on
+    # homebase-core's script. hostd runs under ProtectSystem=strict, so a
+    # directory in ReadWritePaths that does not exist used to stop it starting
+    # at all — and homebase-hostd can be installed without homebase-core.
+    #
+    # `install -d` is idempotent and matches what core's script sets, so
+    # whichever package configures first, both agree.
+    install -d -o root -g homebase -m 0750 /etc/homebase
+    install -d -o homebase -g homebase -m 0750 /var/log/homebase
+
     systemctl daemon-reload >/dev/null 2>&1 || true
     # The socket, not the service: hostd is socket-activated, so it starts on
     # the first connection and is not running the rest of the time.

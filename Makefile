@@ -233,6 +233,10 @@ vm-test-dashboard: ## The milestone's user journey, in a real browser against a 
 vm-test-packages: ## Install, upgrade and purge the .debs on a clean machine
 	@python3 tests/vm/test_packages.py
 
+.PHONY: vm-test-storage
+vm-test-storage: ## Add a real USB disk, unplug it, reconnect it; nothing may corrupt
+	@python3 tests/vm/test_storage.py
+
 .PHONY: vm-test-apps
 vm-test-apps: ## Install an application, use it, reboot, uninstall; data must survive
 	@python3 tests/vm/test_apps.py

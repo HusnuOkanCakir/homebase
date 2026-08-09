@@ -40,6 +40,8 @@ tags:
     description: Long-running operations
   - name: apps
     description: Installing and running applications
+  - name: storage
+    description: Disks, and the locations Homebase manages on them
   - name: events
     description: Structured events and the audit trail
 
@@ -515,6 +517,347 @@ paths:
         "428":
           $ref: "#/components/responses/ConfirmationRequired"
 
+  /storage/disks:
+    get:
+      tags: [storage]
+      summary: List the disks attached to this server
+      description: |
+        Every block device worth showing a person, with what is on it. Requires `storage.read`.
+
+        `system: true` marks the disk holding the running system. Homebase will not erase it,
+        whatever is asked.
+      operationId: listDisks
+      responses:
+        "200":
+          description: The disks attached to this server
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Disk"
+                  total:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /storage/locations:
+    get:
+      tags: [storage]
+      summary: List the storage locations Homebase manages
+      description: |
+        Requires `storage.read`.
+
+        `connected` and `mounted` are reported separately on purpose: a disk that is plugged
+        in but failed to mount is a different problem from one that is not plugged in, and
+        conflating them tells the user to do the wrong thing.
+      operationId: listLocations
+      responses:
+        "200":
+          description: The managed locations
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StorageLocation"
+                  total:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+    post:
+      tags: [storage]
+      summary: Start managing a disk
+      description: |
+        Requires `storage.modify`. Mounts the disk and keeps mounting it at every boot.
+
+        **The disk is named by filesystem UUID, never by device path.** `/dev/sdb` becomes
+        `/dev/sdc` when something else is plugged in first, so an API accepting a device path
+        would be inviting a client to act on whichever disk holds that name today. See
+        [ADR-0013](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0013-storage-identity-and-mounting.md).
+
+        A volume with no UUID cannot be managed. Some FAT and exFAT volumes are affected, and
+        the only remedy is to erase and prepare them.
+      operationId: addLocation
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [uuid, id]
+              properties:
+                uuid:
+                  type: string
+                  description: The filesystem's UUID, from `GET /storage/disks`.
+                id:
+                  type: string
+                  pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+                  description: |
+                    What this location is called on this machine. Becomes a directory name and
+                    part of a systemd unit name.
+                name:
+                  type: string
+                  description: What the user calls it. Defaults to the disk's label.
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "400":
+          description: A missing or unusable field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /storage/locations/{location_id}/remove:
+    post:
+      tags: [storage]
+      summary: Stop managing a disk
+      description: |
+        Requires `storage.modify` and a confirmation naming the location.
+
+        **Nothing on the disk is changed.** The mount unit is removed and the disk is
+        unmounted; every file on it stays exactly where it was.
+      operationId: removeLocation
+      parameters:
+        - $ref: "#/components/parameters/LocationID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NamedConfirmation"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/LocationNotFound"
+        "428":
+          $ref: "#/components/responses/ConfirmationRequired"
+
+  /storage/locations/{location_id}/mount:
+    post:
+      tags: [storage]
+      summary: Mount a location that is connected but not mounted
+      description: Requires `storage.modify`. Takes no parameters.
+      operationId: mountLocation
+      parameters:
+        - $ref: "#/components/parameters/LocationID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "400":
+          description: The request carried settings this endpoint does not accept
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/LocationNotFound"
+
+  /storage/locations/{location_id}/unmount:
+    post:
+      tags: [storage]
+      summary: Unmount a location so the disk can be unplugged safely
+      description: |
+        Requires `storage.modify` and a confirmation naming the location. Applications using
+        the disk must be stopped first; otherwise the unmount fails rather than forcing.
+      operationId: unmountLocation
+      parameters:
+        - $ref: "#/components/parameters/LocationID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NamedConfirmation"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/LocationNotFound"
+        "428":
+          $ref: "#/components/responses/ConfirmationRequired"
+
+  /storage/format:
+    post:
+      tags: [storage]
+      summary: Erase a disk and prepare it for use
+      description: |
+        Requires `storage.modify`. **Everything on the disk is permanently deleted, there is
+        no undo, and no backup is taken first.**
+
+        This is the only operation in Homebase that can destroy data Homebase never created —
+        somebody's photographs, put on the disk before they had Homebase. `confirm` must
+        repeat the disk's UUID, or its device path where it has no filesystem and therefore no
+        UUID. It is checked here and again by `hostd`.
+
+        Refused outright, whatever is confirmed: the disk holding the running system, any
+        volume currently mounted, and any volume Homebase could not read. That last one
+        matters — unreadable and blank are different answers, and only one of them is safe to
+        act on.
+
+        Homebase never selects a disk on the user's behalf, including when there is only one
+        candidate.
+      operationId: formatDisk
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm]
+              properties:
+                uuid:
+                  type: string
+                  description: The filesystem to erase. Preferred where the disk has one.
+                device:
+                  type: string
+                  description: |
+                    The device to erase, for a disk with no filesystem and therefore no UUID.
+                    Resolved by `hostd` against a volume it discovered itself.
+                label:
+                  type: string
+                  maxLength: 16
+                  description: What to call the new filesystem.
+                confirm:
+                  type: string
+                  description: The `uuid`, or the `device` where there is no UUID.
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "400":
+          description: A missing or unusable field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "428":
+          $ref: "#/components/responses/ConfirmationRequired"
+
+  /apps/{app_id}/storage:
+    get:
+      tags: [storage, apps]
+      summary: Where an application keeps its files
+      description: |
+        Each storage location the application declares, and what is behind it. Requires
+        `apps.read`.
+
+        `ready: false` at the top level means the application cannot start: one of its
+        locations needs a disk chosen, or the disk it was given is not connected.
+      operationId: getAppStorage
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+      responses:
+        "200":
+          description: The application's storage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationStorage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+
+    post:
+      tags: [storage, apps]
+      summary: Choose which disk an application keeps its files on
+      description: |
+        Requires `apps.manage`.
+
+        Takes effect the next time the application starts. **Nothing already written is
+        moved**, and nothing is deleted — data on the previous location stays where it is.
+
+        Only `user-selected` storage can be assigned. Storage Homebase places itself holds the
+        application's own configuration, and putting that on a removable disk would mean the
+        application cannot start without it — including the configuration recording which disk
+        it wants.
+      operationId: assignAppStorage
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [storage_id, location]
+              properties:
+                storage_id:
+                  type: string
+                  description: Which of the application's declared locations this is.
+                location:
+                  type: string
+                  description: A managed storage location's id.
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "400":
+          description: A missing field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/AppNotFound"
+
   /events:
     get:
       tags: [events]
@@ -624,6 +967,14 @@ components:
       schema:
         type: string
         pattern: "^[a-z][a-z0-9-]{1,38}[a-z0-9]$"
+    LocationID:
+      name: location_id
+      in: path
+      required: true
+      description: A managed storage location's id.
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
     Cursor:
       name: cursor
       in: query
@@ -644,6 +995,12 @@ components:
       description: |
         This server has no such application. Not "not installed" — the manifest is not on the
         machine at all, and no package ships it.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    LocationNotFound:
+      description: This server has no storage location by that name.
       content:
         application/json:
           schema:
@@ -929,6 +1286,181 @@ components:
             reboot confirmation is the hostname: a `true` a client can send by default is not a
             confirmation, and one that names its target cannot be replayed against a different
             application.
+
+    Disk:
+      type: object
+      additionalProperties: false
+      required: [device, path, size_bytes, removable, system, volumes]
+      properties:
+        device:
+          type: string
+          description: |
+            The kernel's current name for it. **Never store this.** It is assigned in
+            discovery order, so a disk unplugged as `sda` can come back as `sdb`.
+          examples: ["sdb"]
+        path:
+          type: string
+          examples: ["/dev/sdb"]
+        model:
+          type: string
+        vendor:
+          type: string
+        size_bytes:
+          type: integer
+        removable:
+          type: boolean
+        transport:
+          type: string
+          enum: [usb, sata, nvme, virtio, sd-card, ""]
+          description: How it is attached. "the USB one" is how people identify a disk.
+        system:
+          type: boolean
+          description: |
+            This disk holds the running system. Homebase will not erase it, whatever is asked
+            and however it is confirmed.
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Volume"
+
+    Volume:
+      type: object
+      additionalProperties: false
+      required: [device, path, size_bytes, unreadable, read_only]
+      properties:
+        device:
+          type: string
+        path:
+          type: string
+        uuid:
+          type: string
+          description: |
+            The filesystem's identity, and the only thing Homebase stores to find a disk
+            again. Absent means this volume **cannot be assigned to an application**.
+        label:
+          type: string
+        filesystem:
+          type: string
+          description: Empty means it was read and nothing recognisable was found.
+          examples: ["ext4", "vfat", "ntfs", "exfat", "btrfs", "xfs", "crypto_LUKS"]
+        unreadable:
+          type: boolean
+          description: |
+            Homebase could not read this volume. **Not the same as an empty `filesystem`**,
+            which means it was read and found blank. Conflating the two would let a disk
+            nobody can see the contents of be described as empty, and then offered for
+            erasure.
+        size_bytes:
+          type: integer
+        mount_point:
+          type: string
+        read_only:
+          type: boolean
+
+    StorageLocation:
+      type: object
+      additionalProperties: false
+      required: [id, name, uuid, mount_point, connected, mounted, read_only, added_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        uuid:
+          type: string
+        filesystem:
+          type: string
+        label:
+          type: string
+        added_at:
+          type: string
+          format: date-time
+        mount_point:
+          type: string
+        connected:
+          type: boolean
+          description: The disk is plugged in.
+        mounted:
+          type: boolean
+          description: |
+            And usable. Separate from `connected` because a disk that is present but failed to
+            mount is a different problem, with a different remedy.
+        read_only:
+          type: boolean
+        total_bytes:
+          type: integer
+        available_bytes:
+          type: integer
+          description: |
+            Free space excluding blocks reserved for root, which a user cannot use. On a
+            default ext4 that reserve is 5 % — 200 GB on a 4 TB disk.
+        device:
+          type: string
+          description: Where it currently appears, for diagnostics. Never stored.
+
+    ApplicationStorage:
+      type: object
+      additionalProperties: false
+      required: [id, name, storage, ready]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        ready:
+          type: boolean
+          description: |
+            Every location this application needs is available. When false the application
+            cannot start, and will refuse rather than run without its files.
+        storage:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApplicationStorageSlot"
+
+    ApplicationStorageSlot:
+      type: object
+      additionalProperties: false
+      required: [id, type, mount_path, read_only, ready]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [private, user-selected]
+          description: |
+            `private` is placed by Homebase under the application's own directory.
+            `user-selected` needs a disk chosen by the user before the application can run.
+        description:
+          type: string
+          description: Shown to the user when they are asked to choose a disk for this.
+        mount_path:
+          type: string
+          description: Where it appears inside the application.
+        read_only:
+          type: boolean
+        location:
+          type: string
+          description: The managed location assigned to this slot. Empty means none chosen.
+        location_name:
+          type: string
+        ready:
+          type: boolean
+        path:
+          type: string
+          description: Where the data actually lives, when that is resolvable.
+
+    NamedConfirmation:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm:
+          type: string
+          description: |
+            The id of the thing being acted on. The name rather than a boolean, for the same
+            reason everywhere else in Homebase: a `true` a client can send by default is not a
+            confirmation, and one that names its target cannot be replayed against a different
+            disk.
 
     EventList:
       type: object

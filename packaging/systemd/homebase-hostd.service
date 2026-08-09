@@ -11,6 +11,19 @@ ExecStart=/usr/libexec/homebase/hostd
 Restart=on-failure
 RestartSec=2s
 
+# Give up rather than spin.
+#
+# Without a limit, a hostd that cannot start restarts every two seconds for
+# ever: the journal fills with the same error, and because the socket is owned
+# by systemd rather than by the service, every client request *connects* and
+# then hangs waiting for a reply that never comes. A caller sees a timeout
+# rather than a failure, which is the least diagnosable outcome available.
+#
+# Five attempts and then stay failed. `systemctl status` on a failed unit says
+# what went wrong; a crash-loop says it 700 times and buries the first one.
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
 # hostd must be root: it mounts disks, controls containers and restarts the
 # machine. Everything below narrows what "root" means here.
 #
@@ -24,7 +37,15 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/etc/homebase /var/lib/homebase /srv/homebase /run/homebase /var/log/homebase
+# The leading `-` makes a missing path non-fatal.
+#
+# Without it, ProtectSystem=strict refuses to set up the mount namespace and
+# hostd exits 226/NAMESPACE before running a line of Go — so a directory that
+# has not been created yet stops the privileged service entirely. That is not
+# hypothetical: /etc/homebase is created by homebase-core's maintainer script,
+# so installing homebase-hostd on its own produced a service that could never
+# start, and the error named a directory rather than the missing package.
+ReadWritePaths=-/etc/homebase -/var/lib/homebase -/srv/homebase -/run/homebase -/var/log/homebase
 
 # AF_UNIX for the socket; AF_NETLINK for reading network state later. No
 # AF_INET: hostd never talks to the network, and should not be able to.
