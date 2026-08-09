@@ -7,7 +7,7 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–3 complete. Milestone 4 next.**
+**Current position: Milestones 0–4 complete. Milestone 5 next.**
 
 ---
 
@@ -133,7 +133,7 @@ That costs something real, and the ADR says so: **a user cannot install an appli
 Homebase does not ship.** Widening the catalogue is a package change, which is what makes
 the set of installable applications reviewable in a diff.
 
-### Milestone 4 — Storage ← *in progress*
+### Milestone 4 — Storage ✅
 
 Its own milestone because storage mistakes are the ones that destroy data.
 
@@ -141,11 +141,17 @@ Its own milestone because storage mistakes are the ones that destroy data.
 - [x] Managed storage locations; assigning them to applications
 - [x] Disconnected-disk handling; read-only reporting
 - [x] Explicit confirmation before any format; never auto-select between disks
-- [ ] Space alerts
-- [ ] The browser journey
+- [x] Space alerts, as events, before applications start failing to write
+- [x] `make vm-run` — Homebase on a throwaway VM you can actually use
 
 **Done when:** a USB disk can be added as Jellyfin's media storage, removed and reconnected
-without corrupting anything.
+without corrupting anything. ✅
+
+Verified against a real disk, hot-plugged over QEMU's monitor and **pulled out without
+warning while mounted** — which is the case that destroys data, as opposed to unmounting,
+which is the tidy one. The exit condition is checked for an application as well as for a
+disk: File Browser installed onto the disk, the disk yanked, the application refusing to
+start and naming the disk to plug back in, then reconnected with everything intact.
 
 The load-bearing decision is
 [ADR-0013](docs/decisions/0013-storage-identity-and-mounting.md): a disk is identified by
@@ -157,7 +163,7 @@ a device path was by then pointing at nothing. And a malformed `fstab` entry sto
 and drops the machine to an emergency shell, which on a laptop in a cupboard is a brick
 caused by a disk somebody unplugged. Every unit Homebase writes carries `nofail`.
 
-### Milestone 5 — Backup and restore
+### Milestone 5 — Backup and restore ← *next*
 
 Before the installer ships, because real users start storing data immediately.
 

@@ -6,13 +6,13 @@ Homebase installs a complete server operating system onto a spare machine, then 
 the way behind a local web dashboard. You install applications, attach storage, and
 configure backups without ever opening a terminal or learning Linux.
 
-> **Status: pre-alpha. Milestones 0–3 complete.**
+> **Status: pre-alpha. Milestones 0–4 complete.**
 > There is no installable release yet, and nothing here should be pointed at data you care
 > about. What works: setting up an administrator, reading live system information,
-> restarting the machine, and installing, running and removing applications from a small
-> catalogue — all from a browser. What does not exist yet: an installer, storage
-> management, and backups. Nothing here backs anything up, so nothing here should hold the
-> only copy of anything. See the [roadmap](ROADMAP.md).
+> restarting the machine, installing and removing applications from a small catalogue, and
+> attaching a disk and giving it to an application — all from a browser. What does not exist
+> yet: an installer, and backups. Nothing here backs anything up, so nothing here should hold
+> the only copy of anything. See the [roadmap](ROADMAP.md).
 
 ## Try it
 
