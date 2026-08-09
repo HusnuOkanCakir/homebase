@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -95,7 +97,17 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, 
 // implementation and tells the user nothing they can act on.
 func (s *Server) writeInternal(w http.ResponseWriter, r *http.Request, err error) {
 	id, _ := r.Context().Value(requestIDKey).(string)
-	s.log.Error("request failed",
+
+	// A client that went away is not a fault. It happens constantly and by
+	// design: the dashboard polls, and every navigation and every reboot
+	// cancels whatever was in flight. Logging those at error level fills the
+	// journal with entries nobody can act on, which is how people learn to
+	// scroll past the ones they can.
+	level := slog.LevelError
+	if errors.Is(err, context.Canceled) || errors.Is(r.Context().Err(), context.Canceled) {
+		level = slog.LevelDebug
+	}
+	s.log.Log(r.Context(), level, "request failed",
 		"error", err, "request_id", id, "path", r.URL.Path, "method", r.Method)
 
 	s.writeError(w, r, http.StatusInternalServerError, apiError{
