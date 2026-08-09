@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, NetworkError, type User } from "./api";
 import { Setup } from "./views/Setup";
 import { Login } from "./views/Login";
-import { Overview } from "./views/Overview";
+import { Dashboard } from "./views/Dashboard";
 import { Message } from "./components/Message";
 
 type Screen =
@@ -102,7 +102,7 @@ export function App() {
       return <Login onSignedIn={signedIn} />;
 
     case "signed-in":
-      return <Overview user={screen.user} onSignOut={() => void signOut()} />;
+      return <Dashboard user={screen.user} onSignOut={() => void signOut()} />;
   }
 }
 

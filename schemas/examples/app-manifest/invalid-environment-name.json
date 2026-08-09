@@ -1,0 +1,22 @@
+{
+  "manifest_version": 1,
+  "id": "bad-env",
+  "name": "Bad Environment",
+  "container": {
+    "image": "example/app",
+    "version": "1.0.0",
+    "environment": {
+      "NOT A NAME": "value"
+    }
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config"
+    }
+  ],
+  "health": {
+    "type": "none"
+  }
+}

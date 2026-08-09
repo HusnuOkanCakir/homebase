@@ -1,88 +1,31 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api, isTerminal, NetworkError, type Job, type SystemInfo, type User } from "../api";
+import { useState } from "react";
+import { api, NetworkError, type Job, type SystemInfo } from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
 import { bytes, duration, percentage } from "../format";
 
-const REFRESH_MS = 5000;
-
 interface Props {
-  user: User;
-  onSignOut: () => void;
+  system: SystemInfo;
+  onRebootStarted: (job: Job) => void;
 }
 
-export function Overview({ user, onSignOut }: Props) {
-  const [system, setSystem] = useState<SystemInfo | null>(null);
-  const [error, setError] = useState<ReturnType<typeof describeError> | null>(null);
-  const [rebooting, setRebooting] = useState<Job | null>(null);
+export function Overview({ system, onRebootStarted }: Props) {
   const [confirming, setConfirming] = useState(false);
 
-  const refresh = useCallback(async () => {
-    try {
-      setSystem(await api.system());
-      setError(null);
-    } catch (caught) {
-      setError(describeError(caught));
-    }
-  }, []);
-
-  useEffect(() => {
-    // setState runs after the fetch resolves, not synchronously in the effect
-    // body — the rule cannot see through the async boundary.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh();
-    // Polled rather than pushed. On a LAN, five seconds is imperceptible, and
-    // it avoids a websocket that would have to be reconnected every time the
-    // server restarts — which, on this screen, it is expected to.
-    const timer = setInterval(() => void refresh(), REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [refresh]);
-
-  if (rebooting) {
-    return <Restarting job={rebooting} onBack={() => void refresh().then(() => setRebooting(null))} />;
-  }
-
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>{system?.hostname ?? "Homebase"}</h1>
-        <div className="app-header-actions">
-          <span className="muted">{user.username}</span>
-          <button className="quiet" onClick={onSignOut}>
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      <main className="app-main">
-        {error ? (
-          <Message
-            tone="error"
-            title={error.title}
-            detail={error.detail}
-            recovery={error.recovery}
-          />
-        ) : null}
-
-        {system ? (
-          <>
-            <SystemCard system={system} />
-            <DangerCard
-              hostname={system.hostname}
-              open={confirming}
-              onOpen={() => setConfirming(true)}
-              onCancel={() => setConfirming(false)}
-              onConfirmed={(job) => {
-                setConfirming(false);
-                setRebooting(job);
-              }}
-            />
-          </>
-        ) : (
-          !error && <p className="muted">Reading your server…</p>
-        )}
-      </main>
-    </div>
+    <>
+      <SystemCard system={system} />
+      <DangerCard
+        hostname={system.hostname}
+        open={confirming}
+        onOpen={() => setConfirming(true)}
+        onCancel={() => setConfirming(false)}
+        onConfirmed={(job) => {
+          setConfirming(false);
+          onRebootStarted(job);
+        }}
+      />
+    </>
   );
 }
 
@@ -268,89 +211,5 @@ function DangerCard({ hostname, open, onOpen, onCancel, onConfirmed }: DangerPro
         </button>
       </div>
     </section>
-  );
-}
-
-/**
- * The screen shown while the server is away.
- *
- * The connection dies with the machine, so the dashboard cannot watch the job
- * finish. It waits for the server to answer again and then asks what happened —
- * which is the same thing core does internally, for the same reason.
- */
-function Restarting({ job, onBack }: { job: Job; onBack: () => void }) {
-  const [status, setStatus] = useState<"restarting" | "back">("restarting");
-  const [resolved, setResolved] = useState<Job | null>(null);
-  const wentAway = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
-      while (!cancelled) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        if (cancelled) return;
-
-        try {
-          await api.health();
-          // Only trust "it is back" after we have seen it go away. Immediately
-          // after asking for a restart the server is still up, and treating
-          // that as recovery would declare success before anything happened.
-          if (wentAway.current) {
-            if (job.job_id) {
-              try {
-                setResolved(await api.job(job.job_id));
-              } catch {
-                // The job is gone or we are signed out; the restart itself
-                // still succeeded.
-              }
-            }
-            setStatus("back");
-            return;
-          }
-        } catch {
-          wentAway.current = true;
-        }
-      }
-    };
-
-    void poll();
-    return () => {
-      cancelled = true;
-    };
-  }, [job.job_id]);
-
-  return (
-    <main className="centred">
-      <div className="card">
-        {status === "restarting" ? (
-          <>
-            <h1>Restarting…</h1>
-            <p className="muted">
-              Your server is restarting. This usually takes a minute or two. You do not need
-              to do anything — this page will notice when it is back.
-            </p>
-            <div className="spinner" aria-label="Waiting for the server" />
-          </>
-        ) : (
-          <>
-            <h1>Your server is back</h1>
-            {resolved && isTerminal(resolved.state) ? (
-              <Message
-                tone={resolved.state === "succeeded" ? "info" : "error"}
-                title={resolved.message ?? "The restart finished."}
-                detail={resolved.error?.detail}
-                recovery={resolved.error?.recovery}
-              />
-            ) : (
-              <p className="muted">It restarted and is answering again.</p>
-            )}
-            <button className="primary" onClick={onBack}>
-              Continue
-            </button>
-          </>
-        )}
-      </div>
-    </main>
   );
 }

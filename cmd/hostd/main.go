@@ -39,6 +39,10 @@ func main() {
 		socketPath = flag.String("socket", defaultSocket, "Unix socket to listen on")
 		auditPath  = flag.String("audit-log", defaultAuditLog, "append-only audit log")
 		peerUser   = flag.String("peer-user", defaultPeerUser, "the unprivileged user permitted to connect")
+		catalogue  = flag.String("catalogue", hostd.DefaultCatalogueDir, "directory of application manifests")
+		dockerSock = flag.String("docker-socket", "", "Docker socket (default /var/run/docker.sock)")
+		appData    = flag.String("app-data", hostd.DefaultAppDataRoot, "directory holding application data")
+		stateDir   = flag.String("state-dir", hostd.DefaultStateDir, "hostd's own state directory")
 		describe   = flag.Bool("describe", false, "print the operation registry as JSON and exit")
 		version    = flag.Bool("version", false, "print the version and exit")
 	)
@@ -46,6 +50,16 @@ func main() {
 
 	registry := hostd.NewRegistry()
 	hostd.RegisterSystemOperations(registry)
+
+	// The catalogue is read at startup from root-owned files on disk. It is what
+	// bounds the set of containers this machine can run, and core cannot add to
+	// it — see ADR-0012.
+	apps := hostd.NewCatalogue(*catalogue)
+	if err := apps.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "hostd: "+err.Error())
+		os.Exit(1)
+	}
+	hostd.RegisterAppOperations(registry, hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir))
 
 	// --describe needs no socket, no root and no audit log. It exists so that
 	// the privileged surface can be inspected — by a reviewer, by the docs
@@ -68,13 +82,14 @@ func main() {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	if err := run(log, registry, *socketPath, *auditPath, *peerUser); err != nil {
+	if err := run(log, registry, apps, *socketPath, *auditPath, *peerUser); err != nil {
 		log.Error("hostd failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, registry *hostd.Registry, socketPath, auditPath, peerUser string) error {
+func run(log *slog.Logger, registry *hostd.Registry, apps *hostd.Catalogue,
+	socketPath, auditPath, peerUser string) error {
 	if os.Geteuid() != 0 {
 		// Not fatal: it is useful to run hostd unprivileged while developing,
 		// and the operations that need root will fail on their own terms with a
@@ -115,8 +130,16 @@ func run(log *slog.Logger, registry *hostd.Registry, socketPath, auditPath, peer
 	server := hostd.NewServer(registry, hostd.NewAuditor(auditFile), log, uid)
 	httpServer := server.HTTPServer()
 
+	// A rejected manifest is reported rather than merely absent: "Jellyfin is
+	// missing from the list" is far harder to diagnose than "Jellyfin's manifest
+	// is invalid, and here is why".
+	for name, reason := range apps.Rejected() {
+		log.Error("rejected an application manifest", "file", name, "reason", reason)
+	}
+
 	log.Info("hostd listening",
 		"socket", listener.Addr().String(),
+		"applications", len(apps.IDs()),
 		"socket_activated", activated,
 		"operations", len(registry.Names()),
 		"peer_user", peerUser,

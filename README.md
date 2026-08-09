@@ -6,12 +6,13 @@ Homebase installs a complete server operating system onto a spare machine, then 
 the way behind a local web dashboard. You install applications, attach storage, and
 configure backups without ever opening a terminal or learning Linux.
 
-> **Status: pre-alpha. Milestones 0, 1 and 2 complete.**
+> **Status: pre-alpha. Milestones 0–3 complete.**
 > There is no installable release yet, and nothing here should be pointed at data you care
-> about. `hostd`, `core` and the dashboard exist and work — you can set up an administrator,
-> read live system information and restart the machine from a browser — but there is no
-> installer, no applications, no storage management and no backups. See the
-> [roadmap](ROADMAP.md).
+> about. What works: setting up an administrator, reading live system information,
+> restarting the machine, and installing, running and removing applications from a small
+> catalogue — all from a browser. What does not exist yet: an installer, storage
+> management, and backups. Nothing here backs anything up, so nothing here should hold the
+> only copy of anything. See the [roadmap](ROADMAP.md).
 
 ## Try it
 
@@ -28,9 +29,15 @@ Then open **<http://127.0.0.1:8080>**. It will ask you to create an administrato
 name, and a password of twelve characters or more — and then show you live information
 about the machine you are sitting at. `make run-fresh` starts over with an empty database.
 
+Under **Applications** you can install something from the catalogue. That needs Docker on
+your machine; without it the list still appears and says it cannot see the container
+runtime, which is deliberate — "Homebase cannot look" and "there is nothing there" are
+different answers and must not look the same.
+
 That is a development instance, not an installation. Both services run as you rather than
-as `root` and the `homebase` account, so the privilege boundary is not the real one, and
-restarting is refused on purpose — it would restart *your* machine.
+as `root` and the `homebase` account, so the privilege boundary is not the real one.
+Application data goes under `./run/` instead of `/srv/homebase`, and restarting the server
+is refused on purpose — it would restart *your* machine.
 
 To see the real thing, install the Debian packages on a throwaway virtual machine. This
 needs QEMU with KVM and about 40 GB of free disk:
@@ -63,6 +70,7 @@ place a reboot is a reboot:
 | `make vm-test-hostd` | `hostd` under real systemd — socket permissions, sandbox, audit log |
 | `make vm-test-core` | The API slice: setup, sign in, read the machine, restart it |
 | `make vm-test-dashboard` | The whole journey in a browser, including a real reboot |
+| `make vm-test-apps` | Install an application, use it, reboot, remove it — the data must survive |
 | `make vm-test-packages` | Install, upgrade, reboot and purge the `.deb`s |
 
 ## What it is
@@ -72,7 +80,9 @@ place a reboot is a reboot:
 - **Whole-disk install.** Boot a USB stick, pick a disk, wait. The result is a server, not a
   desktop with extras.
 - **Applications, not containers.** Curated, tested app manifests — you choose "Jellyfin",
-  not an image tag and a volume mount.
+  not an image tag and a volume mount. The trade is deliberate and it is a real one: you
+  can install what Homebase ships and nothing else
+  ([ADR-0012](docs/decisions/0012-hostd-owns-the-catalogue.md)).
 - **Recoverable by design.** Every meaningful change is a job that can be previewed,
   verified and rolled back. Backups and restore are core features, not add-ons.
 

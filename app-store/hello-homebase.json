@@ -1,0 +1,60 @@
+{
+  "manifest_version": 1,
+  "revision": 1,
+  "id": "hello-homebase",
+  "name": "Hello Homebase",
+  "summary": "A tiny test application. It shows you which server answered.",
+  "homepage": "https://github.com/traefik/whoami",
+  "license": "MIT",
+
+  "container": {
+    "image": "traefik/whoami",
+    "version": "v1.10.4"
+  },
+
+  "network": {
+    "internal_port": 80,
+    "protocol": "http",
+    "path": "/"
+  },
+
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config",
+      "description": "Nothing important — this application keeps no state.",
+      "backup": false
+    }
+  ],
+
+  "health": {
+    "type": "http",
+    "path": "/health",
+    "interval_seconds": 30,
+    "start_period_seconds": 10
+  },
+
+  "permissions": {
+    "read_only_root": true
+  },
+
+  "resources": {
+    "memory_limit_bytes": 67108864,
+    "memory_minimum_bytes": 33554432
+  },
+
+  "capabilities": [
+    {
+      "name": "hello.get_status",
+      "description": "Whether the test application is answering.",
+      "risk": "read",
+      "confirmation": "none",
+      "rollback": null
+    }
+  ],
+
+  "requires": {
+    "architectures": ["amd64", "arm64"]
+  }
+}

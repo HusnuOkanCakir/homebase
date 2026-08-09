@@ -2,17 +2,19 @@
 
 Turn an old laptop into a home server you can actually manage.
 
-!!! warning "Pre-alpha — Milestones 0, 1 and 2 complete"
+!!! warning "Pre-alpha — Milestones 0–3 complete"
 
     There is no installable release yet — no installer. `hostd`, `core` and the dashboard
-    work and install from Debian packages: you can set up an administrator, read live
-    system information and restart the machine from a browser. There are no applications,
-    no storage management and no backups.
+    work and install from Debian packages: you can set up an administrator, read live system
+    information, restart the machine, and install, run and remove applications from a small
+    catalogue — all from a browser.
+
+    There is **no storage management and no backup**. Nothing here backs anything up, so
+    nothing here should hold the only copy of anything.
 
     Much of what follows still describes intent rather than behaviour — everything from
-    Milestone 3 onward. Where the documentation and the implementation eventually disagree,
-    the documentation is the target and the gap is a bug. Nothing here should be pointed at
-    data you care about.
+    Milestone 4 onward. Where the documentation and the implementation eventually disagree,
+    the documentation is the target and the gap is a bug.
 
 ## The idea
 

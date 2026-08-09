@@ -31,6 +31,7 @@ from vmctl import (  # noqa: E402
     destroy,
     fail,
     info,
+    install_docker,
     ok,
     ssh,
     start,
@@ -97,10 +98,12 @@ def install(vm: VM, built: dict[str, Path]) -> None:
              "--home-dir", "/var/lib/homebase", "--shell", "/usr/sbin/nologin",
              "homebase"], check=False)
     ssh(vm, ["sudo", "mkdir", "-p", "/usr/libexec/homebase", "/etc/homebase",
-             "/var/lib/homebase", "/srv/homebase", "/var/log/homebase",
-             "/usr/share/homebase/dashboard"])
+             "/var/lib/homebase", "/srv/homebase", "/srv/homebase/apps",
+             "/var/log/homebase", "/usr/share/homebase/dashboard",
+             "/usr/share/homebase/apps"])
     ssh(vm, ["sudo", "chown", "homebase:homebase",
-             "/var/lib/homebase", "/srv/homebase", "/var/log/homebase"])
+             "/var/lib/homebase", "/srv/homebase", "/srv/homebase/apps",
+             "/var/log/homebase"])
 
     for name in ("core", "hostd"):
         copy_to(vm, built[name], f"/usr/libexec/homebase/{name}", mode="0755")
@@ -113,6 +116,15 @@ def install(vm: VM, built: dict[str, Path]) -> None:
     ssh(vm, ["sudo", "tar", "-xzf", "/tmp/dashboard.tar.gz",
              "-C", "/usr/share/homebase/dashboard"])
     ssh(vm, ["rm", "-f", "/tmp/dashboard.tar.gz"])
+
+    # The application catalogue, left owned by root — that is the point of it.
+    # These are the same manifests the homebase-apps package installs; sent
+    # directly here because this test builds from the tree rather than from a
+    # package, and test_packages.py covers the packaged path.
+    for manifest in sorted((REPO_ROOT / "app-store").glob("*.json")):
+        write_file(vm, f"/usr/share/homebase/apps/{manifest.name}",
+                   manifest.read_text(), mode="0644")
+    ok(f"{len(list((REPO_ROOT / 'app-store').glob('*.json')))} application manifests")
 
     for unit in ("homebase-hostd.service", "homebase-hostd.socket", "homebase-core.service"):
         write_file(vm, f"/etc/systemd/system/{unit}",
@@ -167,7 +179,8 @@ def verify_reachable(vm: VM) -> None:
 
 def run_browser_tests(vm: VM) -> None:
     step("Running the browser journey")
-    info("first-run setup → overview → restart confirmation → real reboot → sign out")
+    info("first-run setup → overview → restart → real reboot → sign out")
+    info("then: install an application → use it → reboot → remove it, data kept")
     print()
 
     env = {
@@ -226,6 +239,7 @@ def main() -> int:
         wait_for_ssh(vm)
         wait_for_boot_complete(vm)
 
+        install_docker(vm, prepull=["traefik/whoami:v1.10.4"])
         install(vm, built)
         verify_reachable(vm)
         run_browser_tests(vm)

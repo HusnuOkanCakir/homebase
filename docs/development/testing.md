@@ -106,23 +106,50 @@ Required where applicable to the change:
 - [ ] Existing user data survives an upgrade
 - [ ] Failure messages are comprehensible to a non-technical user
 
-## Later milestones
+## The VM tests
 
-**`make vm-test-hostd`** runs `hostd` under real systemd in a VM and checks the things a
-unit test cannot: the socket's mode and group, systemd's sandbox actually applying, an
-unprivileged user being refused by the *kernel* rather than by our code, and the service
-surviving the reboot it performed itself. Each of those is a property of the deployment, and
-each would pass a unit test while being wrong in production.
+These need QEMU/KVM and roughly 40 GB of free disk. Each one creates a machine, exercises
+it, and destroys it — including on failure, after collecting diagnostics.
 
-**`make vm-test-dashboard`** drives the milestone's exit condition through a real browser
-against a real machine, including a real reboot. It is not a mocked API: the exit
-condition is phrased as something a person does, and a mock would let every assertion
-pass while the thing a user touches was broken. Two bugs were found this way that no
-unit test could have reached — `fetch` having no default timeout, so a half-restarted
-machine left the page spinning forever, and API responses carrying no `Cache-Control`.
+**`make vm-test-hostd`** runs `hostd` under real systemd and checks the things a unit test
+cannot: the socket's mode and group, systemd's sandbox actually applying, an unprivileged
+user being refused by the *kernel* rather than by our code, and the service surviving the
+reboot it performed itself. Each of those is a property of the deployment, and each would
+pass a unit test while being wrong in production.
 
-**VM tests (Milestone 1)** need QEMU/KVM and roughly 40 GB of free disk. `make vm-create`,
-`vm-test`, `vm-destroy`.
+**`make vm-test-dashboard`** drives the milestone exit conditions through a real browser
+against a real machine, including a real reboot. It is not a mocked API: those conditions
+are phrased as things a person does, and a mock would let every assertion pass while the
+thing a user touches was broken.
+
+**`make vm-test-apps`** installs an application, uses it over HTTP, restarts the machine,
+and removes it. The assertion it exists for is that a file written into the application's
+data directory is still there afterwards — a test that only checked the container was gone
+would pass on an implementation that wiped the disk. It also reads `hostd`'s audit log to
+confirm nothing describing a container ever crossed the socket, because
+[ADR-0012](../decisions/0012-hostd-owns-the-catalogue.md) is a claim about the socket.
+
+**`make vm-test-packages`** installs, upgrades, reinstalls, reboots and purges the `.deb`s
+on a clean machine, with a real administrator account and a real file intact throughout —
+including after purge, which deliberately keeps user data.
+
+### What they have caught that nothing else would
+
+Not a boast. Each of these passed every unit test in the repository at the time, and the
+list is the argument for why these tests are worth their twelve minutes.
+
+| Test | Bug |
+|---|---|
+| `vm-test-dashboard` | `fetch` has no default timeout, so a half-restarted machine left the page spinning for ever |
+| `vm-test-dashboard` | API responses carried no `Cache-Control`, so a polled endpoint could freeze at a cached value |
+| `vm-test-dashboard` | An application the user stopped read "Stopped unexpectedly" — Docker records nothing about who stopped a container |
+| `vm-test-apps` | `/srv/homebase/apps/<id>` was `0750 root:root`, so `core` could not traverse into it to back the data up. Silent |
+| `vm-test-packages` | Restarting `hostd` deleted its own socket, while the socket unit went on reporting itself healthy. **Every upgrade restarts `hostd`** |
+| `vm-test-core` | Both units declared `StateDirectory=homebase` as different users, so `core`'s database became root-owned |
+
+The pattern is worth naming: every one is a property of the *deployment* rather than of the
+code, and every one is silent. Nothing crashed, no test went red, and `systemctl status`
+reported success in three of them.
 
 **Installer tests (Milestone 6)** run against fixtures including a Windows-style disk, because
 that is what most target machines actually contain. An installer change is never merged on the

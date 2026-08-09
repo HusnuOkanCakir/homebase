@@ -67,8 +67,13 @@ def build(version: str) -> list[Path]:
         raise VMError("make packages failed", (result.stderr or result.stdout)[-800:])
 
     packages = sorted((REPO_ROOT / "dist").glob(f"*_{version}_*.deb"))
-    if len(packages) != 3:
-        raise VMError(f"expected 3 packages, found {len(packages)}")
+    # hostd, core, apps, dashboard. Named rather than counted, so a package that
+    # silently stops being built is a failure here rather than a surprise on
+    # somebody's machine.
+    expected = {"homebase-hostd", "homebase-core", "homebase-apps", "homebase-dashboard"}
+    built = {p.name.split("_")[0] for p in packages}
+    if built != expected:
+        raise VMError(f"expected {sorted(expected)}, built {sorted(built)}")
     for p in packages:
         ok(p.name)
     return packages
@@ -96,11 +101,15 @@ def install(vm: VM, packages: list[Path], what: str) -> None:
     for package in packages:
         upload(vm, package, f"/tmp/{package.name}")
 
-    # One dpkg invocation so inter-package dependencies resolve. `set -e` in the
-    # maintainer scripts means any failure surfaces here rather than silently.
+    # apt rather than dpkg, because homebase-apps depends on a container runtime
+    # and dpkg does not resolve dependencies — it would report them unmet and
+    # stop. This is also closer to what a user does, and it is the path where an
+    # unsatisfiable dependency actually shows up.
     names = " ".join(f"/tmp/{p.name}" for p in packages)
-    result = ssh(vm, ["sudo", "sh", "-c", f"DEBIAN_FRONTEND=noninteractive dpkg -i {names}"],
-                 check=False)
+    result = ssh(vm, ["sudo", "sh", "-c",
+                      "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
+                      f"--allow-downgrades {names}"],
+                 check=False, timeout=1200)
     if result.returncode != 0:
         raise TestFailure(f"dpkg failed\n{result.stdout}\n{result.stderr}")
 
@@ -152,6 +161,41 @@ def verify_installed(vm: VM) -> None:
     for service in ("homebase-hostd.socket", "homebase-core.service"):
         state = ssh(vm, ["systemctl", "is-enabled", service], check=False).stdout.strip()
         check(state == "enabled", f"{service} is enabled at boot ({state})")
+
+    verify_socket_survives_a_restart(vm)
+
+
+def verify_socket_survives_a_restart(vm: VM) -> None:
+    """Restarting hostd must not destroy the socket.
+
+    systemd removes a RuntimeDirectory when a service stops, and the socket the
+    *socket unit* owns lives inside hostd's. So stopping hostd for a moment
+    deleted /run/homebase/hostd.sock while homebase-hostd.socket carried on
+    reporting "active (running)" against a path that no longer existed — nothing
+    could connect again, and nothing said so.
+
+    Every upgrade restarts hostd, so this is not a corner. It is checked here
+    rather than only in the upgrade step because the failure is silent: the units
+    all look healthy afterwards, and the only symptom is core reporting that it
+    cannot reach the part of itself that manages the server, for ever.
+    """
+    # Activate it first: the directory is only at risk once the service has run.
+    ssh(vm, ["curl", "--silent", "--max-time", "10", "-o", "/dev/null",
+             "http://127.0.0.1:8080/api/v1/health"], check=False)
+    ssh(vm, ["sudo", "systemctl", "restart", "homebase-hostd.service"], check=False)
+
+    perms = ssh(vm, ["stat", "-c", "%a %U %G", "/run/homebase/hostd.sock"],
+                check=False)
+    check(perms.returncode == 0 and perms.stdout.strip() == "660 root homebase",
+          f"the socket survives restarting hostd ({perms.stdout.strip() or 'gone'})",
+          "systemd removed the RuntimeDirectory and the socket inside it. "
+          "The socket unit still reports itself as listening, so nothing looks "
+          "wrong — but the privilege boundary is unreachable until it is "
+          "restarted. See RuntimeDirectoryPreserve in homebase-hostd.service.")
+
+    # And it still works, which is the property the mode is a proxy for.
+    status, _ = api(vm, "/setup")
+    check(status == 200, f"and core can still reach hostd through it ({status})")
 
 
 def create_data(vm: VM) -> None:
@@ -279,6 +323,13 @@ def main() -> int:
         start(vm)
         wait_for_ssh(vm)
         wait_for_boot_complete(vm)
+
+        # homebase-apps depends on a container runtime, so apt needs an index to
+        # resolve it from. Refreshed once, here, rather than on every install.
+        step("Refreshing the package index")
+        ssh(vm, ["sudo", "sh", "-c",
+                 "DEBIAN_FRONTEND=noninteractive apt-get update -qq"], timeout=900)
+        ok("apt is ready")
 
         install(vm, first, "Installing on a clean machine")
         verify_installed(vm)

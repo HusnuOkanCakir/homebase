@@ -36,6 +36,26 @@ and why it is worth stating in three separate documents.
 Socket activation means `hostd` starts on first connection and `core` can start before it is
 ready.
 
+### The socket outlives the service
+
+`hostd`'s unit declares `RuntimeDirectoryPreserve=yes`, and that line is load-bearing rather
+than tidy.
+
+systemd removes a `RuntimeDirectory` when its service stops. The socket belongs to
+`homebase-hostd.socket`, but it lives inside `homebase-hostd.service`'s runtime directory —
+so without that line, stopping `hostd` for a moment deletes the socket, while the socket unit
+carries on reporting itself `active (running)` and `Listen: /run/homebase/hostd.sock` against
+a path that no longer exists.
+
+Nothing can connect after that, and nothing says so. Every unit looks healthy; the only
+symptom is `core` reporting that it cannot reach the part of itself that manages the server,
+permanently. **Every upgrade restarts `hostd`,** so this is the ordinary path rather than a
+corner of it.
+
+A test in `tests/vm/test_packages.py` restarts `hostd` deliberately and checks the socket is
+still there and still works. That check exists because the failure is silent: it cannot be
+noticed by looking.
+
 ## systemd sandboxing
 
 `hostd` is root, so it gets the tightest confinement that still lets it work:

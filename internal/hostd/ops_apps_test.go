@@ -1,0 +1,399 @@
+package hostd
+
+import (
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func appServices(t *testing.T) *AppServices {
+	t.Helper()
+	return NewAppServices(NewCatalogue(t.TempDir()), "", t.TempDir()+"/apps", t.TempDir()+"/state")
+}
+
+// Every directory created for an application must be created, not only the leaf.
+//
+// os.MkdirAll creates intermediates as the calling process, and chowning only the
+// leaf left /srv/homebase/apps/<id> as 0750 root:root on a real machine — which
+// core, running as the service account, cannot traverse. It could not back the
+// data up, and it would have failed silently. The VM test found this; the test is
+// here so it is found in a second rather than in twelve minutes.
+func TestEveryDirectoryUnderTheDataRootIsCreated(t *testing.T) {
+	s := appServices(t)
+
+	target := filepath.Join(s.dataRoot, "some-app", "config")
+	if err := s.makeOwnedDir(target); err != nil {
+		t.Fatalf("makeOwnedDir: %v", err)
+	}
+
+	// Each level, including the data root itself, which does not exist on a
+	// fresh machine either.
+	for _, path := range []string{
+		s.dataRoot,
+		filepath.Join(s.dataRoot, "some-app"),
+		target,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("%s was not created: %v", path, err)
+		}
+		if !info.IsDir() {
+			t.Errorf("%s is not a directory", path)
+		}
+		// 0750: the service account and nothing else. World-readable would put
+		// an application's configuration in reach of every account on the box.
+		if mode := info.Mode().Perm(); mode != 0o750 {
+			t.Errorf("%s is %o, want 750", path, mode)
+		}
+	}
+}
+
+func TestMakeOwnedDirIsIdempotent(t *testing.T) {
+	s := appServices(t)
+	target := filepath.Join(s.dataRoot, "some-app", "config")
+
+	for i := 0; i < 3; i++ {
+		if err := s.makeOwnedDir(target); err != nil {
+			t.Fatalf("call %d: %v", i+1, err)
+		}
+	}
+}
+
+// A path outside the data root must be refused, whatever route it takes there.
+// This function creates directories as root; the set of paths it will accept is
+// the set of places a manifest can cause a directory to appear.
+func TestMakeOwnedDirRefusesPathsOutsideTheDataRoot(t *testing.T) {
+	s := appServices(t)
+
+	for _, path := range []string{
+		"/etc/homebase",
+		"/tmp/elsewhere",
+		filepath.Join(s.dataRoot, "..", "escaped"),
+		filepath.Join(s.dataRoot, "app", "..", "..", "escaped"),
+		s.dataRoot + "-sibling", // a prefix match that is not a child
+	} {
+		if err := s.makeOwnedDir(path); err == nil {
+			t.Errorf("%s was accepted", path)
+		}
+	}
+}
+
+// The data path reported to a user must be the one that is actually used. It is
+// what they are told uninstalling will leave behind, and a wrong answer there is
+// a promise about the wrong directory.
+func TestDataPathFollowsTheConfiguredRoot(t *testing.T) {
+	s := appServices(t)
+
+	got := s.appDataDir("jellyfin")
+	want := filepath.Join(s.dataRoot, "jellyfin")
+	if got != want {
+		t.Errorf("appDataDir = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(got, s.dataRoot+string(filepath.Separator)) {
+		t.Errorf("%q is not under the data root", got)
+	}
+}
+
+// --- What gets built ----------------------------------------------------------
+
+// The container configuration is the security boundary in practice: a manifest
+// that loaded still must not produce a container that can reach the host.
+func TestContainerIsBuiltLockedDown(t *testing.T) {
+	s := appServices(t)
+
+	manifest := Manifest{
+		ManifestVersion: 1,
+		ID:              "test-app",
+		Name:            "Test App",
+	}
+	manifest.Container.Image = "example/app"
+	manifest.Container.Version = "1.0.0"
+	manifest.Network.InternalPort = 8080
+
+	config := s.buildContainer(manifest, []string{"/data:/config:rw"})
+
+	if config.HostConfig.Privileged {
+		t.Error("the container is privileged")
+	}
+	if len(config.HostConfig.CapDrop) != 1 || config.HostConfig.CapDrop[0] != "ALL" {
+		t.Errorf("CapDrop = %v, want [ALL]", config.HostConfig.CapDrop)
+	}
+
+	var hasNoNewPrivileges bool
+	for _, option := range config.HostConfig.SecurityOpt {
+		if option == "no-new-privileges" {
+			hasNoNewPrivileges = true
+		}
+	}
+	if !hasNoNewPrivileges {
+		t.Errorf("SecurityOpt = %v, want no-new-privileges", config.HostConfig.SecurityOpt)
+	}
+
+	// unless-stopped rather than always: an application the user stopped must
+	// stay stopped across a reboot, and `always` would start it again behind
+	// their back.
+	if config.HostConfig.RestartPolicy.Name != "unless-stopped" {
+		t.Errorf("RestartPolicy = %q", config.HostConfig.RestartPolicy.Name)
+	}
+
+	// A home network has a printer, a television and whatever the neighbours can
+	// reach on it. An application is published deliberately or not at all.
+	for port, bindings := range config.HostConfig.PortBindings {
+		for _, binding := range bindings {
+			if binding.HostIP != "127.0.0.1" {
+				t.Errorf("%s is bound to %q, want 127.0.0.1", port, binding.HostIP)
+			}
+		}
+	}
+}
+
+// A manifest asking for a capability gets exactly that one, and still loses the
+// rest. Adding one must not become a way to keep all of them.
+func TestRequestedCapabilitiesDoNotUndoTheDrop(t *testing.T) {
+	s := appServices(t)
+
+	manifest := Manifest{ManifestVersion: 1, ID: "test-app", Name: "Test App"}
+	manifest.Container.Image = "example/app"
+	manifest.Container.Version = "1.0.0"
+	manifest.Permissions.Capabilities = []string{"NET_ADMIN"}
+
+	config := s.buildContainer(manifest, nil)
+
+	if len(config.HostConfig.CapDrop) != 1 || config.HostConfig.CapDrop[0] != "ALL" {
+		t.Errorf("CapDrop = %v; a manifest asking for one capability kept the rest",
+			config.HostConfig.CapDrop)
+	}
+	if len(config.HostConfig.CapAdd) != 1 || config.HostConfig.CapAdd[0] != "NET_ADMIN" {
+		t.Errorf("CapAdd = %v, want [NET_ADMIN]", config.HostConfig.CapAdd)
+	}
+}
+
+// --- Remembering a deliberate stop -------------------------------------------
+
+// An application somebody stopped must not be reported as having crashed.
+//
+// Docker keeps no record of who stopped a container: a deliberately stopped one
+// and a crashed one are identical afterwards, because a program terminated by
+// SIGTERM chooses its own exit code. traefik/whoami chooses 2, which made every
+// deliberate stop read as "stopped unexpectedly" — found by the browser test.
+func TestADeliberateStopIsRememberedAsOne(t *testing.T) {
+	s := appServices(t)
+
+	if s.stoppedDeliberately("jellyfin") {
+		t.Fatal("an application nobody has stopped is recorded as stopped")
+	}
+
+	s.rememberStopped("jellyfin")
+	if !s.stoppedDeliberately("jellyfin") {
+		t.Error("the stop was not remembered")
+	}
+
+	// One application's state must not answer for another's.
+	if s.stoppedDeliberately("filebrowser") {
+		t.Error("stopping one application marked another as stopped")
+	}
+
+	s.forgetStopped("jellyfin")
+	if s.stoppedDeliberately("jellyfin") {
+		t.Error("starting it again did not clear the record")
+	}
+}
+
+// It has to survive a restart of the machine: an application the user stopped
+// stays stopped across a reboot, and must still read as stopped rather than as
+// having crashed while nobody was looking.
+func TestTheStopRecordSurvivesARestart(t *testing.T) {
+	catalogue := NewCatalogue(t.TempDir())
+	dataRoot := t.TempDir() + "/apps"
+	stateDir := t.TempDir() + "/state"
+
+	before := NewAppServices(catalogue, "", dataRoot, stateDir)
+	before.rememberStopped("jellyfin")
+
+	// A second instance, as though hostd had been restarted with the machine.
+	after := NewAppServices(catalogue, "", dataRoot, stateDir)
+	if !after.stoppedDeliberately("jellyfin") {
+		t.Error("the record did not survive hostd restarting")
+	}
+}
+
+// Clearing a record that was never written is the ordinary case — every start of
+// an application that was already running goes through it — and must not be
+// noisy or fail.
+func TestForgettingAnUnrecordedStopIsFine(t *testing.T) {
+	s := appServices(t)
+	s.forgetStopped("never-stopped")
+	if s.stoppedDeliberately("never-stopped") {
+		t.Error("forgetting created a record")
+	}
+}
+
+// The marker is hostd's, not the user's, and not core's. core running as the
+// service account must not be able to rewrite hostd's account of what it did.
+func TestTheStopRecordIsNotReadableByOtherAccounts(t *testing.T) {
+	s := appServices(t)
+	s.rememberStopped("jellyfin")
+
+	info, err := os.Stat(filepath.Dir(s.stopMarker("jellyfin")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o700 {
+		t.Errorf("the state directory is %o, want 700", mode)
+	}
+}
+
+// The container name is namespaced, so nothing here can act on a container
+// somebody else created on the same machine.
+func TestContainerNamesAreNamespaced(t *testing.T) {
+	name := containerName("jellyfin")
+	if !strings.HasPrefix(name, "homebase-") {
+		t.Errorf("containerName = %q, want a homebase- prefix", name)
+	}
+	if name == "jellyfin" {
+		t.Error("the container name is the application id, so Homebase could act on a container it does not own")
+	}
+}
+
+// --- Talking to Docker --------------------------------------------------------
+
+// A failed negotiation must not be remembered.
+//
+// sync.Once was the first shape and it was wrong: it caches the failure as
+// readily as the success, so a hostd asked for something before Docker had
+// finished starting would refuse every operation for the rest of its life. On a
+// machine that has just booted, hostd being ready first is the normal case, not
+// an edge one.
+func TestADockerThatStartsLateIsPickedUp(t *testing.T) {
+	dir, err := os.MkdirTemp("", "hb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "docker.sock")
+
+	client := newDocker(socket)
+
+	// Nothing is listening yet.
+	if _, err := client.apiVersion(t.Context()); err == nil {
+		t.Fatal("negotiating against a socket that does not exist succeeded")
+	}
+
+	// Docker arrives.
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"Version":"27.0.0","ApiVersion":"1.46","MinAPIVersion":"1.24"}`)
+		})}
+	go server.Serve(listener)
+	t.Cleanup(func() { server.Close() })
+
+	version, err := client.apiVersion(t.Context())
+	if err != nil {
+		t.Fatalf("hostd never recovered once Docker was running: %v", err)
+	}
+	if version != "v1.46" {
+		t.Errorf("version = %q, want v1.46", version)
+	}
+}
+
+// The daemon's floor wins over our ceiling. Speaking a version newer than hostd
+// was written against is a risk; refusing to run at all on a Docker newer than
+// this release is a certainty, and on an appliance the certainty is worse.
+func TestVersionNegotiationRespectsBothEnds(t *testing.T) {
+	cases := []struct {
+		name       string
+		daemonAPI  string
+		daemonMin  string
+		want       string
+		wantErrror bool
+	}{
+		{
+			name:      "a daemon newer than us is capped at our ceiling",
+			daemonAPI: "1.99", daemonMin: "1.24", want: "v" + dockerMaxAPIVersion,
+		},
+		{
+			name:      "a daemon older than us is met where it is",
+			daemonAPI: "1.44", daemonMin: "1.24", want: "v1.44",
+		},
+		{
+			// The case that broke a pinned client: Docker 29 refuses below 1.44.
+			name:      "a floor above our ceiling wins",
+			daemonAPI: "1.99", daemonMin: "1.99", want: "v1.99",
+		},
+		{
+			name:      "a daemon too old to speak to is refused",
+			daemonAPI: "1.20", daemonMin: "1.12", wantErrror: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, err := os.MkdirTemp("", "hb")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(dir) })
+			socket := filepath.Join(dir, "docker.sock")
+
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := &http.Server{Handler: http.HandlerFunc(
+				func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprintf(w, `{"Version":"x","ApiVersion":%q,"MinAPIVersion":%q}`,
+						tc.daemonAPI, tc.daemonMin)
+				})}
+			go server.Serve(listener)
+			t.Cleanup(func() { server.Close() })
+
+			version, err := newDocker(socket).apiVersion(t.Context())
+			if tc.wantErrror {
+				if err == nil {
+					t.Fatalf("a daemon speaking %s was accepted", tc.daemonAPI)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("negotiation failed: %v", err)
+			}
+			if version != tc.want {
+				t.Errorf("version = %q, want %q", version, tc.want)
+			}
+		})
+	}
+}
+
+// Dotted versions are numbers, not strings: "1.9" sorts after "1.10"
+// alphabetically and before it numerically, and getting that backwards picks a
+// version the daemon rejects.
+func TestAPIVersionsCompareNumerically(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"1.43", "1.44", -1},
+		{"1.44", "1.43", 1},
+		{"1.44", "1.44", 0},
+		{"1.9", "1.10", -1}, // the one a string comparison gets wrong
+		{"1.10", "1.9", 1},
+		{"1.100", "1.99", 1},
+		{"2.0", "1.99", 1},
+	}
+
+	for _, tc := range cases {
+		if got := compareAPIVersions(tc.a, tc.b); got != tc.want {
+			t.Errorf("compareAPIVersions(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

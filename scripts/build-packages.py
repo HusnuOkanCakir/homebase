@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Build the Homebase Debian packages.
 
-Three packages, staged and sealed with `dpkg-deb --build`:
+Four packages, staged and sealed with `dpkg-deb --build`:
 
     homebase-hostd      the privileged host service
     homebase-core       the unprivileged service
+    homebase-apps       the application catalogue (architecture-independent)
     homebase-dashboard  the web interface (architecture-independent)
 
 Deliberately not debhelper. Not because debhelper is wrong — it is the right
-tool for a package with anything complicated in it — but because these three
-have no build system to invoke, no libraries to shlibdeps, and nothing to
+tool for a package with anything complicated in it — but because these have
+no build system to invoke, no libraries to shlibdeps, and nothing to
 compile at package time. What they do have is a privilege boundary expressed in
 file ownership and modes, and that is worth being able to read in one file
 rather than inferring from a dozen debhelper defaults.
@@ -120,6 +121,11 @@ fi
 
 if [ "$1" = "purge" ]; then
     rm -f /var/log/homebase/audit.log
+
+    # hostd's own bookkeeping — which applications were stopped deliberately.
+    # Not user data: with hostd gone there is nothing left for it to describe,
+    # and unlike /var/lib/homebase there is nothing in it somebody would miss.
+    rm -rf /var/lib/homebase-hostd
 
     # The homebase group is left in place. homebase-core may still be installed
     # and still own files with that group, and removing a group whose gid is
@@ -243,6 +249,22 @@ fi
 exit 0
 """
 
+APPS_POSTINST = """#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # hostd reads the catalogue at startup, so a new or changed manifest needs it
+    # to restart. try-restart rather than restart: hostd is socket-activated and
+    # is frequently not running, and starting it here just to reload a catalogue
+    # it will re-read on its next activation would be pointless.
+    if [ -d /run/systemd/system ]; then
+        systemctl try-restart homebase-hostd.service >/dev/null 2>&1 || true
+    fi
+fi
+
+exit 0
+"""
+
 DASHBOARD_POSTINST = """#!/bin/sh
 set -e
 
@@ -329,6 +351,58 @@ def build_core(version: str, binaries: Path) -> Path:
     script(root, "postrm", CORE_POSTRM)
 
     return seal(root, "homebase-core", version, "amd64")
+
+
+def build_apps(version: str) -> Path:
+    """The application catalogue.
+
+    Its own package, because adding an application is a package change — that is
+    what makes the set of installable applications reviewable in a diff and
+    outside core's reach. See ADR-0012.
+    """
+    root = BUILD / "homebase-apps"
+    reset(root)
+
+    source = REPO_ROOT / "app-store"
+    target = root / "usr/share/homebase/apps"
+    target.mkdir(parents=True)
+
+    manifests = sorted(source.glob("*.json"))
+    if not manifests:
+        die("no manifests in app-store/")
+
+    for manifest in manifests:
+        install_file(manifest, target / manifest.name, 0o644)
+
+    control(
+        root,
+        package="homebase-apps",
+        version=version,
+        architecture="all",
+        # The container runtime is a dependency of the *catalogue*, not of hostd.
+        # hostd's system operations work perfectly well without Docker; it is
+        # having applications to install that makes a runtime necessary. Putting
+        # it here keeps the dependency graph honest, and means a machine that
+        # only wants the system service does not pull in Docker.
+        #
+        # An alternative is accepted because a user who installed Docker from
+        # Docker's own repository has docker-ce, not docker.io, and refusing to
+        # install alongside a working Docker would be absurd.
+        depends=f"homebase-hostd (= {version}), docker.io | docker-ce",
+        description=(
+            "Homebase application catalogue\n"
+            " The applications this server can install, as manifests read by\n"
+            " homebase-hostd.\n"
+            " .\n"
+            " The set of applications a machine can run is the set of manifests in this\n"
+            " package. Nothing at runtime can add to it, which is what keeps the\n"
+            " unprivileged service from being able to describe a container."
+        ),
+    )
+
+    script(root, "postinst", APPS_POSTINST)
+
+    return seal(root, "homebase-apps", version, "all")
 
 
 def build_dashboard(version: str, dist: Path) -> Path:
@@ -495,6 +569,7 @@ def main() -> int:
     packages = [
         build_hostd(args.version, binaries),
         build_core(args.version, binaries),
+        build_apps(args.version),
         build_dashboard(args.version, dashboard),
     ]
 

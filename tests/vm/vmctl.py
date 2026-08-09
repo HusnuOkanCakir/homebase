@@ -574,6 +574,7 @@ def ssh(
     command: list[str] | None = None,
     check: bool = True,
     stdin: str | None = None,
+    timeout: int = 300,
 ) -> subprocess.CompletedProcess:
     """Run a command in the guest.
 
@@ -585,11 +586,27 @@ def ssh(
     it. So `["stat", "-c", "%a %U %G", path]` arrives as five arguments and stat
     tries to open "%U" as a file. Anything containing a space silently becomes
     two arguments, which is a confusing failure a long way from its cause.
+
+    `timeout` bounds the wait. There is a default because without one a wedged
+    guest hangs the whole test run with no output — and a test suite that hangs
+    is worse than one that fails, because nobody can tell it apart from one that
+    is still working. Raise it for anything that legitimately takes minutes,
+    such as apt or a container pull.
     """
     args = ssh_args(vm)
     if command:
         args.append(" ".join(shlex.quote(part) for part in command))
-        result = subprocess.run(args, capture_output=True, text=True, input=stdin)
+        try:
+            result = subprocess.run(
+                args, capture_output=True, text=True, input=stdin, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as expired:
+            raise VMError(
+                f"Command timed out after {timeout}s in '{vm.name}': {' '.join(command)}",
+                (expired.stderr or expired.stdout or b"").decode(errors="replace").strip()[:500]
+                if isinstance(expired.stderr or expired.stdout, bytes)
+                else str(expired.stdout or "")[:500],
+            ) from expired
         if check and result.returncode != 0:
             raise VMError(
                 f"Command failed in '{vm.name}': {' '.join(command)}",
@@ -717,6 +734,52 @@ def reboot(vm: VM) -> None:
             "that silently does not reboot is worse than no reboot test.",
         )
     ok(f"rebooted (boot_id {boot_id_before[:8]}… → {boot_id_after[:8]}…)")
+
+
+def install_docker(vm: VM, prepull: list[str] | None = None) -> str:
+    """Install a container runtime in the guest, and return the API version it speaks.
+
+    From Ubuntu's own archive rather than Docker's repository. That is what a user
+    gets from `apt install docker.io`, and it is deliberately not the newest
+    Docker — the point of hostd negotiating the Engine API version is that
+    Homebase works with whatever Docker the user happens to have, and a test that
+    always installed the latest would never exercise that.
+
+    `prepull` names images to fetch up front, so a test of the application
+    lifecycle is not also a test of this connection's throughput or of whether
+    Docker Hub is up. Homebase still performs its own pull; it finds the bytes
+    already there.
+    """
+    step("Installing Docker")
+
+    result = ssh(vm, ["sudo", "sh", "-c",
+                      "DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
+                      "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io"],
+                 check=False, timeout=900)
+    if result.returncode != 0:
+        raise VMError("installing docker.io failed",
+                      (result.stderr or result.stdout).strip()[-600:])
+
+    # sudo: the login user is not in the docker group, and without it this
+    # reports "<unknown>" — which reads like Docker failing to install rather
+    # than the query failing to authenticate.
+    version = ssh(vm, ["sudo", "docker", "version", "--format",
+                       "{{.Server.APIVersion}} (minimum {{.Server.MinAPIVersion}})"],
+                  check=False).stdout.strip()
+    if not version:
+        raise VMError("Docker installed but would not report its version",
+                      "hostd negotiates the API version against this, so a daemon "
+                      "that will not answer is a daemon Homebase cannot use.")
+    ok(f"Docker speaks API {version}")
+
+    for image in prepull or []:
+        result = ssh(vm, ["sudo", "docker", "pull", image], check=False, timeout=900)
+        if result.returncode != 0:
+            raise VMError(f"could not pull {image}",
+                          (result.stdout + result.stderr).strip()[-400:])
+        ok(f"{image} is on the machine")
+
+    return version
 
 
 def collect_logs(vm: VM, destination: Path | None = None) -> Path:

@@ -3,6 +3,9 @@ import { test, expect, type Page } from "@playwright/test";
 /**
  * The Milestone 2 exit condition, as a browser test.
  *
+ * First in the numbered sequence: it creates the administrator that every later
+ * spec signs in as.
+ *
  * "A user opens the dashboard, creates an administrator, sees accurate system
  * information, reboots the machine, and everything comes back by itself."
  *

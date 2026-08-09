@@ -1,12 +1,18 @@
 # User guide
 
-!!! warning "Not yet written"
+!!! warning "Mostly not yet written"
 
-    Homebase is pre-alpha. There is no installable release, so there is nothing here to
-    guide you through.
+    Homebase is pre-alpha. There is no installable release, so most of what a user guide
+    would guide you through does not exist.
 
     These pages are written alongside the features they describe — not afterwards — so each
     one appears when its milestone lands.
+
+## Written
+
+| Page | Covers |
+|---|---|
+| [Applications](applications.md) | Installing, running and removing applications |
 
 ## Planned
 
@@ -14,7 +20,6 @@
 |---|---|---|
 | Installation | Creating the USB stick, erasing the target laptop, first boot | 6 |
 | First steps | Administrator setup, naming the server, finding it on your network | 6 |
-| Applications | Installing, updating and removing apps | 3 |
 | Storage | Attaching disks, assigning them to applications, safe removal | 4 |
 | Backup | Configuring backups, verifying them, restoring | 5 |
 | Networking | Wi-Fi, discovery, optional private remote access | 7 |

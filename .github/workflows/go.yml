@@ -111,6 +111,13 @@ jobs:
               print(f\"  {op['name']:<26} risk={op['risk']:<8} confirm={op['confirmation']}\")
           "
 
+      # A confirmation requirement that can be downgraded during a refactor is
+      # not a confirmation requirement, and nothing else in the build would
+      # notice: the code compiles, the tests pass, and a destructive operation
+      # simply stops asking.
+      - name: Destructive operations still require what they should
+        run: python3 scripts/check_operations.py /tmp/operations.json
+
       - name: Vulnerability scan
         run: |
           go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... || {

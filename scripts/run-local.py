@@ -137,7 +137,18 @@ def main() -> int:
          "--audit-log", str(RUN_DIR / "audit.log"),
          # As you, not as root. The account that would normally be `homebase`
          # is whoever is running this.
-         "--peer-user", getpass.getuser()],
+         "--peer-user", getpass.getuser(),
+         # The repository's own catalogue, rather than the installed
+         # /usr/share/homebase/apps. This is the one place where local
+         # development reads a manifest a user could edit — which is exactly
+         # what makes it useful for working on one, and exactly why it is not
+         # how the packaged service behaves.
+         "--catalogue", str(REPO_ROOT / "app-store"),
+         # Application data under ./run rather than /srv/homebase, so
+         # installing something here needs no root and touches nothing outside
+         # the repository. The packaged service uses the real path.
+         "--app-data", str(RUN_DIR / "apps"),
+         "--state-dir", str(RUN_DIR / "hostd-state")],
         stdout=(RUN_DIR / "hostd.log").open("w"),
         stderr=subprocess.STDOUT,
     ))

@@ -188,6 +188,71 @@ export interface Job {
 export const isTerminal = (state: JobState): boolean =>
   ["succeeded", "failed", "cancelled", "rolled_back", "rollback_failed"].includes(state);
 
+/**
+ * `unknown` means Homebase could not ask the container runtime.
+ *
+ * Kept separate from `not_installed` because the two look the same in an
+ * interface and are entirely different facts — one of them means a working
+ * application Homebase cannot see, and offering to install it again on top of a
+ * running one is how somebody loses data.
+ */
+export type ApplicationState =
+  | "not_installed"
+  | "stopped"
+  | "running"
+  | "failed"
+  | "unknown";
+
+export interface Application {
+  id: string;
+  name: string;
+  summary?: string;
+  state: ApplicationState;
+  /** Null where the state is unknown; `false` would be a claim nobody can make. */
+  installed: boolean | null;
+  /**
+   * The application's own health result, or null.
+   *
+   * **null is not "unhealthy".** It means the application declares no check, or
+   * has not been checked yet. Showing "unhealthy" for null would report every
+   * starting application as broken.
+   */
+  health: string | null;
+  image: string;
+  version?: string;
+  internal_port?: number;
+  started_at: string | null;
+  exit_code: number | null;
+  /** Where its data lives, so a user can be told what uninstalling leaves behind. */
+  data_path: string;
+}
+
+export interface ApplicationList {
+  items: Application[];
+  total: number;
+  /**
+   * When false, every application reads `not_installed` because its real state
+   * is unknown. The list is still populated: the machine knows what it *can*
+   * install even when it cannot see what is running.
+   */
+  docker_available: boolean;
+  /** Manifests that failed to load, mapped to why. */
+  unavailable?: Record<string, string>;
+}
+
+export type EventSeverity = "info" | "warning" | "error" | "critical";
+
+export interface Event {
+  event_id: string;
+  type: string;
+  severity: EventSeverity;
+  subject: string | null;
+  reason: string | null;
+  recoverable: boolean | null;
+  message: string | null;
+  occurred_at: string;
+}
+
 // --- Calls -------------------------------------------------------------------
 
 export const api = {
@@ -227,4 +292,103 @@ export const api = {
   job: (id: string) => get<Job>(`/jobs/${encodeURIComponent(id)}`),
 
   jobs: () => get<{ items: Job[]; total: number }>("/jobs"),
+
+  // --- Applications ---------------------------------------------------------
+  //
+  // Note what is absent: there is no argument anywhere here for an image, a
+  // port, a mount or an environment variable. The dashboard cannot describe a
+  // container because the API cannot, and the API cannot because hostd builds
+  // it from a manifest the browser never sees. See ADR-0012.
+
+  apps: () => get<ApplicationList>("/apps"),
+
+  app: (id: string) => get<Application>(`/apps/${encodeURIComponent(id)}`),
+
+  /**
+   * The application's own log output.
+   *
+   * A longer timeout than usual: an application that has just failed is the one
+   * whose logs somebody most wants, and it is also the one most likely to be
+   * slow to answer.
+   */
+  appLogs: (id: string, lines = 200) =>
+    get<{ id: string; lines: number; logs: string }>(
+      `/apps/${encodeURIComponent(id)}/logs?lines=${lines}`,
+      30_000,
+    ),
+
+  installApp: (id: string) => post<Job>(`/apps/${encodeURIComponent(id)}/install`),
+
+  startApp: (id: string) => post<Job>(`/apps/${encodeURIComponent(id)}/start`),
+
+  /**
+   * The destructive operations take the application's id as confirmation.
+   *
+   * Passed through rather than invented here: the API requires the request to
+   * name what it is acting on, so a confirmation cannot be replayed against a
+   * different application, and typing the name is what makes somebody notice
+   * which one they are about to stop.
+   */
+  stopApp: (id: string, confirm: string) =>
+    post<Job>(`/apps/${encodeURIComponent(id)}/stop`, { confirm }),
+
+  restartApp: (id: string, confirm: string) =>
+    post<Job>(`/apps/${encodeURIComponent(id)}/restart`, { confirm }),
+
+  uninstallApp: (id: string, confirm: string) =>
+    post<Job>(`/apps/${encodeURIComponent(id)}/uninstall`, { confirm }),
+
+  removeAppData: (id: string, confirm: string) =>
+    post<Job>(`/apps/${encodeURIComponent(id)}/data/remove`, { confirm }),
+
+  // --- Events ---------------------------------------------------------------
+
+  events: (limit = 20) => get<{ items: Event[]; total: number }>(`/events?limit=${limit}`),
 };
+
+/**
+ * Watch a job until it finishes.
+ *
+ * Polled rather than streamed. The event stream announces that something
+ * happened, but a job's progress is a question about one specific job, and
+ * asking for it directly means the interface cannot show a stale percentage
+ * because it missed a message.
+ *
+ * Returns a function that stops watching. `onUpdate` is called with every
+ * observation including the last, so a caller does not have to fetch again to
+ * learn how it ended.
+ */
+export function watchJob(
+  id: string,
+  onUpdate: (job: Job) => void,
+  onError: (error: unknown) => void,
+  intervalMs = 1000,
+): () => void {
+  let stopped = false;
+
+  const poll = async () => {
+    while (!stopped) {
+      try {
+        const job = await api.job(id);
+        if (stopped) return;
+        onUpdate(job);
+        if (isTerminal(job.state)) return;
+      } catch (caught) {
+        if (stopped) return;
+        // A single missed poll is not a failure: installing an application can
+        // load the machine enough that one request times out, and giving up
+        // there would report a working install as broken.
+        if (!(caught instanceof NetworkError)) {
+          onError(caught);
+          return;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  };
+
+  void poll();
+  return () => {
+    stopped = true;
+  };
+}
