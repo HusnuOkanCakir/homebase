@@ -863,6 +863,27 @@ def reboot(vm: VM) -> None:
     ok(f"rebooted (boot_id {boot_id_before[:8]}… → {boot_id_after[:8]}…)")
 
 
+def apt(vm: VM, arguments: str, timeout: int = 900) -> subprocess.CompletedProcess:
+    """Run apt in the guest, without it pulling the floor out from under us.
+
+    Two environment variables, both load-bearing:
+
+    DEBIAN_FRONTEND=noninteractive stops a package stopping to ask a question
+    nobody is there to answer.
+
+    NEEDRESTART_SUSPEND stops Ubuntu's needrestart deciding, part-way through an
+    install, that ssh.service should be restarted — which drops the connection
+    the command is running over. That failure looks like "Connection closed by
+    remote host" with no other explanation, arrives intermittently, and is
+    entirely a property of installing something that touches a library sshd
+    links against. Installing docker.io does.
+    """
+    return ssh(vm, ["sudo", "sh", "-c",
+                    "DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 "
+                    "NEEDRESTART_MODE=l apt-get " + arguments],
+               check=False, timeout=timeout)
+
+
 def install_docker(vm: VM, prepull: list[str] | None = None) -> str:
     """Install a container runtime in the guest, and return the API version it speaks.
 
@@ -879,10 +900,12 @@ def install_docker(vm: VM, prepull: list[str] | None = None) -> str:
     """
     step("Installing Docker")
 
-    result = ssh(vm, ["sudo", "sh", "-c",
-                      "DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
-                      "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io"],
-                 check=False, timeout=900)
+    result = apt(vm, "update -qq")
+    if result.returncode != 0:
+        raise VMError("apt-get update failed",
+                      (result.stderr or result.stdout).strip()[-600:])
+
+    result = apt(vm, "install -y -qq docker.io")
     if result.returncode != 0:
         raise VMError("installing docker.io failed",
                       (result.stderr or result.stdout).strip()[-600:])

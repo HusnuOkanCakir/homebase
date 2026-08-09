@@ -32,6 +32,7 @@ sys.path.insert(0, str(REPO_ROOT / "tests/vm"))
 from vmctl import (  # noqa: E402
     VM,
     VMError,
+    apt,
     attach_removable_disk,
     create,
     create_removable_disk,
@@ -75,9 +76,7 @@ def install(vm: VM, packages: list[Path]) -> None:
         upload(vm, package, f"/tmp/{package.name}")
 
     names = " ".join(f"/tmp/{p.name}" for p in packages)
-    result = ssh(vm, ["sudo", "sh", "-c",
-                      "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
-                      f"--allow-downgrades {names}"], check=False, timeout=1200)
+    result = apt(vm, f"install -y -qq --allow-downgrades {names}", timeout=1200)
     if result.returncode != 0:
         raise VMError("installing the packages failed",
                       (result.stdout + result.stderr).strip()[-800:])
