@@ -53,11 +53,15 @@ type docker struct {
 	http   *http.Client
 	socket string
 
-	// The negotiated version, resolved on first use and then reused. Guarded
-	// because operations run concurrently.
-	versionOnce sync.Once
-	version     string
-	versionErr  error
+	// The negotiated version, resolved on first use and then reused.
+	//
+	// Only a successful negotiation is remembered. sync.Once was the obvious
+	// shape and it is wrong here: it would cache the failure too, so a hostd
+	// that happened to be asked something before Docker finished starting would
+	// refuse every operation for the rest of its life. On a machine that has
+	// just booted, hostd starting first is the normal case.
+	versionMu sync.Mutex
+	version   string
 }
 
 func newDocker(socket string) *docker {
@@ -100,10 +104,20 @@ var ErrDockerUnavailable = &Error{
 // /version is itself unversioned, which is what makes this possible: there is
 // one endpoint that answers regardless of what the client would have guessed.
 func (d *docker) apiVersion(ctx context.Context) (string, error) {
-	d.versionOnce.Do(func() {
-		d.version, d.versionErr = d.negotiate(ctx)
-	})
-	return d.version, d.versionErr
+	d.versionMu.Lock()
+	defer d.versionMu.Unlock()
+
+	if d.version != "" {
+		return d.version, nil
+	}
+
+	version, err := d.negotiate(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	d.version = version
+	return version, nil
 }
 
 func (d *docker) negotiate(ctx context.Context) (string, error) {

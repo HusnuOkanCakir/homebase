@@ -1,6 +1,9 @@
 package hostd
 
 import (
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,5 +256,144 @@ func TestContainerNamesAreNamespaced(t *testing.T) {
 	}
 	if name == "jellyfin" {
 		t.Error("the container name is the application id, so Homebase could act on a container it does not own")
+	}
+}
+
+// --- Talking to Docker --------------------------------------------------------
+
+// A failed negotiation must not be remembered.
+//
+// sync.Once was the first shape and it was wrong: it caches the failure as
+// readily as the success, so a hostd asked for something before Docker had
+// finished starting would refuse every operation for the rest of its life. On a
+// machine that has just booted, hostd being ready first is the normal case, not
+// an edge one.
+func TestADockerThatStartsLateIsPickedUp(t *testing.T) {
+	dir, err := os.MkdirTemp("", "hb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	socket := filepath.Join(dir, "docker.sock")
+
+	client := newDocker(socket)
+
+	// Nothing is listening yet.
+	if _, err := client.apiVersion(t.Context()); err == nil {
+		t.Fatal("negotiating against a socket that does not exist succeeded")
+	}
+
+	// Docker arrives.
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"Version":"27.0.0","ApiVersion":"1.46","MinAPIVersion":"1.24"}`)
+		})}
+	go server.Serve(listener)
+	t.Cleanup(func() { server.Close() })
+
+	version, err := client.apiVersion(t.Context())
+	if err != nil {
+		t.Fatalf("hostd never recovered once Docker was running: %v", err)
+	}
+	if version != "v1.46" {
+		t.Errorf("version = %q, want v1.46", version)
+	}
+}
+
+// The daemon's floor wins over our ceiling. Speaking a version newer than hostd
+// was written against is a risk; refusing to run at all on a Docker newer than
+// this release is a certainty, and on an appliance the certainty is worse.
+func TestVersionNegotiationRespectsBothEnds(t *testing.T) {
+	cases := []struct {
+		name       string
+		daemonAPI  string
+		daemonMin  string
+		want       string
+		wantErrror bool
+	}{
+		{
+			name:      "a daemon newer than us is capped at our ceiling",
+			daemonAPI: "1.99", daemonMin: "1.24", want: "v" + dockerMaxAPIVersion,
+		},
+		{
+			name:      "a daemon older than us is met where it is",
+			daemonAPI: "1.44", daemonMin: "1.24", want: "v1.44",
+		},
+		{
+			// The case that broke a pinned client: Docker 29 refuses below 1.44.
+			name:      "a floor above our ceiling wins",
+			daemonAPI: "1.99", daemonMin: "1.99", want: "v1.99",
+		},
+		{
+			name:      "a daemon too old to speak to is refused",
+			daemonAPI: "1.20", daemonMin: "1.12", wantErrror: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, err := os.MkdirTemp("", "hb")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(dir) })
+			socket := filepath.Join(dir, "docker.sock")
+
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := &http.Server{Handler: http.HandlerFunc(
+				func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprintf(w, `{"Version":"x","ApiVersion":%q,"MinAPIVersion":%q}`,
+						tc.daemonAPI, tc.daemonMin)
+				})}
+			go server.Serve(listener)
+			t.Cleanup(func() { server.Close() })
+
+			version, err := newDocker(socket).apiVersion(t.Context())
+			if tc.wantErrror {
+				if err == nil {
+					t.Fatalf("a daemon speaking %s was accepted", tc.daemonAPI)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("negotiation failed: %v", err)
+			}
+			if version != tc.want {
+				t.Errorf("version = %q, want %q", version, tc.want)
+			}
+		})
+	}
+}
+
+// Dotted versions are numbers, not strings: "1.9" sorts after "1.10"
+// alphabetically and before it numerically, and getting that backwards picks a
+// version the daemon rejects.
+func TestAPIVersionsCompareNumerically(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"1.43", "1.44", -1},
+		{"1.44", "1.43", 1},
+		{"1.44", "1.44", 0},
+		{"1.9", "1.10", -1}, // the one a string comparison gets wrong
+		{"1.10", "1.9", 1},
+		{"1.100", "1.99", 1},
+		{"2.0", "1.99", 1},
+	}
+
+	for _, tc := range cases {
+		if got := compareAPIVersions(tc.a, tc.b); got != tc.want {
+			t.Errorf("compareAPIVersions(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
 	}
 }
