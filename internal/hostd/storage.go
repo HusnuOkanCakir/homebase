@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Block device discovery, read from the kernel rather than from a subprocess.
@@ -552,4 +553,20 @@ func extVariant(header []byte) string {
 		return "ext3"
 	}
 	return "ext2"
+}
+
+// --- Free space ---------------------------------------------------------------
+
+// diskUsage reports the size and free space of the filesystem at a path.
+//
+// Bavail rather than Bfree: Bfree counts blocks reserved for root, which a user
+// cannot use and should not be told about. On a default ext4 that is 5 % of the
+// disk, so reporting it would overstate the free space on a 4 TB drive by 200 GB.
+func diskUsage(path string) (total, available uint64, err error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0, 0, err
+	}
+	size := uint64(stat.Bsize)
+	return stat.Blocks * size, stat.Bavail * size, nil
 }

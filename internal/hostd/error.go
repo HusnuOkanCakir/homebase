@@ -1,6 +1,9 @@
 package hostd
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Error is the failure envelope hostd returns.
 //
@@ -101,4 +104,13 @@ func internalError(detail string) *Error {
 		Recoverable: false,
 		Status:      500,
 	}
+}
+
+// asHostError unwraps an operation failure into the envelope it carries.
+//
+// errors.As rather than a type assertion, so a wrapped error still resolves —
+// an error that lost its code on the way out reaches the user as "something
+// went wrong inside Homebase", which is the least useful thing it could say.
+func asHostError(err error, target **Error) bool {
+	return errors.As(err, target)
 }

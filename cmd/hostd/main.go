@@ -43,6 +43,7 @@ func main() {
 		dockerSock = flag.String("docker-socket", "", "Docker socket (default /var/run/docker.sock)")
 		appData    = flag.String("app-data", hostd.DefaultAppDataRoot, "directory holding application data")
 		stateDir   = flag.String("state-dir", hostd.DefaultStateDir, "hostd's own state directory")
+		storageDir = flag.String("storage-root", hostd.DefaultStorageRoot, "where managed disks are mounted")
 		describe   = flag.Bool("describe", false, "print the operation registry as JSON and exit")
 		version    = flag.Bool("version", false, "print the version and exit")
 	)
@@ -59,6 +60,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "hostd: "+err.Error())
 		os.Exit(1)
 	}
+	storage := hostd.NewStorageServices(*storageDir, *stateDir)
+	hostd.RegisterStorageOperations(registry, storage)
+
 	hostd.RegisterAppOperations(registry, hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir))
 
 	// --describe needs no socket, no root and no audit log. It exists so that

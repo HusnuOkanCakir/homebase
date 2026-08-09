@@ -43,6 +43,13 @@ EXPECTED = {
     "app.install": ("low", "none"),
     "app.list": ("read", "none"),
     "system.get_info": ("read", "none"),
+    # Storage. format is the only operation that can destroy data Homebase never
+    # created, and remove_location must never quietly become destructive: it
+    # unmounts a disk and leaves everything on it alone.
+    "storage.format": ("critical", "explicit"),
+    "storage.remove_location": ("medium", "required"),
+    "storage.unmount": ("medium", "required"),
+    "storage.list_disks": ("read", "none"),
 }
 
 
