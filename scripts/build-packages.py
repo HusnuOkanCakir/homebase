@@ -95,10 +95,16 @@ if [ "$1" = "configure" ]; then
     # directory in ReadWritePaths that does not exist used to stop it starting
     # at all — and homebase-hostd can be installed without homebase-core.
     #
-    # `install -d` is idempotent and matches what core's script sets, so
-    # whichever package configures first, both agree.
+    # Owned by root, with group homebase. hostd creates the *group* above; the
+    # homebase *user* is created by homebase-core, which may not be installed —
+    # so referring to it here fails with "invalid user 'homebase'" and takes the
+    # whole package down with it.
+    #
+    # core's own script sets /var/log/homebase to homebase:homebase when it
+    # arrives. Both orders work: `install -d` updates an existing directory, and
+    # hostd writes its audit log as root either way.
     install -d -o root -g homebase -m 0750 /etc/homebase
-    install -d -o homebase -g homebase -m 0750 /var/log/homebase
+    install -d -o root -g homebase -m 0770 /var/log/homebase
 
     systemctl daemon-reload >/dev/null 2>&1 || true
     # The socket, not the service: hostd is socket-activated, so it starts on

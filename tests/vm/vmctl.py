@@ -643,6 +643,14 @@ def detach_removable_disk(vm: VM) -> None:
 def ssh_args(vm: VM) -> list[str]:
     return [
         "ssh",
+        # A C locale in the guest, always.
+        #
+        # ssh forwards the client's LC_* variables by default, and a guest with
+        # no matching locale answers every command with a dozen lines of perl
+        # warnings. Those lines are what a failing command's captured output
+        # ends with, so the real error scrolls off — an apt failure was reported
+        # as "LC_TELEPHONE = de_CH.UTF-8" and nothing else.
+        "-o", "SetEnv=LC_ALL=C LANG=C",
         "-i", str(vm.key),
         "-p", str(vm.ssh_port),
         "-o", "StrictHostKeyChecking=no",
