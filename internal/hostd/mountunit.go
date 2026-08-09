@@ -87,8 +87,34 @@ func systemdEscapePath(path string) string {
 	return out.String()
 }
 
+// unitSafe strips anything that could end a line or start a new directive.
+//
+// The description carries a name a user typed. A newline in it would put the
+// rest of that name on its own line inside the unit, where systemd reads it as
+// a directive — and hostd writes these files into /etc/systemd/system.
+//
+// Done here rather than only at the point of input, because this function is
+// what produces the file: a generator that cannot emit a malformed unit is a
+// stronger guarantee than every caller remembering to check.
+func unitSafe(value string) string {
+	var out strings.Builder
+	for _, r := range value {
+		switch {
+		case r == '\n', r == '\r', r == 0:
+			out.WriteRune(' ')
+		case r < 0x20:
+			// Any other control character. Nothing legitimate contains one.
+			out.WriteRune(' ')
+		default:
+			out.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(out.String())
+}
+
 // managedMountUnit renders the unit for one location.
 func managedMountUnit(uuid, mountPoint, filesystem, description string) string {
+	description = unitSafe(description)
 	fstype := filesystem
 	if fstype == "" {
 		// systemd works it out. Homebase knows the type from the superblock, but

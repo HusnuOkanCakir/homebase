@@ -53,6 +53,31 @@ PrivateTmp=yes
 # start, and the error named a directory rather than the missing package.
 ReadWritePaths=-/etc/homebase -/var/lib/homebase -/srv/homebase -/run/homebase -/var/log/homebase
 
+# Mount units for managed disks are written here, and this is the widest grant
+# in the file, so it is worth being explicit about what it costs.
+#
+# A hostd that can write to /etc/systemd/system can write a unit that runs
+# anything as root at the next boot. That is persistence for an attacker who has
+# already compromised hostd, and it is the one place this sandbox stops being
+# defence in depth against exactly that.
+#
+# It is granted because the alternative is worse. Persistent mounts have to
+# exist somewhere systemd reads at boot, and the only other candidate is
+# /etc/fstab — a single file that the distribution and the installer also edit,
+# where a mistake produces an unbootable machine rather than a failed unit. See
+# ADR-0013.
+#
+# What narrows it is in the code rather than here: hostd only ever writes a path
+# derived from a validated location id under /srv/homebase/storage, the unit
+# name is derived from that path by systemd's own escaping rules, and the units
+# it generates are .mount units, which have no Exec directives at all. A test
+# asserts that last point, because it is the property that stops a generated
+# unit being a way to run something.
+#
+# `systemctl enable` needs no access here: systemctl asks PID 1 to write the
+# symlink, so that happens outside this sandbox.
+ReadWritePaths=/etc/systemd/system
+
 # AF_UNIX for the socket; AF_NETLINK for reading network state later. No
 # AF_INET: hostd never talks to the network, and should not be able to.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK

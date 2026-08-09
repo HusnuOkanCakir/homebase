@@ -148,3 +148,97 @@ func TestUnitsSayTheyAreGenerated(t *testing.T) {
 		t.Error("the unit does not warn that edits are lost")
 	}
 }
+
+// A generated unit must not be able to run anything.
+//
+// hostd is granted write access to /etc/systemd/system so that managed mounts
+// survive a reboot, which is the widest grant in its unit file. What keeps that
+// from being a generic execution path is that the only units it writes are
+// .mount units, and a .mount unit has no Exec directives.
+//
+// If this ever fails, the sandbox grant has become a way to run code as root at
+// boot, which is precisely what ADR-0006 exists to prevent.
+func TestGeneratedUnitsCannotRunAnything(t *testing.T) {
+	// Every value that could plausibly carry an injection: the description comes
+	// from a user-supplied location name.
+	unit := managedMountUnit(
+		"abcd-1234",
+		"/srv/homebase/storage/media",
+		"ext4",
+		"Homebase storage: Films",
+	)
+
+	for _, directive := range []string{
+		"ExecStart", "ExecStop", "ExecReload", "ExecStartPre", "ExecStartPost",
+		"ExecCondition", "ExecStopPost",
+	} {
+		if strings.Contains(unit, directive) {
+			t.Errorf("the generated unit contains %s, so it can run code as root", directive)
+		}
+	}
+
+	// And it is a mount unit, not a service. Only [Unit], [Mount] and [Install]
+	// sections; a [Service] section would be a different kind of unit entirely.
+	if strings.Contains(unit, "[Service]") {
+		t.Error("the generated unit has a [Service] section")
+	}
+	if !strings.Contains(unit, "[Mount]") {
+		t.Error("the generated unit is not a mount unit")
+	}
+}
+
+// A location name is typed by a user and lands in the unit's Description. A
+// newline in it would let the rest of the line become a new directive.
+func TestALocationNameCannotInjectADirective(t *testing.T) {
+	unit := managedMountUnit(
+		"abcd-1234",
+		"/srv/homebase/storage/media",
+		"ext4",
+		"Films\nExecStartPre=/bin/sh -c id",
+	)
+
+	// The generator refuses to emit a line break, so the injected text stays on
+	// the Description line where it means nothing.
+	for _, line := range strings.Split(unit, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "ExecStartPre=") {
+			t.Errorf("a location name became a directive:\n%s", unit)
+		}
+	}
+
+	// And the ids and labels that reach the rest of the system are validated
+	// separately, so this is not the only thing standing in the way.
+	if validFilesystemLabel("Films\nExecStartPre=/bin/sh -c id") {
+		t.Error("a label containing a newline was accepted")
+	}
+	if validLocationID.MatchString("films\nExecStartPre=x") {
+		t.Error("a location id containing a newline was accepted")
+	}
+}
+
+func TestControlCharactersNeverReachAUnitFile(t *testing.T) {
+	names := []string{
+		"Films\nExecStart=/bin/sh",
+		"Films\r\n[Service]",
+		"Films\x00hidden",
+		"Films\tand\ttabs",
+	}
+
+	for _, name := range names {
+		unit := managedMountUnit("abcd", "/srv/homebase/storage/media", "ext4", name)
+
+		// Exactly the lines the template defines, and no more. A name that could
+		// add one is a name that could add a directive.
+		descriptions := 0
+		for _, line := range strings.Split(unit, "\n") {
+			if strings.HasPrefix(line, "Description=") {
+				descriptions++
+			}
+			if strings.HasPrefix(line, "ExecStart") || line == "[Service]" {
+				t.Errorf("%q produced the line %q", name, line)
+			}
+		}
+		if descriptions != 1 {
+			t.Errorf("%q produced %d Description lines", name, descriptions)
+		}
+	}
+}
