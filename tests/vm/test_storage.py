@@ -39,6 +39,7 @@ from vmctl import (  # noqa: E402
     VM,
     VMError,
     attach_removable_disk,
+    install_docker,
     collect_logs,
     copy_to,
     create,
@@ -469,6 +470,134 @@ def verify_removing_the_location_keeps_the_data(vm: VM, marker: str) -> None:
           "Removing a location must never delete anything.")
 
 
+# --- The exit condition ---------------------------------------------------------
+#
+# "A USB disk can be added as Jellyfin's media storage, removed and reconnected
+# without corrupting anything." Everything above proves the disk half. This is
+# the half about an application, which is where the damage would actually happen.
+#
+# File Browser rather than Jellyfin: it declares exactly the same kind of
+# user-selected storage, and it is 60 MB rather than 1.8 GB. What is being tested
+# is the storage boundary, not the download.
+
+APP = "filebrowser"
+APP_STORAGE = "files"
+
+
+def install_catalogue(vm: VM) -> None:
+    step("Giving hostd a catalogue")
+
+    ssh(vm, ["sudo", "mkdir", "-p", "/usr/share/homebase/apps"])
+    for manifest in sorted((REPO_ROOT / "app-store").glob("*.json")):
+        write_file(vm, f"/usr/share/homebase/apps/{manifest.name}",
+                   manifest.read_text(), mode="0644")
+
+    # hostd reads the catalogue at startup.
+    ssh(vm, ["sudo", "systemctl", "restart", "homebase-hostd.service"], check=False)
+    apps = must(vm, "app.list")["applications"]
+    check(len(apps) >= 3, f"{len(apps)} applications available")
+
+
+def verify_an_application_refuses_to_start_without_its_disk(vm: VM) -> None:
+    step(f"Installing {APP} before choosing a disk for it")
+
+    status, body = op(vm, "app.install", {"id": APP}, timeout=900)
+    check(status != 200,
+          f"it refuses to install ({error_code(body)})",
+          "An application whose files have nowhere to go must not be installed "
+          "against a directory on the system disk.")
+    check(error_code(body) == "app.storage_not_assigned",
+          "and says a disk has not been chosen yet",
+          json.dumps(body))
+
+    error = body.get("error", {})
+    check(bool(error.get("recovery")),
+          "with something the user can do about it",
+          "A refusal with no remedy is a dead end.")
+
+
+def give_the_disk_to_the_application(vm: VM) -> None:
+    step(f"Choosing the disk for {APP}")
+
+    must(vm, "app.assign_storage",
+         {"id": APP, "storage_id": APP_STORAGE, "location": LOCATION},
+         confirmed=True)
+
+    storage = must(vm, "app.storage", {"id": APP})
+    check(storage["ready"], "it now has everywhere it needs",
+          json.dumps(storage.get("storage")))
+
+    slot = next(s for s in storage["storage"] if s["id"] == APP_STORAGE)
+    check(slot["path"].startswith(f"{STORAGE_ROOT}/{LOCATION}/"),
+          f"and its files go on the disk ({slot['path']})",
+          "Not on the system disk, which is the whole point.")
+
+
+def verify_it_runs_from_the_disk(vm: VM) -> str:
+    step(f"Installing {APP} now that it has somewhere to put things")
+
+    must(vm, "app.install", {"id": APP}, timeout=1800)
+
+    status = must(vm, "app.status", {"id": APP})
+    check(status["state"] == "running", f"it is running ({status['state']})")
+
+    # Its bind mount points at the disk, not at the system disk. Read from
+    # Docker rather than from Homebase, so this is what actually happened.
+    binds = ssh(vm, ["sudo", "docker", "inspect", f"homebase-{APP}",
+                     "--format", "{{json .HostConfig.Binds}}"], check=False).stdout.strip()
+    check(f"{STORAGE_ROOT}/{LOCATION}/" in binds,
+          "and its files really are on the disk",
+          f"binds: {binds}")
+
+    marker = "a file the user put there through the application"
+    ssh(vm, ["sudo", "sh", "-c",
+             f"echo '{marker}' > {STORAGE_ROOT}/{LOCATION}/{APP}/mine.txt"])
+    ok("a file written through its storage")
+    return marker
+
+
+def verify_it_refuses_to_start_with_the_disk_gone(vm: VM) -> None:
+    step("Unplugging the disk the application depends on")
+
+    must(vm, "app.stop", {"id": APP}, confirmed=True)
+    detach_removable_disk(vm)
+    ssh(vm, ["sudo", "umount", "-l", f"{STORAGE_ROOT}/{LOCATION}"], check=False)
+
+    status, body = op(vm, "app.start", {"id": APP})
+    check(status != 200,
+          f"it refuses to start ({error_code(body)})",
+          "A media server started without its media presents an empty library, "
+          "rebuilds its database from nothing, and fills the system disk. "
+          "Refusing is worse in the moment and better every time after it.")
+    check(error_code(body) == "app.storage_unavailable",
+          "and says the disk is not connected",
+          json.dumps(body))
+
+    message = body.get("error", {}).get("message", "")
+    check("Films drive" in message,
+          f"naming the disk to plug back in ({message!r})")
+
+
+def verify_it_works_again_once_the_disk_returns(vm: VM, marker: str) -> None:
+    step("Plugging the disk back in")
+
+    attach_removable_disk(vm)
+    must(vm, "storage.mount", {"id": LOCATION})
+    must(vm, "app.start", {"id": APP})
+
+    status = must(vm, "app.status", {"id": APP})
+    check(status["state"] == "running", f"the application starts again ({status['state']})")
+
+    content = ssh(vm, ["sudo", "cat", f"{STORAGE_ROOT}/{LOCATION}/{APP}/mine.txt"],
+                  check=False).stdout.strip()
+    check(content == marker,
+          "and the file it wrote is intact",
+          "Removed and reconnected without corrupting anything — the milestone's "
+          "exit condition, for an application rather than for a disk.")
+
+    must(vm, "app.uninstall", {"id": APP}, confirmed=True)
+
+
 # --- Driver -------------------------------------------------------------------
 
 
@@ -504,6 +633,16 @@ def main() -> int:
         verify_unplugging_is_noticed(vm)
         verify_nothing_can_write_while_it_is_absent(vm)
         verify_reconnecting_finds_it_again(vm, uuid, marker)
+
+        # The exit condition: the same disk, given to an application.
+        install_docker(vm, prepull=["filebrowser/filebrowser:v2.32.0"])
+        install_catalogue(vm)
+        verify_an_application_refuses_to_start_without_its_disk(vm)
+        give_the_disk_to_the_application(vm)
+        app_marker = verify_it_runs_from_the_disk(vm)
+        verify_it_refuses_to_start_with_the_disk_gone(vm)
+        verify_it_works_again_once_the_disk_returns(vm, app_marker)
+
         verify_removing_the_location_keeps_the_data(vm, marker)
 
         elapsed = int(time.time() - started)

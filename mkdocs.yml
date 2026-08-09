@@ -112,6 +112,7 @@ nav:
   - User guide:
       - Overview: user-guide/index.md
       - Applications: user-guide/applications.md
+      - Storage: user-guide/storage.md
 
 extra:
   social:
