@@ -703,6 +703,154 @@ func (s *StorageServices) resolveFormatTarget(params FormatParams) (Volume, erro
 	return target, nil
 }
 
+// --- Assignments --------------------------------------------------------------
+//
+// Which managed location holds an application's user-selected storage. Recorded
+// by hostd, in hostd's own state: core must not be able to change which disk an
+// application's files are on.
+
+// Assignment binds one of an application's declared storage slots to a location.
+type Assignment struct {
+	App       string `json:"app"`
+	StorageID string `json:"storage_id"`
+	Location  string `json:"location"`
+	// Subdirectory is where under the location the data lives. Applications get
+	// a directory of their own rather than the whole disk, so one disk can hold
+	// several applications' data without them seeing each other's.
+	Subdirectory string `json:"subdirectory"`
+	AssignedAt   string `json:"assigned_at"`
+}
+
+// Assignments returns everything assigned for one application.
+func (s *StorageServices) Assignments(app string) map[string]Assignment {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	assignments, err := s.loadAssignments()
+	if err != nil {
+		return nil
+	}
+
+	result := map[string]Assignment{}
+	for _, assignment := range assignments {
+		if assignment.App == app {
+			result[assignment.StorageID] = assignment
+		}
+	}
+	return result
+}
+
+// Assign records that a location holds one of an application's storage slots.
+func (s *StorageServices) Assign(app, storageID, locationID, subdirectory string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	locations, err := s.load()
+	if err != nil {
+		return err
+	}
+	location, _, found := findLocation(locations, locationID)
+	if !found {
+		return unknownLocation(locationID)
+	}
+
+	// Assigning a disk that is not connected would let a user set something up
+	// that cannot work, and find out later. Refused now, while they are looking
+	// at it.
+	state := s.describe(location)
+	if !state.Mounted {
+		return diskNotConnected(location)
+	}
+
+	assignments, err := s.loadAssignments()
+	if err != nil {
+		return err
+	}
+
+	next := Assignment{
+		App:          app,
+		StorageID:    storageID,
+		Location:     locationID,
+		Subdirectory: subdirectory,
+		AssignedAt:   time.Now().UTC().Format(time.RFC3339),
+	}
+
+	replaced := false
+	for i, existing := range assignments {
+		if existing.App == app && existing.StorageID == storageID {
+			assignments[i] = next
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		assignments = append(assignments, next)
+	}
+
+	return s.saveAssignments(assignments)
+}
+
+// Unassign forgets an application's assignments. Nothing on the disk is touched.
+func (s *StorageServices) Unassign(app string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	assignments, err := s.loadAssignments()
+	if err != nil {
+		return err
+	}
+
+	kept := assignments[:0]
+	for _, assignment := range assignments {
+		if assignment.App != app {
+			kept = append(kept, assignment)
+		}
+	}
+	return s.saveAssignments(kept)
+}
+
+func (s *StorageServices) assignmentFile() string {
+	return filepath.Join(filepath.Dir(s.stateFile), "assignments.json")
+}
+
+func (s *StorageServices) loadAssignments() ([]Assignment, error) {
+	data, err := os.ReadFile(s.assignmentFile())
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, internalError("reading assignments: " + err.Error())
+	}
+
+	var assignments []Assignment
+	if err := json.Unmarshal(data, &assignments); err != nil {
+		return nil, internalError("the storage assignments could not be read: " + err.Error())
+	}
+	return assignments, nil
+}
+
+func (s *StorageServices) saveAssignments(assignments []Assignment) error {
+	if err := os.MkdirAll(filepath.Dir(s.stateFile), 0o700); err != nil {
+		return internalError("creating the state directory: " + err.Error())
+	}
+
+	body, err := json.MarshalIndent(assignments, "", "  ")
+	if err != nil {
+		return internalError("encoding assignments: " + err.Error())
+	}
+
+	path := s.assignmentFile()
+	temporary := path + ".new"
+	if err := os.WriteFile(temporary, append(body, '\n'), 0o600); err != nil {
+		return internalError("writing " + temporary + ": " + err.Error())
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		os.Remove(temporary)
+		return internalError("saving assignments: " + err.Error())
+	}
+	return nil
+}
+
 // --- Resolving a location for an application ----------------------------------
 
 // ResolveLocation returns the mount point of a managed location, if it is

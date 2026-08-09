@@ -63,7 +63,8 @@ func main() {
 	storage := hostd.NewStorageServices(*storageDir, *stateDir)
 	hostd.RegisterStorageOperations(registry, storage)
 
-	hostd.RegisterAppOperations(registry, hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir))
+	hostd.RegisterAppOperations(registry,
+		hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir).WithStorage(storage))
 
 	// --describe needs no socket, no root and no audit log. It exists so that
 	// the privileged surface can be inspected — by a reviewer, by the docs

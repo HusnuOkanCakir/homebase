@@ -53,6 +53,11 @@ type AppServices struct {
 	// against escaping this root, not against the root being chosen.
 	dataRoot string
 
+	// storage resolves user-selected storage to a place on a disk. Optional:
+	// hostd runs without it, and an application declaring user-selected storage
+	// then refuses to install rather than quietly using the system disk.
+	storage *StorageServices
+
 	// stateDir holds hostd's own record of what it has done — currently which
 	// applications were stopped deliberately.
 	//
@@ -66,6 +71,12 @@ type AppServices struct {
 	stateDir string
 
 	docker *docker
+}
+
+// WithStorage gives the application operations access to managed disks.
+func (s *AppServices) WithStorage(storage *StorageServices) *AppServices {
+	s.storage = storage
+	return s
 }
 
 func NewAppServices(catalogue *Catalogue, dockerSocketPath, dataRoot, stateDir string) *AppServices {
@@ -176,6 +187,28 @@ func RegisterAppOperations(r *Registry, services *AppServices) {
 		Timeout:     5 * time.Minute,
 		Rollback:    "", // Cannot be undone. Stated, not implied.
 		Handler:     Typed(services.removeData),
+	})
+
+	r.MustRegister(Operation{
+		Name:    "app.assign_storage",
+		Summary: "Choose which disk holds one of an application's storage locations.",
+		// Medium: it changes where an application's files live, taking effect the
+		// next time it starts. Nothing is moved and nothing is deleted — data
+		// already written to the old location stays where it is.
+		Risk:        RiskMedium,
+		Permissions: []string{"apps.manage", "storage.modify"},
+		Confirm:     ConfirmRequired,
+		Timeout:     30 * time.Second,
+		Handler:     Typed(services.assignStorage),
+	})
+
+	r.MustRegister(Operation{
+		Name:    "app.storage",
+		Summary: "Report which disks an application's storage locations are on.",
+		Risk:    RiskRead,
+		Confirm: ConfirmNone,
+		Timeout: 15 * time.Second,
+		Handler: Typed(services.storageStatus),
 	})
 
 	r.MustRegister(Operation{
@@ -726,7 +759,20 @@ var deviceePaths = map[string]string{
 func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 	var binds []string
 
+	assignments := map[string]Assignment{}
+	if s.storage != nil {
+		assignments = s.storage.Assignments(manifest.ID)
+	}
+
 	for _, storage := range manifest.Storage {
+		if storage.Type == "user-selected" {
+			bind, err := s.prepareUserSelected(manifest, storage, assignments)
+			if err != nil {
+				return nil, err
+			}
+			binds = append(binds, bind)
+			continue
+		}
 		if storage.Type != "private" {
 			continue
 		}
@@ -763,6 +809,97 @@ func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 	}
 
 	return binds, nil
+}
+
+// prepareUserSelected resolves storage the user chose a disk for.
+//
+// Every failure here refuses rather than falling back. An application whose
+// media disk is missing must not start against an empty directory on the system
+// disk: it produces a media server with an empty library, a database rebuilt
+// from nothing, and a root filesystem quietly filling up. Refusing is worse in
+// the moment and better every time after it. See ADR-0013.
+func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment) (string, error) {
+	described := storage.Description
+	if described == "" {
+		described = storage.ID
+	}
+
+	if s.storage == nil {
+		return "", &Error{
+			Code:        "app.storage_not_assigned",
+			Message:     manifest.Name + " needs a disk before it can run.",
+			Detail:      "storage management is not available on this server",
+			Recoverable: false,
+			Status:      409,
+		}
+	}
+
+	assignment, assigned := assignments[storage.ID]
+	if !assigned {
+		return "", &Error{
+			Code:        "app.storage_not_assigned",
+			Message:     manifest.Name + " needs somewhere to keep its files.",
+			Detail:      described,
+			Recoverable: true,
+			Recovery: "Choose a disk for " + manifest.Name + " in the storage " +
+				"settings, then try again.",
+			Status: 409,
+		}
+	}
+
+	mountPoint, mounted := s.storage.ResolveLocation(assignment.Location)
+	if !mounted {
+		location, known := s.storage.LocationByID(assignment.Location)
+		name := assignment.Location
+		if known {
+			name = location.Name
+		}
+		return "", &Error{
+			Code:        "app.storage_unavailable",
+			Message:     manifest.Name + " cannot start because " + name + " is not connected.",
+			Detail:      described + " is on " + name,
+			Recoverable: true,
+			Recovery: "Plug " + name + " back in. " + manifest.Name +
+				" will start on its own once it is there.",
+			Status: 409,
+		}
+	}
+
+	// A directory of its own under the location, so one disk can hold several
+	// applications' files without them seeing each other's.
+	subdirectory := assignment.Subdirectory
+	if subdirectory == "" {
+		subdirectory = manifest.ID
+	}
+	hostPath := filepath.Join(mountPoint, subdirectory)
+
+	// Checked, because this path is about to be handed to a container as a bind
+	// mount and it was assembled from stored state.
+	if !strings.HasPrefix(hostPath, mountPoint+"/") || strings.Contains(hostPath, "..") {
+		return "", internalError("refusing to mount " + hostPath + ": outside " + mountPoint)
+	}
+
+	if err := os.MkdirAll(hostPath, 0o750); err != nil {
+		return "", &Error{
+			Code:        "app.storage_unavailable",
+			Message:     "Homebase could not use that disk for " + manifest.Name + ".",
+			Detail:      err.Error(),
+			Recoverable: true,
+			Recovery:    "The disk may be full, faulty or read-only.",
+			Status:      500,
+		}
+	}
+	if os.Geteuid() == 0 {
+		if err := chownToService(hostPath); err != nil {
+			return "", internalError("setting ownership on " + hostPath + ": " + err.Error())
+		}
+	}
+
+	mode := "rw"
+	if storage.ReadOnly() {
+		mode = "ro"
+	}
+	return hostPath + ":" + storage.MountPath + ":" + mode, nil
 }
 
 // checkResources refuses an install the machine cannot support, before spending
@@ -916,6 +1053,149 @@ func (s *AppServices) forgetStopped(id string) {
 func (s *AppServices) stoppedDeliberately(id string) bool {
 	_, err := os.Stat(s.stopMarker(id))
 	return err == nil
+}
+
+// --- Storage assignment -------------------------------------------------------
+
+type AssignStorageParams struct {
+	ID string `json:"id"`
+	// StorageID names which of the application's declared locations this is.
+	StorageID string `json:"storage_id"`
+	// Location is a managed storage location's id.
+	Location string `json:"location"`
+}
+
+// AppStorageSlot describes one of an application's declared storage locations
+// and what, if anything, is behind it.
+type AppStorageSlot struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	MountPath   string `json:"mount_path"`
+	ReadOnly    bool   `json:"read_only"`
+
+	// Location is the managed location assigned to this slot, for user-selected
+	// storage. Empty means nothing has been chosen yet.
+	Location     string `json:"location,omitempty"`
+	LocationName string `json:"location_name,omitempty"`
+
+	// Ready means this slot can be used right now. For private storage that is
+	// always true; for user-selected it means assigned and connected.
+	Ready bool `json:"ready"`
+
+	// Path is where the data actually lives, when it is resolvable.
+	Path string `json:"path,omitempty"`
+}
+
+func (s *AppServices) assignStorage(_ context.Context, params AssignStorageParams) (any, error) {
+	manifest, err := s.manifest(params.ID)
+	if err != nil {
+		return nil, err
+	}
+	if s.storage == nil {
+		return nil, internalError("storage management is not available")
+	}
+
+	var slot ManifestStorage
+	var found bool
+	for _, declared := range manifest.Storage {
+		if declared.ID == params.StorageID {
+			slot, found = declared, true
+		}
+	}
+	if !found {
+		return nil, &Error{
+			Code:        "app.unknown_storage",
+			Message:     manifest.Name + " has no storage location by that name.",
+			Detail:      params.StorageID,
+			Recoverable: false,
+			Status:      404,
+		}
+	}
+
+	// Private storage is Homebase's to place, not the user's. Allowing a disk to
+	// be chosen for it would move an application's own configuration onto a
+	// removable disk, and the application would then not start without it.
+	if slot.Type != "user-selected" {
+		return nil, &Error{
+			Code:        "app.storage_not_choosable",
+			Message:     "That part of " + manifest.Name + " is looked after by Homebase.",
+			Detail:      params.StorageID + " is " + slot.Type + " storage",
+			Recoverable: false,
+			Status:      409,
+		}
+	}
+
+	if err := s.storage.Assign(manifest.ID, slot.ID, params.Location, manifest.ID); err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"id":         manifest.ID,
+		"storage_id": slot.ID,
+		"location":   params.Location,
+		"message": manifest.Name + " will use that disk. " +
+			"It takes effect the next time it starts.",
+	}, nil
+}
+
+func (s *AppServices) storageStatus(_ context.Context, params AppRef) (any, error) {
+	manifest, err := s.manifest(params.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	assignments := map[string]Assignment{}
+	if s.storage != nil {
+		assignments = s.storage.Assignments(manifest.ID)
+	}
+
+	slots := make([]AppStorageSlot, 0, len(manifest.Storage))
+	for _, declared := range manifest.Storage {
+		slot := AppStorageSlot{
+			ID:          declared.ID,
+			Type:        declared.Type,
+			Description: declared.Description,
+			MountPath:   declared.MountPath,
+			ReadOnly:    declared.ReadOnly(),
+		}
+
+		if declared.Type != "user-selected" {
+			slot.Ready = true
+			slot.Path = filepath.Join(s.appDataDir(manifest.ID), declared.ID)
+			slots = append(slots, slot)
+			continue
+		}
+
+		if assignment, assigned := assignments[declared.ID]; assigned && s.storage != nil {
+			slot.Location = assignment.Location
+			if location, known := s.storage.LocationByID(assignment.Location); known {
+				slot.LocationName = location.Name
+			}
+			if mountPoint, mounted := s.storage.ResolveLocation(assignment.Location); mounted {
+				slot.Ready = true
+				slot.Path = filepath.Join(mountPoint, assignment.Subdirectory)
+			}
+		}
+		slots = append(slots, slot)
+	}
+
+	return map[string]any{
+		"id":      manifest.ID,
+		"name":    manifest.Name,
+		"storage": slots,
+		// ready is what decides whether the application can start at all.
+		"ready": allReady(slots),
+	}, nil
+}
+
+func allReady(slots []AppStorageSlot) bool {
+	for _, slot := range slots {
+		if !slot.Ready {
+			return false
+		}
+	}
+	return true
 }
 
 func boolPtr(v bool) *bool { return &v }
