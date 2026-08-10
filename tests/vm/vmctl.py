@@ -173,7 +173,18 @@ class VM:
         in that milestone is about a disk that is not there — mid-write, at boot,
         or between a user assigning it and an application starting.
         """
-        return self.dir / "removable.qcow2"
+        return self.removable_disk_at(0)
+
+    def removable_disk_at(self, slot: int) -> Path:
+        """One of several removable disks, by slot.
+
+        Backups need two: Homebase refuses to back up onto the disk an
+        application keeps its files on, so a machine with a single spare disk
+        can hold data or hold backups, but not both. That is not a limitation
+        of the test — it is the rule the product enforces, and a test with one
+        disk cannot reach the backup at all.
+        """
+        return self.dir / (f"removable{slot}.qcow2" if slot else "removable.qcow2")
 
     @property
     def qmp_socket(self) -> Path:
@@ -590,36 +601,38 @@ def qmp(vm: VM, command: str, **arguments) -> dict:
     raise VMError(f"QMP {command} returned nothing")
 
 
-def create_removable_disk(vm: VM, size_gb: int = 2) -> Path:
+def create_removable_disk(vm: VM, size_gb: int = 2, slot: int = 0) -> Path:
     """Create the disk image, without attaching it."""
-    if vm.removable_disk.exists():
-        vm.removable_disk.unlink()
+    path = vm.removable_disk_at(slot)
+    if path.exists():
+        path.unlink()
 
-    run(["qemu-img", "create", "-f", "qcow2", str(vm.removable_disk), f"{size_gb}G"])
-    ok(f"removable disk created ({size_gb} GB, not yet plugged in)")
-    return vm.removable_disk
+    run(["qemu-img", "create", "-f", "qcow2", str(path), f"{size_gb}G"])
+    ok(f"removable disk {slot} created ({size_gb} GB, not yet plugged in)")
+    return path
 
 
-def attach_removable_disk(vm: VM) -> None:
+def attach_removable_disk(vm: VM, slot: int = 0) -> None:
     """Plug the disk in, as a USB stick."""
-    if not vm.removable_disk.exists():
-        create_removable_disk(vm)
+    path = vm.removable_disk_at(slot)
+    if not path.exists():
+        create_removable_disk(vm, slot=slot)
 
     qmp(vm, "blockdev-add",
-        **{"node-name": "removable0", "driver": "qcow2",
-           "file": {"driver": "file", "filename": str(vm.removable_disk)}})
+        **{"node-name": f"removable{slot}", "driver": "qcow2",
+           "file": {"driver": "file", "filename": str(path)}})
     qmp(vm, "device_add",
-        driver="usb-storage", id="removable-stick",
-        drive="removable0", bus="xhci.0")
+        driver="usb-storage", id=f"removable-stick{slot}",
+        drive=f"removable{slot}", bus="xhci.0")
 
     # The guest needs a moment to notice and enumerate it.
     time.sleep(3)
-    ok("disk plugged in")
+    ok(f"disk {slot} plugged in")
 
 
-def detach_removable_disk(vm: VM) -> None:
+def detach_removable_disk(vm: VM, slot: int = 0) -> None:
     """Pull the disk out, without warning, exactly as a person would."""
-    qmp(vm, "device_del", id="removable-stick")
+    qmp(vm, "device_del", id=f"removable-stick{slot}")
 
     # device_del is a request: the guest is asked to release the device, and
     # blockdev-del fails while it is still in use. Retried rather than slept on,
@@ -627,8 +640,8 @@ def detach_removable_disk(vm: VM) -> None:
     for _ in range(20):
         time.sleep(1)
         try:
-            qmp(vm, "blockdev-del", **{"node-name": "removable0"})
-            ok("disk pulled out")
+            qmp(vm, "blockdev-del", **{"node-name": f"removable{slot}"})
+            ok(f"disk {slot} pulled out")
             return
         except VMError:
             continue
