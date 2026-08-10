@@ -262,6 +262,67 @@ def anonymise(path: str) -> str:
     return re.sub(r"\{[^}]*\}", "{}", path)
 
 
+def check_installer_seed(results: Results) -> None:
+    """The autoinstall template must be YAML, once its placeholders are filled.
+
+    Rendering happens in Go, and Go has no YAML parser here by choice. The
+    installer VM test settles the question definitively by handing the result to
+    Ubuntu, but it takes fifteen minutes — and an indentation slip in this file
+    is a machine that stops halfway through an installation with a question on a
+    screen nobody is watching. Worth catching in a second.
+    """
+    print("\nInstaller seed (internal/installer/user-data.yaml.in)")
+
+    template = Path("internal/installer/user-data.yaml.in")
+    if not template.exists():
+        results.fail(str(template), "not found")
+        return
+
+    text = template.read_text()
+
+    # The same substitutions homebasectl makes, with values shaped like the
+    # real ones. Anything left over is a placeholder nobody fills in.
+    filled = (
+        text.replace("@HOSTNAME@", "homebase")
+        .replace("@LOCALE@", "en_GB.UTF-8")
+        .replace("@KEYBOARD@", "gb")
+        .replace("@INSTALL_SSH@", "true")
+        .replace("@AUTHORIZED_KEYS@", "\n      - ssh-ed25519 AAAAExample a@b")
+        .replace("@SSH_FIREWALL@", "ufw allow 22/tcp")
+        .replace("@SEED_LABEL@", "CIDATA")
+        .replace("@VERSION@", "0.0.0")
+        .replace("@UBUNTU_RELEASE@", "24.04")
+    )
+
+    leftover = re.findall(r"@[A-Z][A-Z0-9_]*@", filled)
+    if leftover:
+        results.fail(
+            "every placeholder is filled",
+            f"nothing fills {', '.join(sorted(set(leftover)))} — it would reach a "
+            f"user's disk as literal text",
+        )
+        return
+
+    try:
+        parsed = yaml.safe_load(filled)
+    except yaml.YAMLError as exc:
+        results.fail("the rendered seed is valid YAML", str(exc)[:400])
+        return
+
+    autoinstall = (parsed or {}).get("autoinstall")
+    if not isinstance(autoinstall, dict):
+        results.fail("the seed has an autoinstall section", f"got {type(autoinstall)}")
+        return
+
+    results.ok("the rendered seed is valid YAML")
+
+    for key in ("version", "identity", "storage", "late-commands", "shutdown"):
+        if key not in autoinstall:
+            results.fail(f"autoinstall has {key}", "missing")
+        else:
+            results.ok(f"autoinstall has {key}")
+
+
 def main() -> int:
     if not EXPECTATIONS.exists():
         print(f"{EXPECTATIONS} not found.", file=sys.stderr)
@@ -277,6 +338,7 @@ def main() -> int:
 
     check_catalogue(results)
     check_api_routes(results)
+    check_installer_seed(results)
 
     print()
     if results.failures:

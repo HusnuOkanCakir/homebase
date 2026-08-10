@@ -35,6 +35,10 @@ import (
 
 const defaultDatabase = "/var/lib/homebase/homebase.db"
 
+// version is stamped in at build time, the same way core's is, and travels onto
+// the installation media so a machine can say which stick produced it.
+var version = "dev"
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "\n%s\n", err)
@@ -53,6 +57,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return recoveryCode(args[1:], stdout)
 	case "list-accounts":
 		return listAccounts(args[1:], stdout)
+	case "installer":
+		return installer(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		usage(stdout)
 		return nil
@@ -72,6 +78,10 @@ func usage(w io.Writer) {
 
   homebasectl list-accounts
         Show the accounts on this server.
+
+  homebasectl installer ...
+        Make Homebase installation media.
+        Run "homebasectl installer help" for what it can do.
 
 Options:
   --database PATH   Where Homebase keeps its database
