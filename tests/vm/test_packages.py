@@ -160,6 +160,21 @@ def verify_installed(vm: VM) -> None:
         state = ssh(vm, ["systemctl", "is-enabled", service], check=False).stdout.strip()
         check(state == "enabled", f"{service} is enabled at boot ({state})")
 
+    # The console tool, on PATH. It ships in the core package because it is what
+    # somebody reaches for when they cannot sign in — a recovery path that is
+    # not installed by the package is a recovery path nobody has. ADR-0015.
+    listing = ssh(vm, ["sudo", "homebasectl", "list-accounts"], check=False)
+    check(listing.returncode == 0,
+          "homebasectl is on PATH and can read the database",
+          (listing.stdout + listing.stderr).strip()[:300])
+
+    # Without sudo it must explain itself rather than appearing not to exist:
+    # /usr/bin rather than /usr/sbin is what buys that.
+    unprivileged = ssh(vm, ["homebasectl", "list-accounts"], check=False)
+    check("sudo" in (unprivileged.stdout + unprivileged.stderr).lower(),
+          "and without sudo it says to use sudo",
+          (unprivileged.stdout + unprivileged.stderr).strip()[:300])
+
     verify_socket_survives_a_restart(vm)
 
 
@@ -282,7 +297,8 @@ def verify_removal_keeps_data(vm: VM) -> None:
         check(state != "active", f"{service} is stopped ({state})")
 
     check(
-        ssh(vm, ["test", "-f", "/usr/libexec/homebase/core"], check=False).returncode != 0,
+        ssh(vm, ["test", "-f", "/usr/libexec/homebase/core"], check=False).returncode != 0
+        and ssh(vm, ["test", "-f", "/usr/bin/homebasectl"], check=False).returncode != 0,
         "the binaries are gone",
     )
     check(
