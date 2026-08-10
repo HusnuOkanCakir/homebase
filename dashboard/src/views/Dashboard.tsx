@@ -7,6 +7,7 @@ import { Applications } from "./Applications";
 import { Storage } from "./Storage";
 import { Backup } from "./Backup";
 import { Security } from "./Security";
+import { FirstSteps } from "./FirstSteps";
 import { Restarting } from "./Restarting";
 
 /**
@@ -125,7 +126,15 @@ export function Dashboard({ user, onSignOut }: Props) {
 
         {tab === "overview" ? (
           system ? (
-            <Overview system={system} onRebootStarted={setRebooting} />
+            <>
+              {/*
+                Above the machine's vital statistics, because on a server that
+                has just been claimed the useful thing is what to do next, not
+                how much memory is free.
+              */}
+              <FirstSteps system={system} onGo={setTab} />
+              <Overview system={system} onRebootStarted={setRebooting} />
+            </>
           ) : (
             !error && <p className="muted">Reading your server…</p>
           )

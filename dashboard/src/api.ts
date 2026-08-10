@@ -454,6 +454,16 @@ export const api = {
    * named so that a confirmation cannot be replayed against a different
    * machine — the dashboard passes it through rather than inventing one.
    */
+  /**
+   * Change what the server calls itself.
+   *
+   * Not a job, unlike everything else that changes the machine: renaming is
+   * three file writes and a syscall, and the first thing this does afterwards
+   * is read the name back.
+   */
+  rename: (name: string) =>
+    post<{ previous: string; name: string; message: string }>("/system/name", { name }),
+
   reboot: (confirm: string, reason?: string) =>
     post<Job>("/system/reboot", reason === undefined ? { confirm } : { confirm, reason }),
 

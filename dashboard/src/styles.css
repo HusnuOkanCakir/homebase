@@ -594,3 +594,48 @@ button:focus-visible {
     font-size: 1.25rem;
   }
 }
+
+/* --- Getting started ------------------------------------------------------ */
+
+/*
+ * The checklist a newly claimed server shows. Numbers are deliberately absent:
+ * nothing here has to be done in order, and a numbered list says otherwise.
+ */
+.steps {
+  list-style: none;
+  margin: 1rem 0;
+  padding: 0;
+}
+
+.step {
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.step:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.step-title {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-weight: 500;
+}
+
+/* Done steps stay on the list, greyed, so the remaining ones have a context. */
+.step-done .step-title {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
