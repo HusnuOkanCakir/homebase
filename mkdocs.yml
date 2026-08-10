@@ -114,6 +114,7 @@ nav:
       - Overview: user-guide/index.md
       - Applications: user-guide/applications.md
       - Storage: user-guide/storage.md
+      - Backup and restore: user-guide/backup.md
 
 extra:
   social:
