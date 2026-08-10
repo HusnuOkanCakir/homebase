@@ -40,7 +40,7 @@ $(STAMP): requirements-dev.txt
 # --- The full check ----------------------------------------------------------
 
 .PHONY: check
-check: hygiene lint validate docs-build ## Run every check CI runs
+check: hygiene lint validate docs-build go-lint ## Run every check CI runs
 	@echo
 	@echo "All checks passed."
 

@@ -37,9 +37,9 @@ func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, auth.ErrWeakPassword):
 		s.writeError(w, r, http.StatusUnprocessableEntity, apiError{
-			Code:    "auth.password_too_short",
-			Message: "Please choose a longer password.",
-			Detail:  "at least " + strconv.Itoa(auth.MinPasswordLen) + " characters",
+			Code:        "auth.password_too_short",
+			Message:     "Please choose a longer password.",
+			Detail:      "at least " + strconv.Itoa(auth.MinPasswordLen) + " characters",
 			Recoverable: true,
 			Recovery: "Choose a password of at least " +
 				strconv.Itoa(auth.MinPasswordLen) + " characters.",
@@ -58,7 +58,7 @@ func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 			Recoverable: true,
 			Recovery: "Check the code you wrote down when you set the server up. " +
 				"If you cannot find it, somebody with access to the server itself " +
-				"can set a new password from it.",
+				"can create a new one from it.",
 		})
 		return
 
