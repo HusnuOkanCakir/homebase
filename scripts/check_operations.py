@@ -43,6 +43,10 @@ EXPECTED = {
     "app.install": ("low", "none"),
     "app.list": ("read", "none"),
     "system.get_info": ("read", "none"),
+    # Renaming destroys nothing and can be done again, so it does not ask twice.
+    # Listed anyway: if it ever acquires a confirmation requirement, somebody has
+    # decided it is more dangerous than it looks, and that is worth seeing.
+    "system.rename": ("low", "none"),
     # Storage. format is the only operation that can destroy data Homebase never
     # created, and remove_location must never quietly become destructive: it
     # unmounts a disk and leaves everything on it alone.

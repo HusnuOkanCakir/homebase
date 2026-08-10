@@ -84,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("GET /api/v1/system", s.require(auth.PermSystemRead, s.handleSystem))
 	mux.Handle("POST /api/v1/system/reboot", s.require(auth.PermSystemManage, s.handleReboot))
+	mux.Handle("POST /api/v1/system/name", s.require(auth.PermSystemManage, s.handleRename))
 
 	mux.Handle("GET /api/v1/jobs", s.require(auth.PermSystemRead, s.handleListJobs))
 	mux.Handle("GET /api/v1/jobs/{id}", s.require(auth.PermSystemRead, s.handleGetJob))
@@ -381,6 +382,44 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.Us
 		"load_average": resources.LoadAverage,
 		"power":        resources.Power,
 	})
+}
+
+// handleRename changes what the machine calls itself.
+//
+// Not a job, and deliberately so. Every mutating endpoint in Homebase returns a
+// job because a client that has to know which operations are fast is one that
+// breaks the first time a "fast" one is not — but this is the exception the
+// convention allows for: renaming is three file writes and a syscall, it cannot
+// be interrupted usefully, and the first thing somebody does after it is read
+// the name back. A job here would be a job whose result is checked immediately
+// and never again.
+func (s *Server) handleRename(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !s.decode(w, r, &body) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	result, err := s.host.Rename(ctx, strings.TrimSpace(body.Name))
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	if result.Previous != result.Name {
+		// Worth an event: the name is how the machine is found, and somebody
+		// who cannot reach it afterwards should be able to see why.
+		s.events.Info(r.Context(), "system.renamed", result.Name,
+			"This server was renamed from "+result.Previous+" to "+result.Name+".")
+		s.log.Info("server renamed", "from", result.Previous, "to", result.Name,
+			"by", user.Username)
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleReboot(w http.ResponseWriter, r *http.Request, user *auth.User) {

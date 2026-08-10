@@ -239,6 +239,26 @@ func (c *Client) SystemResources(ctx context.Context) (*SystemResources, error) 
 // A successful return means the reboot was *accepted*, not that it finished.
 // Nothing can observe it finishing — the connection dies with the machine. See
 // the job system for how that is resolved afterwards.
+// Rename changes what the machine calls itself.
+func (c *Client) Rename(ctx context.Context, name string) (RenameResult, error) {
+	params := struct {
+		Name string `json:"name"`
+	}{Name: name}
+
+	var result RenameResult
+	if err := c.Call(ctx, "system.rename", params, true, &result); err != nil {
+		return RenameResult{}, err
+	}
+	return result, nil
+}
+
+// RenameResult is what the machine says it is called afterwards.
+type RenameResult struct {
+	Previous string `json:"previous"`
+	Name     string `json:"name"`
+	Message  string `json:"message"`
+}
+
 func (c *Client) Reboot(ctx context.Context, confirm, reason string) error {
 	params := struct {
 		Confirm string `json:"confirm"`

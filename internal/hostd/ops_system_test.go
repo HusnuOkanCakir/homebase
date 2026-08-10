@@ -3,6 +3,7 @@ package hostd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -221,5 +222,104 @@ func TestReadOperationsAreDeclaredHarmless(t *testing.T) {
 		if op.Confirm != ConfirmNone {
 			t.Errorf("%s: confirmation = %q; a read should not need confirming", name, op.Confirm)
 		}
+	}
+}
+
+// --- system.rename -----------------------------------------------------------
+
+// The name reaches /etc/hostname, which is read at boot and by anything
+// resolving this machine's name. hostd re-checks what core sends rather than
+// trusting it, so these are the rules that actually hold.
+func TestRenameRefusesNamesAMachineCannotHave(t *testing.T) {
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"", "empty"},
+		{"my server", "letters, digits and hyphens"},
+		{"kitchen.local", "letters, digits and hyphens"},
+		{"café", "letters, digits and hyphens"},
+		{"-leading", "start or end with a hyphen"},
+		{"trailing-", "start or end with a hyphen"},
+		{strings.Repeat("a", 64), "at most 63"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkHostname(tc.name)
+			if err == nil {
+				t.Fatalf("accepted %q", tc.name)
+			}
+			var e *Error
+			if !errors.As(err, &e) {
+				t.Fatalf("got %T, want *Error", err)
+			}
+			if e.Code != "system.invalid_name" {
+				t.Errorf("code = %q", e.Code)
+			}
+			if !strings.Contains(e.Detail, tc.want) {
+				t.Errorf("detail = %q, wanted something about %q", e.Detail, tc.want)
+			}
+			if e.Recovery == "" {
+				t.Error("a refusal with no way out is a dead end")
+			}
+		})
+	}
+}
+
+func TestRenameAcceptsOrdinaryNames(t *testing.T) {
+	for _, name := range []string{"homebase", "living-room", "Server2", "a", strings.Repeat("a", 63)} {
+		if err := checkHostname(name); err != nil {
+			t.Errorf("refused %q: %v", name, err)
+		}
+	}
+}
+
+// The hosts file keeps the machine able to resolve its own name. Getting this
+// wrong shows up as sudo taking ten seconds, which nobody connects to a rename.
+func TestRenameUpdatesTheHostsFileWithoutDisturbingIt(t *testing.T) {
+	original := strings.Join([]string{
+		"127.0.0.1\tlocalhost",
+		"127.0.1.1\told-name",
+		"",
+		"# The following lines are desirable for IPv6 capable hosts",
+		"::1     ip6-localhost ip6-loopback",
+		"192.168.1.50\tthe-printer",
+		"",
+	}, "\n")
+
+	rewritten, err := rewriteHosts(original, "old-name", "new-name")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(rewritten, "old-name") {
+		t.Error("the old name is still in the hosts file")
+	}
+	if !strings.Contains(rewritten, "127.0.1.1\tnew-name") {
+		t.Errorf("the new name is not mapped to 127.0.1.1:\n%s", rewritten)
+	}
+
+	// Everything somebody else put there stays.
+	for _, keep := range []string{"127.0.0.1", "localhost", "ip6-localhost",
+		"192.168.1.50", "the-printer", "# The following lines"} {
+		if !strings.Contains(rewritten, keep) {
+			t.Errorf("rewriting the hosts file lost %q:\n%s", keep, rewritten)
+		}
+	}
+}
+
+// A machine whose hosts file has no entry for itself must gain one, rather than
+// being renamed into a state where it cannot resolve its own name at all.
+func TestRenameAddsAHostsEntryWhenThereIsNone(t *testing.T) {
+	rewritten, err := rewriteHosts("127.0.0.1\tlocalhost\n", "old-name", "new-name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rewritten, "127.0.1.1\tnew-name") {
+		t.Errorf("no entry was added:\n%s", rewritten)
+	}
+	if !strings.Contains(rewritten, "localhost") {
+		t.Error("the existing entry was lost")
 	}
 }
