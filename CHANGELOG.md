@@ -144,6 +144,13 @@ Milestone 0 — contracts and project machinery. No product code.
 - Its own screen says where to browse to, worked out when the message is shown rather than
   written in at install time — a screen confidently showing the wrong address is worse than
   one showing none
+- A **getting-started list** on a newly claimed server: what is worth doing, and why. It
+  reads its state from what the server actually reports rather than remembering what was
+  clicked, so a disk that gets removed brings its step back
+- **Servers can be given a name.** `system.rename` asks systemd-hostnamed rather than
+  writing `/etc/hostname` itself, so the privileged service never needs write access to
+  `/etc`. Renaming is offered on the getting-started list while the machine still has the
+  name the installer gave it, and under **This server** for ever
 - **Password recovery** ([ADR-0015](docs/decisions/0015-password-recovery.md)). A recovery
   code shown once at first-run setup: 125 bits, five groups of five, from an alphabet with
   no `I`, `L`, `O` or `U` because it is copied off paper by hand. Stored as an argon2id

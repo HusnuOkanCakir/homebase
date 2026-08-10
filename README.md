@@ -15,7 +15,8 @@ configure backups without ever opening a terminal or learning Linux.
 > Homebase. A forgotten password is recoverable with a code written down at setup — which
 > travels with the backup, so it still works on a machine rebuilt from the disk.
 > There is now an installer: `homebasectl installer create` writes a USB stick that turns a
-> Windows laptop into a working server, with no Linux commands typed on it.
+> Windows laptop into a working server, with no Linux commands typed on it. A newly claimed
+> server says what is worth doing next, and can be given a name of its own.
 > What does not exist yet: the graphical tool for making that stick on Windows or macOS,
 > and backups on a schedule. See the [roadmap](ROADMAP.md).
 

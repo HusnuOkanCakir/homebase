@@ -7,8 +7,9 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–5 complete. Milestone 6 in progress — the installer
-works; the graphical controller and the guided first-use flow remain.**
+**Current position: Milestones 0–5 complete. Milestone 6 all but done — a USB stick turns a
+Windows laptop into a working server, and a new one says what to do next. The graphical
+tool for making that stick on Windows and macOS is split out and still to build.**
 
 ---
 
