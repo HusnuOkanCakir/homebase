@@ -153,7 +153,7 @@ func (s *Server) handleStopApp(w http.ResponseWriter, r *http.Request, user *aut
 	// Stopping takes a service away from whoever is using it, possibly somebody
 	// else in the house. hostd requires the confirmation; core is where it is
 	// obtained.
-	if !s.confirmedByName(w, r, app) {
+	if !s.confirmedByName(w, r, app.ID, app.Name) {
 		return
 	}
 	s.submitAppJob(w, r, user, appJob{
@@ -172,7 +172,7 @@ func (s *Server) handleRestartApp(w http.ResponseWriter, r *http.Request, user *
 	if !ok {
 		return
 	}
-	if !s.confirmedByName(w, r, app) {
+	if !s.confirmedByName(w, r, app.ID, app.Name) {
 		return
 	}
 	s.submitAppJob(w, r, user, appJob{
@@ -191,7 +191,7 @@ func (s *Server) handleUninstallApp(w http.ResponseWriter, r *http.Request, user
 	if !ok {
 		return
 	}
-	if !s.confirmedByName(w, r, app) {
+	if !s.confirmedByName(w, r, app.ID, app.Name) {
 		return
 	}
 	s.submitAppJob(w, r, user, appJob{
@@ -345,32 +345,6 @@ func (s *Server) appFor(w http.ResponseWriter, r *http.Request) (*hostclient.App
 	return app, true
 }
 
-// confirmedByName requires the request to name the application it is acting on.
-//
-// The name rather than a boolean, for the same reason the reboot confirmation is
-// the hostname: a `{"confirm": true}` a client can send by default is not a
-// confirmation, and a confirmation that names its target cannot be replayed
-// against a different application.
-func (s *Server) confirmedByName(w http.ResponseWriter, r *http.Request, app *hostclient.App) bool {
-	var body struct {
-		Confirm string `json:"confirm"`
-	}
-	if !s.decode(w, r, &body) {
-		return false
-	}
-	if body.Confirm != app.ID {
-		s.writeError(w, r, http.StatusPreconditionRequired, apiError{
-			Code:        "apps.confirmation_required",
-			Message:     "Please confirm you want to do that to " + app.Name + ".",
-			Detail:      "confirm must be " + app.ID,
-			Recoverable: true,
-			Recovery:    "Confirm the action, naming the application.",
-		})
-		return false
-	}
-	return true
-}
-
 func (s *Server) recordAppEvent(ctx context.Context, eventType string, severity events.Severity, subject, reason, message string) {
 	if s.events == nil {
 		return
@@ -396,6 +370,11 @@ func (s *Server) appFailureMessage(app *hostclient.App, err error) string {
 		return hostErr.Message
 	}
 	return "Something went wrong with " + app.Name + "."
+}
+
+// asAPIHostError unwraps a failure that came from hostd.
+func asAPIHostError(err error, target **hostclient.Error) bool {
+	return errors.As(err, target)
 }
 
 func hostErrorCode(err error) string {

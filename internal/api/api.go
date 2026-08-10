@@ -71,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/jobs/{id}/cancel", s.require(auth.PermSystemManage, s.handleCancelJob))
 
 	s.registerAppRoutes(mux)
+	s.registerStorageRoutes(mux)
 	s.registerEventRoutes(mux)
 
 	// The dashboard, when it is present. Registered last and at the root, so

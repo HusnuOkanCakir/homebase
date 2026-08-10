@@ -366,6 +366,27 @@ button:focus-visible {
   font-size: 0.85rem;
 }
 
+.storage-row {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.volume-list {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.volume-list li {
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+
 .row-between {
   justify-content: space-between;
   align-items: center;

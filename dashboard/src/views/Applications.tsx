@@ -5,7 +5,9 @@ import {
   watchJob,
   type Application,
   type ApplicationList,
+  type ApplicationStorage,
   type Job,
+  type StorageLocation,
 } from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
@@ -228,8 +230,34 @@ function ApplicationDetail({
 }: DetailProps) {
   const [confirming, setConfirming] = useState<null | "stop" | "uninstall" | "remove-data">(null);
   const [logs, setLogs] = useState<string | null>(null);
+  const [storage, setStorage] = useState<ApplicationStorage | null>(null);
+  const [locations, setLocations] = useState<StorageLocation[]>([]);
 
   const busy = job !== null && !isTerminal(job.state);
+
+  const refreshStorage = useCallback(async () => {
+    try {
+      const [appStorage, locationList] = await Promise.all([
+        api.appStorage(application.id),
+        api.locations(),
+      ]);
+      setStorage(appStorage);
+      setLocations(locationList.items);
+    } catch {
+      // Not fatal to the rest of the screen. An application with no
+      // user-selected storage does not need this to have worked.
+    }
+  }, [application.id]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshStorage();
+  }, [refreshStorage, job?.state]);
+
+  // Which storage the user has to make a decision about. Storage Homebase places
+  // itself is not shown: there is no choice to make, and listing it would turn a
+  // question into a list.
+  const needsADisk = (storage?.storage ?? []).filter((slot) => slot.type === "user-selected");
 
   return (
     <>
@@ -253,6 +281,25 @@ function ApplicationDetail({
         ) : null}
 
         {job ? <JobProgress job={job} /> : null}
+
+        {/* Before anything else, because it is why the application will not
+            start. An install button above an unexplained failure is worse than
+            no button. */}
+        {storage && !storage.ready ? (
+          <Message
+            tone="warning"
+            title={`${application.name} needs somewhere to keep your files.`}
+            detail={needsADisk
+              .filter((slot) => !slot.ready)
+              .map((slot) => slot.description || slot.id)
+              .join("; ")}
+            recovery={
+              locations.length === 0
+                ? "Set up a disk under Storage first, then come back here."
+                : "Choose a disk below."
+            }
+          />
+        ) : null}
 
         {/* An application that exited on its own has a reason, and the reason is
             in its logs. Saying so beats leaving somebody to guess. */}
@@ -369,6 +416,62 @@ function ApplicationDetail({
             onRun(application.id, () => api.removeAppData(application.id, application.id));
           }}
         />
+      ) : null}
+
+      {canManage && needsADisk.length > 0 ? (
+        <section className="card">
+          <h3>Where {application.name} keeps your files</h3>
+          <ul className="app-list">
+            {needsADisk.map((slot) => (
+              <li key={slot.id} className="storage-row">
+                <div className="app-row-main">
+                  <span className="app-row-name">{slot.description || slot.id}</span>
+                  {slot.ready ? (
+                    <span className="muted">On {slot.location_name}</span>
+                  ) : slot.location ? (
+                    <span className="muted">
+                      On {slot.location_name ?? slot.location}, which is not connected
+                    </span>
+                  ) : (
+                    <span className="muted">No disk chosen yet</span>
+                  )}
+                </div>
+
+                {locations.length === 0 ? (
+                  <p className="muted">
+                    There are no disks set up yet. Add one under Storage.
+                  </p>
+                ) : (
+                  <div className="row">
+                    {/* Every disk is listed and none is preselected. Homebase
+                        does not choose a disk for somebody, even when there is
+                        only one — "the obvious disk" is how the wrong one gets
+                        picked. */}
+                    {locations.map((location) => (
+                      <button
+                        key={location.id}
+                        className={location.id === slot.location ? "quiet tab-current" : "quiet"}
+                        disabled={busy || !location.mounted}
+                        onClick={() =>
+                          onRun(application.id, () =>
+                            api.assignStorage(application.id, slot.id, location.id),
+                          )
+                        }
+                      >
+                        {location.name}
+                        {!location.mounted ? " (not connected)" : ""}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="muted">
+            Changing this takes effect the next time {application.name} starts. Anything it
+            has already saved stays where it is.
+          </p>
+        </section>
       ) : null}
 
       <section className="card card-quiet">

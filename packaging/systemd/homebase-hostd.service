@@ -4,6 +4,25 @@ Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/security
 After=network.target
 Requires=homebase-hostd.socket
 
+# Give up rather than spin.
+#
+# Without a limit, a hostd that cannot start restarts every two seconds for
+# ever: the journal fills with the same error, and because the socket is owned
+# by systemd rather than by the service, every client request *connects* and
+# then hangs waiting for a reply that never comes. A caller sees a timeout
+# rather than a failure, which is the least diagnosable outcome available.
+#
+# Five attempts and then stay failed. `systemctl status` on a failed unit says
+# what went wrong; a crash-loop says it seven hundred times and buries the first
+# one.
+#
+# These belong in [Unit], not [Service]. systemd accepts them in [Service] only
+# as deprecated aliases on some versions and silently ignores them on others —
+# "Unknown key name 'StartLimitIntervalSec' in section 'Service', ignoring",
+# which is a warning nobody reads and a limit that never applies.
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
 [Service]
 Type=notify
 NotifyAccess=main
@@ -24,7 +43,40 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/etc/homebase /var/lib/homebase /srv/homebase /run/homebase /var/log/homebase
+# The leading `-` makes a missing path non-fatal.
+#
+# Without it, ProtectSystem=strict refuses to set up the mount namespace and
+# hostd exits 226/NAMESPACE before running a line of Go — so a directory that
+# has not been created yet stops the privileged service entirely. That is not
+# hypothetical: /etc/homebase is created by homebase-core's maintainer script,
+# so installing homebase-hostd on its own produced a service that could never
+# start, and the error named a directory rather than the missing package.
+ReadWritePaths=-/etc/homebase -/var/lib/homebase -/srv/homebase -/run/homebase -/var/log/homebase
+
+# Mount units for managed disks are written here, and this is the widest grant
+# in the file, so it is worth being explicit about what it costs.
+#
+# A hostd that can write to /etc/systemd/system can write a unit that runs
+# anything as root at the next boot. That is persistence for an attacker who has
+# already compromised hostd, and it is the one place this sandbox stops being
+# defence in depth against exactly that.
+#
+# It is granted because the alternative is worse. Persistent mounts have to
+# exist somewhere systemd reads at boot, and the only other candidate is
+# /etc/fstab — a single file that the distribution and the installer also edit,
+# where a mistake produces an unbootable machine rather than a failed unit. See
+# ADR-0013.
+#
+# What narrows it is in the code rather than here: hostd only ever writes a path
+# derived from a validated location id under /srv/homebase/storage, the unit
+# name is derived from that path by systemd's own escaping rules, and the units
+# it generates are .mount units, which have no Exec directives at all. A test
+# asserts that last point, because it is the property that stops a generated
+# unit being a way to run something.
+#
+# `systemctl enable` needs no access here: systemctl asks PID 1 to write the
+# symlink, so that happens outside this sandbox.
+ReadWritePaths=/etc/systemd/system
 
 # AF_UNIX for the socket; AF_NETLINK for reading network state later. No
 # AF_INET: hostd never talks to the network, and should not be able to.

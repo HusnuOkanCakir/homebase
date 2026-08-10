@@ -94,12 +94,35 @@ Milestone 0 — contracts and project machinery. No product code.
   written into its data directory is still there after the application is removed. It
   also reads `hostd`'s audit log to confirm nothing describing a container ever crossed
   the socket — ADR-0012 is a claim about the socket, so that is where it is checked
+- **Storage.** Disks are identified by filesystem UUID and mounted with systemd units
+  rather than `/etc/fstab` ([ADR-0013](docs/decisions/0013-storage-identity-and-mounting.md)).
+  Nine operations in `hostd`, nine endpoints in `core`, a dashboard screen, and the ability
+  to give a disk to an application — which then refuses to start without it rather than
+  writing to the system disk
+- `make vm-test-storage`: a real disk, hot-plugged over QEMU's monitor and pulled out
+  without warning. It checks that the disk is found again after being unplugged even though
+  the kernel gave it a different name, that a managed mount survives a reboot, that **not
+  even root can write into the mount point while the disk is absent**, and that an
+  application whose disk is gone refuses to start rather than running without its files
+- `make vm-run`: Homebase installed from its own packages onto a throwaway VM and left
+  running, with a blank disk plugged in. Every VM target before it created a machine,
+  asserted something and destroyed it — there was no way to simply use the thing
+- Disks filling up are noticed before applications start failing to write. A server that
+  runs out of space does not announce it: applications fail in whatever way each of them
+  fails, and the common cause is visible only to somebody who thinks to look
 - CI now checks `api/openapi.yaml` against the routes `core` actually serves, in both
   directions. A specification that has drifted is worse than none: it reads
   authoritatively and is wrong
 
 ### Changed
 
+- **Restarting `hostd` no longer leaves it unable to start.** Its unit hard-required
+  `/etc/homebase` in `ReadWritePaths`, which `homebase-core`'s maintainer script creates — so
+  installing `homebase-hostd` on its own gave a privileged service that exited
+  `226/NAMESPACE` before running a line of Go, and then retried every two seconds, 673 times,
+  because nothing limited it. The paths are optional now, hostd's own package creates what it
+  needs, and the unit gives up after five attempts and stays failed where `systemctl status`
+  can explain it
 - The Docker Engine API version is negotiated rather than pinned. Pinning was chosen so
   an upgraded Docker could not change a response shape underneath a root process, and
   that reasoning was wrong about how the Engine works: it does not negotiate downwards,

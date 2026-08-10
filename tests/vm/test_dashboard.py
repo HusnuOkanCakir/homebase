@@ -31,6 +31,8 @@ from vmctl import (  # noqa: E402
     destroy,
     fail,
     info,
+    attach_removable_disk,
+    create_removable_disk,
     install_docker,
     ok,
     ssh,
@@ -181,6 +183,7 @@ def run_browser_tests(vm: VM) -> None:
     step("Running the browser journey")
     info("first-run setup → overview → restart → real reboot → sign out")
     info("then: install an application → use it → reboot → remove it, data kept")
+    info("then: prepare a blank disk → set it up → give it to an application")
     print()
 
     env = {
@@ -235,12 +238,18 @@ def main() -> int:
         ok("chromium ready")
 
         vm = create(VM_NAME, force=True)
+        # A blank disk, so the storage journey has something to prepare. Plugged
+        # in after boot rather than present from the start, because that is how
+        # a user meets one.
+        create_removable_disk(vm, size_gb=2)
         start(vm)
         wait_for_ssh(vm)
         wait_for_boot_complete(vm)
 
-        install_docker(vm, prepull=["traefik/whoami:v1.10.4"])
+        install_docker(vm, prepull=["traefik/whoami:v1.10.4",
+                                    "filebrowser/filebrowser:v2.32.0"])
         install(vm, built)
+        attach_removable_disk(vm)
         verify_reachable(vm)
         run_browser_tests(vm)
 

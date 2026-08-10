@@ -240,6 +240,91 @@ export interface ApplicationList {
   unavailable?: Record<string, string>;
 }
 
+// --- Storage -----------------------------------------------------------------
+
+export interface Volume {
+  device: string;
+  path: string;
+  /**
+   * The filesystem's identity. Absent means this volume **cannot be assigned to
+   * an application** — there is no way to find it again reliably once it has
+   * been unplugged.
+   */
+  uuid?: string;
+  label?: string;
+  /** Empty means it was read and nothing recognisable was found. */
+  filesystem?: string;
+  /**
+   * Homebase could not read this volume.
+   *
+   * **Not the same as an empty `filesystem`.** One means "read it, found
+   * nothing"; this means "could not look". Never offer to erase on this basis:
+   * it may be somebody's photographs behind a disk that is failing.
+   */
+  unreadable: boolean;
+  size_bytes: number;
+  mount_point?: string;
+  read_only: boolean;
+}
+
+export interface Disk {
+  /**
+   * The kernel's current name. **Never store this.** It is assigned in
+   * discovery order, so a disk unplugged as `sda` can come back as `sdb`.
+   */
+  device: string;
+  path: string;
+  model?: string;
+  vendor?: string;
+  size_bytes: number;
+  removable: boolean;
+  transport?: "usb" | "sata" | "nvme" | "virtio" | "sd-card" | "";
+  /** Holds the running system. Homebase will not erase it, whatever is asked. */
+  system: boolean;
+  volumes: Volume[];
+}
+
+export interface StorageLocation {
+  id: string;
+  name: string;
+  uuid: string;
+  filesystem?: string;
+  label?: string;
+  added_at: string;
+  mount_point: string;
+  /** The disk is plugged in. */
+  connected: boolean;
+  /**
+   * And usable. Separate from `connected`, because a disk that is present but
+   * failed to mount is a different problem with a different remedy.
+   */
+  mounted: boolean;
+  read_only: boolean;
+  total_bytes?: number;
+  available_bytes?: number;
+  device?: string;
+}
+
+export interface ApplicationStorageSlot {
+  id: string;
+  type: "private" | "user-selected";
+  description?: string;
+  mount_path: string;
+  read_only: boolean;
+  location?: string;
+  location_name?: string;
+  ready: boolean;
+  path?: string;
+}
+
+export interface ApplicationStorage {
+  id: string;
+  name: string;
+  storage: ApplicationStorageSlot[];
+  /** False means the application cannot start, and will refuse rather than run. */
+  ready: boolean;
+}
+
 export type EventSeverity = "info" | "warning" | "error" | "critical";
 
 export interface Event {
@@ -340,6 +425,49 @@ export const api = {
 
   removeAppData: (id: string, confirm: string) =>
     post<Job>(`/apps/${encodeURIComponent(id)}/data/remove`, { confirm }),
+
+  // --- Storage ---------------------------------------------------------------
+  //
+  // Note what is absent: nothing here takes a device path or a mount point. A
+  // disk is named by its filesystem UUID and a location by its id, because
+  // `/dev/sdb` is not a stable name for anything — see ADR-0013.
+
+  disks: () => get<{ items: Disk[]; total: number }>("/storage/disks", 30_000),
+
+  locations: () =>
+    get<{ items: StorageLocation[]; total: number }>("/storage/locations", 30_000),
+
+  addLocation: (uuid: string, id: string, name: string) =>
+    post<Job>("/storage/locations", { uuid, id, name }),
+
+  removeLocation: (id: string, confirm: string) =>
+    post<Job>(`/storage/locations/${encodeURIComponent(id)}/remove`, { confirm }),
+
+  mountLocation: (id: string) =>
+    post<Job>(`/storage/locations/${encodeURIComponent(id)}/mount`),
+
+  unmountLocation: (id: string, confirm: string) =>
+    post<Job>(`/storage/locations/${encodeURIComponent(id)}/unmount`, { confirm }),
+
+  /**
+   * Erase a disk. There is no undo and no backup is taken first.
+   *
+   * `confirm` must repeat the disk's own identifier — the UUID, or the device
+   * path where it has no filesystem. Not a word like "yes": a confirmation
+   * somebody can satisfy by reflex is not a confirmation, and this is the one
+   * operation that can destroy data Homebase never created.
+   */
+  formatDisk: (target: { uuid?: string; device?: string }, label: string, confirm: string) =>
+    post<Job>("/storage/format", { ...target, label, confirm }),
+
+  appStorage: (id: string) =>
+    get<ApplicationStorage>(`/apps/${encodeURIComponent(id)}/storage`),
+
+  assignStorage: (app: string, storageID: string, location: string) =>
+    post<Job>(`/apps/${encodeURIComponent(app)}/storage`, {
+      storage_id: storageID,
+      location,
+    }),
 
   // --- Events ---------------------------------------------------------------
 

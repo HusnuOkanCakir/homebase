@@ -13,6 +13,7 @@
 | Page | Covers |
 |---|---|
 | [Applications](applications.md) | Installing, running and removing applications |
+| [Storage](storage.md) | Adding a disk, giving it to an application, unplugging safely |
 
 ## Planned
 
@@ -20,7 +21,6 @@
 |---|---|---|
 | Installation | Creating the USB stick, erasing the target laptop, first boot | 6 |
 | First steps | Administrator setup, naming the server, finding it on your network | 6 |
-| Storage | Attaching disks, assigning them to applications, safe removal | 4 |
 | Backup | Configuring backups, verifying them, restoring | 5 |
 | Networking | Wi-Fi, discovery, optional private remote access | 7 |
 | Updates | Channels, applying updates, rolling back | 8 |

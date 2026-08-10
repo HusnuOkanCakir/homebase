@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vmctl import (  # noqa: E402
     VM,
     VMError,
+    apt,
     collect_logs,
     create,
     destroy,
@@ -189,10 +190,11 @@ def install_homebase(vm: VM, packages: list[Path]) -> None:
         upload(vm, package, f"/tmp/{package.name}")
 
     names = " ".join(f"/tmp/{p.name}" for p in packages)
-    result = ssh(vm, ["sudo", "sh", "-c",
-                      f"DEBIAN_FRONTEND=noninteractive dpkg -i {names}"], check=False)
+    # apt rather than dpkg: homebase-apps depends on a container runtime, and
+    # dpkg does not resolve dependencies.
+    result = apt(vm, f"install -y -qq --allow-downgrades {names}", timeout=1200)
     if result.returncode != 0:
-        raise TestFailure(f"dpkg failed\n{result.stdout}\n{result.stderr}")
+        raise TestFailure(f"installing the packages failed\n{result.stdout}\n{result.stderr}")
 
     ssh(vm, ["sudo", "sh", "-c", "rm -f /tmp/*.deb"], check=False)
 

@@ -83,6 +83,33 @@ func (s *Server) expectNoBody(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
+// confirmedByName requires the request to name the thing it is acting on.
+//
+// The name rather than a boolean, and the same rule everywhere in Homebase: a
+// `{"confirm": true}` that a client can send by default is not a confirmation,
+// and one that names its target cannot be replayed against a different
+// application or a different disk. Typing it is also what makes somebody read
+// which one they picked, which a second button does not.
+func (s *Server) confirmedByName(w http.ResponseWriter, r *http.Request, id, name string) bool {
+	var body struct {
+		Confirm string `json:"confirm"`
+	}
+	if !s.decode(w, r, &body) {
+		return false
+	}
+	if body.Confirm != id {
+		s.writeError(w, r, http.StatusPreconditionRequired, apiError{
+			Code:        "confirmation_required",
+			Message:     "Please confirm you want to do that to " + name + ".",
+			Detail:      "confirm must be " + id,
+			Recoverable: true,
+			Recovery:    "Confirm the action, naming it exactly.",
+		})
+		return false
+	}
+	return true
+}
+
 func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, e apiError) {
 	if id, ok := r.Context().Value(requestIDKey).(string); ok {
 		e.RequestID = id

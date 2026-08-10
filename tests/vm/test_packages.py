@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from vmctl import (  # noqa: E402
     VM,
+    apt,
     VMError,
     collect_logs,
     create,
@@ -106,10 +107,7 @@ def install(vm: VM, packages: list[Path], what: str) -> None:
     # stop. This is also closer to what a user does, and it is the path where an
     # unsatisfiable dependency actually shows up.
     names = " ".join(f"/tmp/{p.name}" for p in packages)
-    result = ssh(vm, ["sudo", "sh", "-c",
-                      "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
-                      f"--allow-downgrades {names}"],
-                 check=False, timeout=1200)
+    result = apt(vm, f"install -y -qq --allow-downgrades {names}", timeout=1200)
     if result.returncode != 0:
         raise TestFailure(f"dpkg failed\n{result.stdout}\n{result.stderr}")
 
@@ -275,9 +273,7 @@ def verify_reboot(vm: VM) -> None:
 def verify_removal_keeps_data(vm: VM) -> None:
     step("Removing the packages does not take the data with them")
 
-    result = ssh(vm, ["sudo", "sh", "-c",
-                      "DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge "
-                      "homebase-dashboard homebase-core homebase-hostd"], check=False)
+    result = apt(vm, "remove -y --purge homebase-dashboard homebase-core homebase-apps homebase-hostd")
     if result.returncode != 0:
         raise TestFailure(f"purge failed\n{result.stdout}\n{result.stderr}")
 
@@ -327,8 +323,7 @@ def main() -> int:
         # homebase-apps depends on a container runtime, so apt needs an index to
         # resolve it from. Refreshed once, here, rather than on every install.
         step("Refreshing the package index")
-        ssh(vm, ["sudo", "sh", "-c",
-                 "DEBIAN_FRONTEND=noninteractive apt-get update -qq"], timeout=900)
+        apt(vm, "update -qq")
         ok("apt is ready")
 
         install(vm, first, "Installing on a clean machine")

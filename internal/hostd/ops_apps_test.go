@@ -1,6 +1,7 @@
 package hostd
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -395,5 +396,225 @@ func TestAPIVersionsCompareNumerically(t *testing.T) {
 		if got := compareAPIVersions(tc.a, tc.b); got != tc.want {
 			t.Errorf("compareAPIVersions(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
 		}
+	}
+}
+
+// --- User-selected storage ----------------------------------------------------
+
+// An application whose disk is missing must refuse to start, rather than running
+// against an empty directory on the system disk.
+//
+// This is ADR-0013's application-facing half. A media server started without its
+// media presents an empty library, rebuilds its database from nothing, and fills
+// the root filesystem — and none of that reports an error anywhere.
+func TestAnApplicationWithNoDiskChosenRefusesToStart(t *testing.T) {
+	s := appServices(t).WithStorage(storageServices(t))
+
+	manifest := Manifest{ManifestVersion: 1, ID: "jellyfin", Name: "Jellyfin"}
+	manifest.Container.Image = "example/app"
+	manifest.Container.Version = "1.0.0"
+	manifest.Storage = []ManifestStorage{
+		{ID: "config", Type: "private", MountPath: "/config"},
+		{ID: "media", Type: "user-selected", MountPath: "/media",
+			Description: "The folder holding your films"},
+	}
+
+	_, err := s.prepareStorage(manifest)
+	if err == nil {
+		t.Fatal("an application with unassigned storage was prepared anyway")
+	}
+
+	var hostErr *Error
+	if !asHostError(err, &hostErr) {
+		t.Fatalf("got %T: %v", err, err)
+	}
+	if hostErr.Code != "app.storage_not_assigned" {
+		t.Errorf("code = %q", hostErr.Code)
+	}
+	if !hostErr.Recoverable || hostErr.Recovery == "" {
+		t.Error("a user who has not chosen a disk yet was given no way forward")
+	}
+	if !strings.Contains(hostErr.Message, "Jellyfin") {
+		t.Errorf("the message does not name the application: %q", hostErr.Message)
+	}
+}
+
+// Assigned, but the disk is not plugged in. A different situation with a
+// different remedy, and it has to say so.
+func TestAnApplicationWhoseDiskIsUnpluggedRefusesToStart(t *testing.T) {
+	storage := storageServices(t)
+	if err := storage.save([]Location{
+		{ID: "media", Name: "Films drive", UUID: "not-connected-0000", Filesystem: "ext4"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Written directly: Assign refuses an unmounted disk, which is the point of
+	// that check, so the state it protects against is built by hand here.
+	if err := storage.saveAssignments([]Assignment{
+		{App: "jellyfin", StorageID: "media", Location: "media", Subdirectory: "jellyfin"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := appServices(t).WithStorage(storage)
+
+	manifest := Manifest{ManifestVersion: 1, ID: "jellyfin", Name: "Jellyfin"}
+	manifest.Container.Image = "example/app"
+	manifest.Container.Version = "1.0.0"
+	manifest.Storage = []ManifestStorage{
+		{ID: "media", Type: "user-selected", MountPath: "/media"},
+	}
+
+	_, err := s.prepareStorage(manifest)
+	if err == nil {
+		t.Fatal("an application started with its disk unplugged")
+	}
+
+	var hostErr *Error
+	if !asHostError(err, &hostErr) || hostErr.Code != "app.storage_unavailable" {
+		t.Fatalf("got %v", err)
+	}
+	if !strings.Contains(hostErr.Message, "Films drive") {
+		t.Errorf("the message does not name the disk to plug back in: %q", hostErr.Message)
+	}
+	if !hostErr.Recoverable {
+		t.Error("an unplugged disk was reported as unrecoverable")
+	}
+}
+
+// Private storage is Homebase's to place. Letting a user move it onto a
+// removable disk would mean the application does not start without that disk —
+// including the configuration that says which disk it wants.
+func TestPrivateStorageCannotBeMovedToAChosenDisk(t *testing.T) {
+	storage := storageServices(t)
+	catalogue := NewCatalogue(t.TempDir())
+	s := NewAppServices(catalogue, "", t.TempDir()+"/apps", t.TempDir()+"/state").
+		WithStorage(storage)
+
+	// A catalogue with one application, so manifest lookup succeeds.
+	manifest := map[string]any{
+		"manifest_version": 1, "id": "jellyfin", "name": "Jellyfin",
+		"container": map[string]any{"image": "example/app", "version": "1.0.0"},
+		"storage": []any{
+			map[string]any{"id": "config", "type": "private", "mount_path": "/config"},
+		},
+		"health": map[string]any{"type": "none"},
+	}
+	writeCatalogueFile(t, catalogue, "jellyfin.json", manifest)
+
+	_, err := s.assignStorage(t.Context(), AssignStorageParams{
+		ID: "jellyfin", StorageID: "config", Location: "media",
+	})
+	if err == nil {
+		t.Fatal("private storage was moved to a chosen disk")
+	}
+	var hostErr *Error
+	if !asHostError(err, &hostErr) || hostErr.Code != "app.storage_not_choosable" {
+		t.Errorf("got %v", err)
+	}
+}
+
+// Private storage is always ready; user-selected storage is not ready until a
+// disk is both chosen and connected. `ready` is what decides whether the
+// application can start at all.
+func TestStorageStatusReportsWhatIsMissing(t *testing.T) {
+	catalogue := NewCatalogue(t.TempDir())
+	s := NewAppServices(catalogue, "", t.TempDir()+"/apps", t.TempDir()+"/state").
+		WithStorage(storageServices(t))
+
+	writeCatalogueFile(t, catalogue, "jellyfin.json", map[string]any{
+		"manifest_version": 1, "id": "jellyfin", "name": "Jellyfin",
+		"container": map[string]any{"image": "example/app", "version": "1.0.0"},
+		"storage": []any{
+			map[string]any{"id": "config", "type": "private", "mount_path": "/config"},
+			map[string]any{"id": "media", "type": "user-selected", "mount_path": "/media"},
+		},
+		"health": map[string]any{"type": "none"},
+	})
+
+	result, err := s.storageStatus(t.Context(), AppRef{ID: "jellyfin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := result.(map[string]any)
+	if report["ready"] != false {
+		t.Error("an application with no disk chosen reported itself ready")
+	}
+
+	slots := report["storage"].([]AppStorageSlot)
+	byID := map[string]AppStorageSlot{}
+	for _, slot := range slots {
+		byID[slot.ID] = slot
+	}
+
+	if !byID["config"].Ready {
+		t.Error("private storage was reported as not ready")
+	}
+	if byID["media"].Ready {
+		t.Error("user-selected storage with no disk chosen was reported as ready")
+	}
+	if byID["media"].Location != "" {
+		t.Errorf("an unassigned slot named a location: %q", byID["media"].Location)
+	}
+}
+
+// Assigning a disk that is not connected is refused at the point of choosing,
+// while the user is looking at it — rather than letting them set up something
+// that cannot work and find out later.
+func TestAssigningADisconnectedDiskIsRefused(t *testing.T) {
+	storage := storageServices(t)
+	if err := storage.save([]Location{
+		{ID: "media", Name: "Films drive", UUID: "not-connected-0000"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := storage.Assign("jellyfin", "media", "media", "jellyfin")
+	if err == nil {
+		t.Fatal("a disconnected disk was accepted")
+	}
+	var hostErr *Error
+	if !asHostError(err, &hostErr) || hostErr.Code != "storage.disk_not_connected" {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestAssignmentsSurviveARestart(t *testing.T) {
+	root := t.TempDir() + "/storage"
+	state := t.TempDir() + "/state"
+
+	before := NewStorageServices(root, state)
+	if err := before.saveAssignments([]Assignment{
+		{App: "jellyfin", StorageID: "media", Location: "usb", Subdirectory: "jellyfin"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	after := NewStorageServices(root, state)
+	assignments := after.Assignments("jellyfin")
+	if len(assignments) != 1 || assignments["media"].Location != "usb" {
+		t.Fatalf("got %+v", assignments)
+	}
+
+	// And one application's assignments do not answer for another's.
+	if len(after.Assignments("filebrowser")) != 0 {
+		t.Error("another application inherited an assignment")
+	}
+}
+
+// writeCatalogueFile puts a manifest where a catalogue will find it.
+func writeCatalogueFile(t *testing.T, catalogue *Catalogue, name string, manifest map[string]any) {
+	t.Helper()
+
+	body, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(catalogue.dir, name), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalogue.Load(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -37,7 +37,8 @@ make check
 | 1 — VM lab ✅ | QEMU/KVM, OVMF, cloud-image-utils, **~40 GB free disk** | Booting real Ubuntu VMs for tests |
 | 2 — Core slice ✅ | Go 1.23+, Node 20+ | `core`, `hostd`, the dashboard |
 | 3 — Applications ✅ | Docker (Engine API 1.41+) | Container lifecycle |
-| 4 — Storage | A spare USB disk, or a second qcow2 attached to a VM | Nothing about disks can be tested without one |
+| 4 — Storage ✅ | A spare USB disk, or a second qcow2 attached to a VM | Nothing about disks can be tested without one |
+| 5 — Backup | Somewhere to back up *to* — a second disk | Restore is the half that has to work |
 
 Three things worth checking in advance rather than mid-task, because each has cost this
 project time already:
@@ -60,6 +61,8 @@ predates `gh label` and `gh run list --branch`. If you extend those scripts, sta
 
 ```sh
 make help                    # list targets
+make vm-run                  # Homebase on a throwaway VM, as a user would have it
+make vm-run-destroy          # …and get rid of it
 make run                     # run Homebase on this machine, in a browser
 make run-fresh               # the same, discarding the existing account and state
 
@@ -78,14 +81,30 @@ make vm-test-hostd           # hostd under real systemd
 make vm-test-core            # the API vertical slice
 make vm-test-dashboard       # the user journey, in a browser
 make vm-test-apps            # install an app, reboot, remove it; data must survive
+make vm-test-storage         # a real disk, unplugged mid-use; nothing may corrupt
 make vm-test-packages        # install, upgrade, reboot and purge the .debs
 make vm-destroy
 ```
 
-`make run` starts both services against a scratch directory under `./run/`. It is a
-development instance rather than an installation: both run as you rather than as `root` and
-the `homebase` account, application data goes under `./run/` instead of `/srv/homebase`, and
-restarting the server is refused on purpose — it would restart *your* machine.
+### Two ways to run it, answering different questions
+
+**`make vm-run`** installs the Debian packages onto a clean Ubuntu VM, plugs a blank 2 GB
+disk into it, and leaves it running with a URL to open. It takes about five minutes the first
+time. This is the one to use when the question is "does this work" — the privilege boundary
+is real, `hostd` is root and `core` is not, and restarting the server restarts the VM.
+
+It is also the only way to exercise storage, which needs root to mount anything, and the only
+way to try a restart without restarting your own machine.
+
+**`make run`** starts both services against a scratch directory under `./run/`, in about two
+seconds. This is the one to use while writing code. It is a development instance rather than
+an installation: both run as you, application data goes under `./run/` instead of
+`/srv/homebase`, restarting is refused on purpose, and storage mostly does not work.
+
+A rule that has already caught things twice: **anything about permissions, mounting, systemd
+or reboots is not tested until it has run in a VM.** Both bugs that made `hostd` unable to
+start at all — a missing directory and a crash-loop with no limit — passed every test on a
+developer machine.
 
 The `vm-test-*` targets each create a VM, exercise it, and destroy it — including on
 failure, after collecting diagnostics. A failing test that leaves a 20 GB disk image behind

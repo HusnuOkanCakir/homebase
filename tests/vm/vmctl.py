@@ -166,6 +166,20 @@ class VM:
         return self.dir / "seed.iso"
 
     @property
+    def removable_disk(self) -> Path:
+        """A disk that can be plugged and unplugged while the machine runs.
+
+        Storage cannot be tested honestly without one. Every interesting failure
+        in that milestone is about a disk that is not there — mid-write, at boot,
+        or between a user assigning it and an application starting.
+        """
+        return self.dir / "removable.qcow2"
+
+    @property
+    def qmp_socket(self) -> Path:
+        return self.dir / "qmp.sock"
+
+    @property
     def key(self) -> Path:
         return self.dir / "id_ed25519"
 
@@ -498,6 +512,12 @@ def start(vm: VM) -> None:
         "-device", "virtio-net-pci,netdev=net0",
         "-serial", f"file:{vm.console_log}",
         "-monitor", "none",
+        # A USB controller with nothing on it. Disks are attached at runtime
+        # rather than at boot, because the point is to plug and unplug them.
+        "-device", "qemu-xhci,id=xhci",
+        # QMP, so a test can do the plugging. `nowait` keeps QEMU from blocking
+        # on a client that may never connect — most tests never touch this.
+        "-qmp", f"unix:{vm.qmp_socket},server=on,wait=off",
     ]
 
     (vm.dir / "qemu.cmd").write_text(" ".join(cmd) + "\n")
@@ -521,9 +541,116 @@ def start(vm: VM) -> None:
     vm.save()
 
 
+# --- Removable disks ---------------------------------------------------------
+#
+# Spoken to QEMU over QMP rather than simulated. A test that "unplugs" a disk by
+# unmounting it proves nothing about the case that matters: the device going away
+# underneath a filesystem that is still mounted and still being written to.
+
+
+def qmp(vm: VM, command: str, **arguments) -> dict:
+    """Send one QMP command and return its reply."""
+    if not vm.qmp_socket.exists():
+        raise VMError(
+            f"'{vm.name}' has no QMP socket.",
+            "The VM was started by an older vmctl, or is not running. Recreate it.",
+        )
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(15)
+        client.connect(str(vm.qmp_socket))
+        reader = client.makefile("rwb")
+
+        # The greeting, then capabilities negotiation, before anything else is
+        # accepted.
+        reader.readline()
+        reader.write(json.dumps({"execute": "qmp_capabilities"}).encode() + b"\n")
+        reader.flush()
+        reader.readline()
+
+        request = {"execute": command}
+        if arguments:
+            request["arguments"] = arguments
+        reader.write(json.dumps(request).encode() + b"\n")
+        reader.flush()
+
+        # Events are interleaved with replies and are not what was asked for.
+        for _ in range(50):
+            line = reader.readline()
+            if not line:
+                break
+            reply = json.loads(line)
+            if "event" in reply:
+                continue
+            if "error" in reply:
+                raise VMError(
+                    f"QMP {command} failed: {reply['error'].get('desc', reply['error'])}")
+            return reply.get("return", {})
+
+    raise VMError(f"QMP {command} returned nothing")
+
+
+def create_removable_disk(vm: VM, size_gb: int = 2) -> Path:
+    """Create the disk image, without attaching it."""
+    if vm.removable_disk.exists():
+        vm.removable_disk.unlink()
+
+    run(["qemu-img", "create", "-f", "qcow2", str(vm.removable_disk), f"{size_gb}G"])
+    ok(f"removable disk created ({size_gb} GB, not yet plugged in)")
+    return vm.removable_disk
+
+
+def attach_removable_disk(vm: VM) -> None:
+    """Plug the disk in, as a USB stick."""
+    if not vm.removable_disk.exists():
+        create_removable_disk(vm)
+
+    qmp(vm, "blockdev-add",
+        **{"node-name": "removable0", "driver": "qcow2",
+           "file": {"driver": "file", "filename": str(vm.removable_disk)}})
+    qmp(vm, "device_add",
+        driver="usb-storage", id="removable-stick",
+        drive="removable0", bus="xhci.0")
+
+    # The guest needs a moment to notice and enumerate it.
+    time.sleep(3)
+    ok("disk plugged in")
+
+
+def detach_removable_disk(vm: VM) -> None:
+    """Pull the disk out, without warning, exactly as a person would."""
+    qmp(vm, "device_del", id="removable-stick")
+
+    # device_del is a request: the guest is asked to release the device, and
+    # blockdev-del fails while it is still in use. Retried rather than slept on,
+    # because how long it takes depends on what the guest was doing with it.
+    for _ in range(20):
+        time.sleep(1)
+        try:
+            qmp(vm, "blockdev-del", **{"node-name": "removable0"})
+            ok("disk pulled out")
+            return
+        except VMError:
+            continue
+
+    raise VMError(
+        "The guest would not release the disk.",
+        "Something still has it open. That is worth understanding rather than "
+        "forcing: on real hardware the user pulls the plug regardless, and what "
+        "happens next is the thing being tested.")
+
+
 def ssh_args(vm: VM) -> list[str]:
     return [
         "ssh",
+        # A C locale in the guest, always.
+        #
+        # ssh forwards the client's LC_* variables by default, and a guest with
+        # no matching locale answers every command with a dozen lines of perl
+        # warnings. Those lines are what a failing command's captured output
+        # ends with, so the real error scrolls off — an apt failure was reported
+        # as "LC_TELEPHONE = de_CH.UTF-8" and nothing else.
+        "-o", "SetEnv=LC_ALL=C LANG=C",
         "-i", str(vm.key),
         "-p", str(vm.ssh_port),
         "-o", "StrictHostKeyChecking=no",
@@ -736,6 +863,27 @@ def reboot(vm: VM) -> None:
     ok(f"rebooted (boot_id {boot_id_before[:8]}… → {boot_id_after[:8]}…)")
 
 
+def apt(vm: VM, arguments: str, timeout: int = 900) -> subprocess.CompletedProcess:
+    """Run apt in the guest, without it pulling the floor out from under us.
+
+    Two environment variables, both load-bearing:
+
+    DEBIAN_FRONTEND=noninteractive stops a package stopping to ask a question
+    nobody is there to answer.
+
+    NEEDRESTART_SUSPEND stops Ubuntu's needrestart deciding, part-way through an
+    install, that ssh.service should be restarted — which drops the connection
+    the command is running over. That failure looks like "Connection closed by
+    remote host" with no other explanation, arrives intermittently, and is
+    entirely a property of installing something that touches a library sshd
+    links against. Installing docker.io does.
+    """
+    return ssh(vm, ["sudo", "sh", "-c",
+                    "DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 "
+                    "NEEDRESTART_MODE=l apt-get " + arguments],
+               check=False, timeout=timeout)
+
+
 def install_docker(vm: VM, prepull: list[str] | None = None) -> str:
     """Install a container runtime in the guest, and return the API version it speaks.
 
@@ -752,10 +900,12 @@ def install_docker(vm: VM, prepull: list[str] | None = None) -> str:
     """
     step("Installing Docker")
 
-    result = ssh(vm, ["sudo", "sh", "-c",
-                      "DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
-                      "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io"],
-                 check=False, timeout=900)
+    result = apt(vm, "update -qq")
+    if result.returncode != 0:
+        raise VMError("apt-get update failed",
+                      (result.stderr or result.stdout).strip()[-600:])
+
+    result = apt(vm, "install -y -qq docker.io")
     if result.returncode != 0:
         raise VMError("installing docker.io failed",
                       (result.stderr or result.stdout).strip()[-600:])

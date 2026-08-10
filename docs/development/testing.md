@@ -129,6 +129,14 @@ would pass on an implementation that wiped the disk. It also reads `hostd`'s aud
 confirm nothing describing a container ever crossed the socket, because
 [ADR-0012](../decisions/0012-hostd-owns-the-catalogue.md) is a claim about the socket.
 
+**`make vm-test-storage`** attaches a real disk over QEMU's monitor and **pulls it out
+without warning while it is mounted**. That distinction is the test: unmounting is the tidy
+case, and the one that destroys data is the device disappearing underneath a filesystem that
+is still being written to. It checks that the disk is found again despite the kernel giving
+it a different name, that a managed mount survives a reboot, that not even root can write
+into the mount point while the disk is absent, and that an application whose disk is gone
+refuses to start rather than running without its files.
+
 **`make vm-test-packages`** installs, upgrades, reinstalls, reboots and purges the `.deb`s
 on a clean machine, with a real administrator account and a real file intact throughout —
 including after purge, which deliberately keeps user data.
@@ -146,6 +154,9 @@ list is the argument for why these tests are worth their twelve minutes.
 | `vm-test-apps` | `/srv/homebase/apps/<id>` was `0750 root:root`, so `core` could not traverse into it to back the data up. Silent |
 | `vm-test-packages` | Restarting `hostd` deleted its own socket, while the socket unit went on reporting itself healthy. **Every upgrade restarts `hostd`** |
 | `vm-test-core` | Both units declared `StateDirectory=homebase` as different users, so `core`'s database became root-owned |
+| `vm-test-storage` | A `0555` mount point does not stop root — and an application container frequently runs as root, so the protection worked against every writer except the most likely one |
+| `vm-test-storage` | `hostd` exited `226/NAMESPACE` before running a line of Go, because its unit hard-required a directory *core's* package creates. Installing `homebase-hostd` alone was impossible |
+| `vm-test-storage` | …and it then restarted every two seconds, 673 times, with no start limit. Because the socket belongs to systemd, clients connected and hung rather than failing |
 
 The pattern is worth naming: every one is a property of the *deployment* rather than of the
 code, and every one is silent. Nothing crashed, no test went red, and `systemctl status`

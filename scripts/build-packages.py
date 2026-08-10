@@ -90,6 +90,22 @@ if ! getent group homebase >/dev/null; then
 fi
 
 if [ "$1" = "configure" ]; then
+    # The directories hostd itself needs, created here rather than relying on
+    # homebase-core's script. hostd runs under ProtectSystem=strict, so a
+    # directory in ReadWritePaths that does not exist used to stop it starting
+    # at all — and homebase-hostd can be installed without homebase-core.
+    #
+    # Owned by root, with group homebase. hostd creates the *group* above; the
+    # homebase *user* is created by homebase-core, which may not be installed —
+    # so referring to it here fails with "invalid user 'homebase'" and takes the
+    # whole package down with it.
+    #
+    # core's own script sets /var/log/homebase to homebase:homebase when it
+    # arrives. Both orders work: `install -d` updates an existing directory, and
+    # hostd writes its audit log as root either way.
+    install -d -o root -g homebase -m 0750 /etc/homebase
+    install -d -o root -g homebase -m 0770 /var/log/homebase
+
     systemctl daemon-reload >/dev/null 2>&1 || true
     # The socket, not the service: hostd is socket-activated, so it starts on
     # the first connection and is not running the rest of the time.
