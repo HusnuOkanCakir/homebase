@@ -14,7 +14,9 @@ Run with `make vm-test-dashboard`.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -74,12 +76,13 @@ def build() -> dict[str, Path]:
     out.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "CGO_ENABLED": "0", "GOOS": "linux", "GOARCH": "amd64"}
     result = subprocess.run(
-        ["go", "build", "-trimpath", "-o", str(out) + "/", "./cmd/core", "./cmd/hostd"],
+        ["go", "build", "-trimpath", "-o", str(out) + "/",
+         "./cmd/core", "./cmd/hostd", "./cmd/homebasectl"],
         cwd=REPO_ROOT, capture_output=True, text=True, env=env,
     )
     if result.returncode != 0:
         raise VMError("go build failed", result.stderr.strip()[:800])
-    ok("core and hostd")
+    ok("core, hostd and homebasectl")
 
     if not (DASHBOARD / "node_modules").exists():
         info("installing dashboard dependencies…")
@@ -90,7 +93,8 @@ def build() -> dict[str, Path]:
     size = sum(f.stat().st_size for f in dist.rglob("*") if f.is_file())
     ok(f"dashboard ({size // 1024} KB)")
 
-    return {"core": out / "core", "hostd": out / "hostd", "dist": dist}
+    return {"core": out / "core", "hostd": out / "hostd",
+            "homebasectl": out / "homebasectl", "dist": dist}
 
 
 def install(vm: VM, built: dict[str, Path]) -> None:
@@ -116,6 +120,10 @@ def install(vm: VM, built: dict[str, Path]) -> None:
 
     for name in ("core", "hostd"):
         copy_to(vm, built[name], f"/usr/libexec/homebase/{name}", mode="0755")
+
+    # On PATH rather than in libexec: it is the one part of Homebase somebody is
+    # ever told to type, and they reach for it when they cannot sign in.
+    copy_to(vm, built["homebasectl"], "/usr/bin/homebasectl", mode="0755")
 
     # The built dashboard: a handful of files, sent as a tarball so this is one
     # transfer rather than one per asset.
@@ -193,6 +201,7 @@ def run_browser_tests(vm: VM) -> None:
     info("then: prepare a blank disk → set it up → give it to an application")
     info("then: be refused a backup onto that disk → set up a second one")
     info("then: back the whole thing up, check it, and preview restoring it")
+    info("then: lose the password, and use the recovery code to get back in")
     print()
 
     env = {
@@ -210,6 +219,74 @@ def run_browser_tests(vm: VM) -> None:
 
     print()
     ok("every step of the journey passed")
+
+
+def verify_the_console_way_back_in(vm: VM) -> None:
+    """The path for somebody who has lost the paper too.
+
+    ADR-0015. Everything else about recovery happens in a browser, and is
+    covered there. This is the part that cannot be: a person standing at the
+    machine because the code they wrote down at setup is gone.
+
+    It runs against the real database core has been using all journey, which is
+    the only way to find out whether a second process can open it at all — core
+    holds it open with a write-ahead log, and a tool that cannot read it while
+    the server is running is a tool that does not work when it is needed.
+    """
+    step("The way back in from the console")
+
+    listing = ssh(vm, ["sudo", "homebasectl", "list-accounts"], check=False)
+    check("okan" in listing.stdout,
+          f"the accounts on this server are listed ({listing.stdout.strip()})",
+          listing.stdout + listing.stderr)
+
+    result = ssh(vm, ["sudo", "homebasectl", "recovery-code"], check=False)
+    check(result.returncode == 0, "a recovery code is issued from the console",
+          result.stdout + result.stderr)
+
+    code = ""
+    for word in result.stdout.split():
+        if re.fullmatch(r"[0-9A-HJ-KM-NP-TV-Z]{5}(-[0-9A-HJ-KM-NP-TV-Z]{5}){4}", word):
+            code = word
+    check(bool(code), "and printed in the shape a person can copy down",
+          result.stdout)
+
+    check("shown once" in result.stdout,
+          "with the warning that it will not be shown again")
+
+    # The claim worth testing: this code, typed into the browser, opens the
+    # server. Anything less proves only that a string was printed.
+    recovered = subprocess.run(
+        ["curl", "--silent", "--show-error", "--max-time", "30",
+         "-o", "/dev/null", "-w", "%{http_code}",
+         "-X", "POST", "-H", "Content-Type: application/json",
+         "-d", json.dumps({
+             "username": "okan",
+             "recovery_code": code,
+             "new_password": "a-password-set-from-the-console-code",
+         }),
+         f"http://127.0.0.1:{vm.api_port}/api/v1/auth/recover"],
+        capture_output=True, text=True,
+    )
+    check(recovered.stdout.strip() == "200",
+          "and it really does open the server",
+          f"the recovery endpoint answered {recovered.stdout.strip()}")
+
+    # Spent. A code that keeps working is a permanent key printed on a screen.
+    again = subprocess.run(
+        ["curl", "--silent", "--max-time", "30",
+         "-o", "/dev/null", "-w", "%{http_code}",
+         "-X", "POST", "-H", "Content-Type: application/json",
+         "-d", json.dumps({
+             "username": "okan",
+             "recovery_code": code,
+             "new_password": "another-password-entirely-here",
+         }),
+         f"http://127.0.0.1:{vm.api_port}/api/v1/auth/recover"],
+        capture_output=True, text=True,
+    )
+    check(again.stdout.strip() == "401", "and stops working once it is used",
+          f"the second attempt answered {again.stdout.strip()}")
 
 
 def ensure_browser() -> None:
@@ -268,6 +345,7 @@ def main() -> int:
         attach_removable_disk(vm, slot=1)
         verify_reachable(vm)
         run_browser_tests(vm)
+        verify_the_console_way_back_in(vm)
 
         elapsed = int(time.time() - started)
         print()
