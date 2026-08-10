@@ -69,8 +69,13 @@ def check(condition: bool, description: str, detail: str = "") -> None:
         raise TestFailure(f"{description}\n    {detail}" if detail else description)
 
 
-def build_media(vm: VM) -> tuple[Path, Path]:
-    """Build the packages and the seed, using the tool a user would use."""
+def build_media(vm: VM) -> Path:
+    """Build the installation media with the tool a user would use.
+
+    The whole stick, not the ISO plus a seed handed to QEMU separately: what
+    boots here is byte for byte what `homebasectl installer create` writes to a
+    USB drive, so the thing being tested is the thing being shipped.
+    """
     step("Building the installation media")
 
     result = subprocess.run(
@@ -108,25 +113,28 @@ def build_media(vm: VM) -> tuple[Path, Path]:
     run(["ssh-keygen", "-t", "ed25519", "-N", "", "-f", str(key), "-q", "-C", "installer-test"])
     public_key = key.with_suffix(".pub").read_text().strip()
 
-    seed = vm.dir / "seed.img"
+    iso = ic.fetch_iso()
+
+    media = vm.dir / "installer.img"
     made = subprocess.run(
-        [str(REPO_ROOT / "bin" / "homebasectl"), "installer", "seed",
-         "--output", str(seed),
+        [str(REPO_ROOT / "bin" / "homebasectl"), "installer", "create",
+         "--iso", str(iso),
          "--packages", str(dist),
+         "--output", str(media),
          "--hostname", "homebase",
          "--authorized-key", public_key],
         capture_output=True, text=True,
     )
     if made.returncode != 0:
-        raise VMError("homebasectl installer seed failed",
+        raise VMError("homebasectl installer create failed",
                       (made.stderr or made.stdout).strip()[:800])
-    ok(f"a seed volume built by homebasectl ({seed.stat().st_size // 1024} KB)")
+    ok(f"media built by homebasectl ({media.stat().st_size // 1024 // 1024} MB)")
 
-    return ic.fetch_iso(), seed
+    return media
 
 
-def install(vm: VM, iso: Path, seed: Path) -> None:
-    ic.boot_installer(vm, iso, seed)
+def install(vm: VM, media: Path) -> None:
+    ic.boot_installer(vm, media)
     ic.wait_for_confirmation_prompt(vm)
     ic.wait_for_install(vm, timeout=ic.INSTALL_TIMEOUT_S)
 
@@ -137,8 +145,11 @@ def verify_the_machine_works(vm: VM) -> None:
     # The installer's account, not the lab's.
     vmctl.SSH_USER = CONSOLE_USER
 
-    time.sleep(20)
-    wait_for_ssh(vm, timeout=600)
+    # This is the real finish line. The machine reboots itself at the end of the
+    # install, and because the disk has boot priority it comes back up as the
+    # system that was just installed — so a machine answering here has genuinely
+    # completed, bootloader and all.
+    wait_for_ssh(vm, timeout=900)
 
     stamp = ssh(vm, ["cat", "/etc/homebase-installed"], check=False).stdout
     check("installed_by=homebase-installer" in stamp,
@@ -325,12 +336,13 @@ def main() -> int:
     print()
 
     try:
+        ic.check_host_memory()
         destroy(VM_NAME)
         vm = ic.create_target(VM_NAME, force=True)
         ic.put_windows_on(vm)
 
-        iso, seed = build_media(vm)
-        install(vm, iso, seed)
+        media = build_media(vm)
+        install(vm, media)
 
         verify_the_machine_works(vm)
         verify_the_laptop_behaviour(vm)
@@ -358,8 +370,16 @@ def main() -> int:
         return 1
 
     finally:
-        if vm is not None:
+        # Left running on request, because the interesting failures here are on
+        # the machine rather than in the output: "the stamp file is missing" is
+        # a sentence, and `ls /etc` is an answer.
+        #
+        #     HOMEBASE_KEEP_VM=1 make vm-test-installer
+        if vm is not None and not os.environ.get("HOMEBASE_KEEP_VM"):
             destroy(VM_NAME)
+        elif vm is not None:
+            info(f"'{VM_NAME}' left running: "
+                 f"ssh -i {vm.key} -p {vm.ssh_port} {CONSOLE_USER}@127.0.0.1")
 
 
 if __name__ == "__main__":

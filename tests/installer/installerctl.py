@@ -19,6 +19,7 @@ media is and why it is not repacked.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -50,9 +51,19 @@ ISO_URL = f"https://releases.ubuntu.com/24.04/{ISO_NAME}"
 ISO_SHA256 = "e907d92eeec9df64163a7e454cbc8d7755e8ddc7ed42f99dbc80c40f1a138433"
 
 # The installer needs considerably more than a running server does: it unpacks a
-# squashfs into memory and runs curtin alongside it.
-INSTALL_MEMORY_MB = 4096
+# squashfs into memory and runs curtin alongside it. Three gigabytes is enough
+# for Ubuntu Server's autoinstall and leaves room on a developer laptop — four
+# was fine until the machine had a browser open, at which point the kernel
+# killed QEMU four minutes into a fourteen-minute test.
+#
+# Overridable, because "enough" depends on what else the machine is doing:
+#     HOMEBASE_INSTALL_MEMORY_MB=4096 make vm-test-installer
+INSTALL_MEMORY_MB = int(os.environ.get("HOMEBASE_INSTALL_MEMORY_MB", "2560"))
 INSTALL_CPUS = 2
+
+# What the host needs free on top of that: QEMU's own overhead, and the page
+# cache for a 3.2 GB medium it is reading from.
+HOST_HEADROOM_MB = 512
 
 # Big enough for Ubuntu plus room to prove an application's data landed
 # somewhere sensible. Sparse, so it costs what it uses.
@@ -183,11 +194,46 @@ def _write_ntfs_signature(image: Path, partition_start: int) -> None:
         handle.write(sector)
 
 
-def boot_installer(vm: VM, iso: Path, seed: Path) -> None:
+def check_host_memory() -> None:
+    """Refuse to start if this machine cannot hold the installation.
+
+    Checked before anything is built rather than discovered by the kernel
+    killing QEMU partway through: an out-of-memory kill looks exactly like a
+    machine that crashed on its own, and the test spent four minutes getting
+    there before saying so.
+    """
+    try:
+        fields = {}
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            name, _, rest = line.partition(":")
+            fields[name] = int(rest.strip().split()[0]) // 1024
+    except (OSError, ValueError, IndexError):
+        return  # Not Linux, or an unreadable meminfo. Not worth failing over.
+
+    available = fields.get("MemAvailable")
+    if available is None:
+        return
+
+    needed = INSTALL_MEMORY_MB + HOST_HEADROOM_MB
+    if available < needed:
+        raise VMError(
+            f"This machine has {available} MB free, and installing needs about {needed} MB.",
+            "Close what you can and try again. Started anyway, the kernel picks a "
+            "process to kill partway through — usually QEMU, which looks "
+            "indistinguishable from the installer crashing.",
+        )
+
+
+def boot_installer(vm: VM, media: Path) -> None:
     """Boot the machine from the installation media.
 
-    The ISO is attached read-only as a CD-ROM, exactly as a USB stick written
-    from it presents itself, and the seed as a second drive. Neither is modified.
+    One drive, because that is what a user has: the stick `homebasectl installer
+    create` wrote, carrying Ubuntu's image untouched and Homebase's seed in a
+    partition appended after it.
+
+    Attached over USB rather than as a disk, so the firmware sees what it would
+    see on the real thing — and so that booting from it exercises the same
+    hybrid boot path Canonical publishes rather than one this project invented.
     """
     if vm.is_running():
         info(f"'{vm.name}' is already running (pid {vm.pid})")
@@ -217,12 +263,24 @@ def boot_installer(vm: VM, iso: Path, seed: Path) -> None:
         # ship. See ADR-0010.
         "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={ovmf_code}",
         "-drive", f"if=pflash,format=raw,unit=1,file={vm.efi_vars}",
-        # The disk being installed onto.
-        "-drive", f"if=virtio,format=qcow2,file={vm.disk}",
-        # The media. `media=cdrom` rather than a plain drive so the installer
-        # sees what it expects to see.
-        "-drive", f"file={iso},media=cdrom,readonly=on",
-        "-drive", f"if=virtio,format=raw,file={seed}",
+        # The disk being installed onto — and the *first* thing the firmware
+        # tries. It has no bootloader on it yet, so the firmware falls through
+        # to the medium below and the installer runs. Once Ubuntu is installed
+        # the disk boots, which is what makes the reboot at the end of the
+        # install land on the new system without anybody touching anything.
+        #
+        # The alternative was to boot the medium first, then pull it out and
+        # reset the machine. That looked reasonable and was a race: "the disk
+        # has stopped being written to" is not "the installer has finished", and
+        # resetting a few seconds early left a machine with partitions, no
+        # bootloader, and a UEFI shell prompt.
+        "-drive", f"id=target,if=none,format=qcow2,file={vm.disk}",
+        "-device", "virtio-blk-pci,drive=target,bootindex=0",
+        # A USB controller, declared before anything is plugged into it.
+        "-device", "qemu-xhci,id=xhci",
+        # The installation media, as a USB drive.
+        "-drive", f"id=media,if=none,format=raw,readonly=on,file={media}",
+        "-device", "usb-storage,id=media-stick,drive=media,bus=xhci.0,bootindex=1",
         "-netdev",
         (
             f"user,id=net0"
@@ -233,12 +291,7 @@ def boot_installer(vm: VM, iso: Path, seed: Path) -> None:
         "-device", "virtio-net-pci,netdev=net0",
         "-serial", f"file:{vm.console_log}",
         "-monitor", "none",
-        "-device", "qemu-xhci,id=xhci",
         "-qmp", f"unix:{vm.qmp_socket},server=on,wait=off",
-        # Boot order: the installer first. Once Ubuntu has written an EFI entry
-        # of its own, the firmware prefers it, so the reboot at the end of the
-        # install lands on the installed system rather than starting again.
-        "-boot", "order=dc",
     ]
 
     (vm.dir / "qemu.cmd").write_text(" ".join(cmd) + "\n")
@@ -257,7 +310,7 @@ def boot_installer(vm: VM, iso: Path, seed: Path) -> None:
 
     vm.pid = process.pid
     vm.save()
-    ok(f"booted from {iso.name}")
+    ok(f"booted from {media.name}")
 
 
 def wait_for_install(vm: VM, timeout: int = INSTALL_TIMEOUT_S) -> None:
@@ -287,6 +340,10 @@ def wait_for_install(vm: VM, timeout: int = INSTALL_TIMEOUT_S) -> None:
             # a *stopped* machine means something went wrong.
             raise VMError(
                 "The machine stopped during installation.",
+                f"QEMU is gone. The usual cause is the host running out of "
+                f"memory and the kernel killing it — check `dmesg | grep -i oom`, "
+                f"which reports it as an ordinary process being killed rather "
+                f"than as anything to do with this test.\n"
                 f"Console log: {vm.console_log}",
             )
 
@@ -303,10 +360,14 @@ def wait_for_install(vm: VM, timeout: int = INSTALL_TIMEOUT_S) -> None:
                 info(f"  {last_reported} MB written")
         previous_size = written
 
-        # Ubuntu is installed and rebooting once the writing stops for a good
-        # while after having started in earnest.
-        if started_writing and written > 1_000_000_000 and time.time() - idle_since > 45:
-            ok(f"installation finished, {written // (1024 * 1024)} MB written")
+        # Writing having stopped is a hint, not a finish. curtin pauses while it
+        # runs commands in the installed system — writing the bootloader among
+        # them — so this waits long enough that a pause is unlikely to be
+        # mistaken for the end, and the machine coming back up on its own is
+        # what actually settles it.
+        if started_writing and written > 1_000_000_000 and time.time() - idle_since > 120:
+            ok(f"the disk has stopped changing, {written // (1024 * 1024)} MB written")
+            info("waiting for the machine to restart into what it installed")
             return
 
         if not started_writing and time.time() - idle_since > 600:
@@ -343,10 +404,14 @@ def screenshot(vm: VM, name: str = "screen") -> Path | None:
     """
     from vmctl import qmp  # local import: only this file needs the screen
 
+    if not vm.is_running():
+        return None
+
     target = vm.dir / f"{name}.ppm"
     try:
         qmp(vm, "screendump", filename=str(target))
-    except VMError:
+    except (VMError, OSError):
+        # A diagnostic that raises while explaining a failure hides the failure.
         return None
 
     if not target.exists():
@@ -534,23 +599,12 @@ def console_text(vm: VM) -> str:
     return result.stdout
 
 
-def eject_media(vm: VM) -> None:
-    """Nothing to do — the firmware prefers the installed system once it exists.
-
-    Kept as a named no-op because "why does it not boot the installer again?" is
-    a reasonable question to have an answer to, and because a real user pulls the
-    USB stick out at this point.
-    """
-    return
-
-
 __all__ = [
     "ISO_NAME",
     "ISO_RELEASE",
     "INSTALL_TIMEOUT_S",
     "boot_installer",
     "create_target",
-    "eject_media",
     "fetch_iso",
     "put_windows_on",
     "wait_for_install",

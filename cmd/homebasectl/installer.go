@@ -35,6 +35,8 @@ func installer(args []string, stdout, stderr io.Writer) error {
 	}
 
 	switch args[0] {
+	case "create":
+		return installerCreate(args[1:], stdout, stderr, os.Stdin)
 	case "seed":
 		return installerSeed(args[1:], stdout)
 	case "devices":
@@ -50,6 +52,11 @@ func installer(args []string, stdout, stderr io.Writer) error {
 
 func installerUsage(w io.Writer) {
 	fmt.Fprint(w, `homebasectl installer — make Homebase installation media
+
+  homebasectl installer create --iso PATH --packages DIR --device /dev/sdX
+        Write installation media to a USB drive. Everything on the drive
+        is erased, and you are asked to type its name first.
+        Use --output FILE instead of --device to write an image.
 
   homebasectl installer seed --output PATH --packages DIR
         Build the autoinstall volume that travels beside the Ubuntu ISO.
@@ -92,59 +99,99 @@ func installerSeed(args []string, stdout io.Writer) error {
 		return errors.New("--packages is required: the media carries Homebase's own packages")
 	}
 
-	debs, err := findPackages(*packages)
-	if err != nil {
-		return err
-	}
-
-	rendered, err := installerpkg.Render(installerpkg.Values{
-		Hostname:       *hostname,
-		Locale:         *locale,
-		Keyboard:       *keyboard,
-		AuthorizedKeys: keys,
-		Version:        version,
+	seed, cleanup, err := buildSeedFile(seedRequest{
+		packages: *packages,
+		hostname: *hostname,
+		locale:   *locale,
+		keyboard: *keyboard,
+		keys:     keys,
 	})
 	if err != nil {
 		return err
 	}
+	defer cleanup()
 
-	staging, err := os.MkdirTemp("", "homebase-seed-")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.RemoveAll(staging) }()
-
-	if err := os.WriteFile(filepath.Join(staging, "user-data"), []byte(rendered), 0o644); err != nil {
-		return err
-	}
-	meta := fmt.Sprintf("instance-id: homebase-installer\nlocal-hostname: %s\n", *hostname)
-	if err := os.WriteFile(filepath.Join(staging, "meta-data"), []byte(meta), 0o644); err != nil {
-		return err
-	}
-
-	target := filepath.Join(staging, "packages")
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return err
-	}
-	for _, deb := range debs {
-		if err := copyFile(deb, filepath.Join(target, filepath.Base(deb))); err != nil {
-			return err
-		}
-	}
-
-	if err := buildVolume(staging, *output); err != nil {
+	if err := copyFile(seed, *output); err != nil {
 		return err
 	}
 
 	fmt.Fprintf(stdout, "Seed volume written to %s\n", *output)
-	fmt.Fprintf(stdout, "  %d Homebase packages\n", len(debs))
-	for _, deb := range debs {
-		fmt.Fprintf(stdout, "    %s\n", filepath.Base(deb))
-	}
 	if len(keys) == 0 {
 		fmt.Fprintln(stdout, "  no SSH keys: the server will be reachable only from a browser")
 	}
 	return nil
+}
+
+// seedRequest is everything a particular stick is built with.
+type seedRequest struct {
+	packages string
+	hostname string
+	locale   string
+	keyboard string
+	keys     []string
+}
+
+// buildSeedFile assembles the CIDATA volume and returns where it is.
+//
+// Shared by `installer seed` and `installer create` so there is one description
+// of what goes on the media. Two would drift, and the way that drift shows up
+// is a machine installed from a stick that was built differently from the one
+// the tests use.
+func buildSeedFile(req seedRequest) (string, func(), error) {
+	nothing := func() {}
+
+	debs, err := findPackages(req.packages)
+	if err != nil {
+		return "", nothing, err
+	}
+
+	rendered, err := installerpkg.Render(installerpkg.Values{
+		Hostname:       req.hostname,
+		Locale:         req.locale,
+		Keyboard:       req.keyboard,
+		AuthorizedKeys: req.keys,
+		Version:        version,
+	})
+	if err != nil {
+		return "", nothing, err
+	}
+
+	staging, err := os.MkdirTemp("", "homebase-seed-")
+	if err != nil {
+		return "", nothing, err
+	}
+	cleanup := func() { _ = os.RemoveAll(staging) }
+
+	contents := filepath.Join(staging, "contents")
+	if err := os.MkdirAll(filepath.Join(contents, "packages"), 0o755); err != nil {
+		cleanup()
+		return "", nothing, err
+	}
+
+	if err := os.WriteFile(filepath.Join(contents, "user-data"), []byte(rendered), 0o644); err != nil {
+		cleanup()
+		return "", nothing, err
+	}
+	meta := fmt.Sprintf("instance-id: homebase-installer\nlocal-hostname: %s\n", req.hostname)
+	if err := os.WriteFile(filepath.Join(contents, "meta-data"), []byte(meta), 0o644); err != nil {
+		cleanup()
+		return "", nothing, err
+	}
+
+	for _, deb := range debs {
+		target := filepath.Join(contents, "packages", filepath.Base(deb))
+		if err := copyFile(deb, target); err != nil {
+			cleanup()
+			return "", nothing, err
+		}
+	}
+
+	volume := filepath.Join(staging, "seed.img")
+	if err := buildVolume(contents, volume); err != nil {
+		cleanup()
+		return "", nothing, err
+	}
+	return volume, cleanup, nil
 }
 
 // findPackages collects the .debs that will travel on the media.
