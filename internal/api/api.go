@@ -36,16 +36,21 @@ type Server struct {
 	// dashboard can say "your last backup failed" without anybody going looking
 	// through the job history.
 	lastBackup *lastBackupState
-	log        *slog.Logger
-	version    string
-	started    time.Time
-	static     http.Handler
+	// authLimit rations the unauthenticated endpoints that verify a password
+	// hash, which is the only expensive thing on this server anybody can reach
+	// without credentials.
+	authLimit *rateLimiter
+	log       *slog.Logger
+	version   string
+	started   time.Time
+	static    http.Handler
 }
 
 func NewServer(a *auth.Service, j *jobs.Manager, h *hostclient.Client, e *events.Recorder, log *slog.Logger, version string) *Server {
 	return &Server{
 		auth: a, jobs: j, host: h, events: e,
 		lastBackup: newLastBackupState(),
+		authLimit:  newRateLimiter(authBurst, authRefill),
 		log:        log, version: version, started: time.Now(),
 	}
 }
@@ -64,12 +69,18 @@ func (s *Server) Handler() http.Handler {
 	// still be diagnosed; /setup so the first administrator can be created.
 	mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	mux.HandleFunc("GET /api/v1/setup", s.handleSetupStatus)
-	mux.HandleFunc("POST /api/v1/setup", s.handleSetup)
-	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+
+	// Rationed, because each of these verifies an argon2id hash and none of
+	// them needs a credential to reach. See ratelimit.go.
+	mux.HandleFunc("POST /api/v1/setup", s.limited(s.handleSetup))
+	mux.HandleFunc("POST /api/v1/auth/login", s.limited(s.handleLogin))
+	mux.HandleFunc("POST /api/v1/auth/recover", s.limited(s.handleRecover))
 
 	// Authenticated.
 	mux.Handle("POST /api/v1/auth/logout", s.authenticated(s.handleLogout))
 	mux.Handle("GET /api/v1/auth/me", s.authenticated(s.handleMe))
+	mux.Handle("GET /api/v1/auth/recovery-code", s.authenticated(s.handleRecoveryStatus))
+	mux.Handle("POST /api/v1/auth/recovery-code", s.authenticated(s.handleReissueRecoveryCode))
 
 	mux.Handle("GET /api/v1/system", s.require(auth.PermSystemRead, s.handleSystem))
 	mux.Handle("POST /api/v1/system/reboot", s.require(auth.PermSystemManage, s.handleReboot))
@@ -241,7 +252,23 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.issueSession(w, r, user, http.StatusCreated)
+	// The recovery code is created here and shown exactly once, because this is
+	// the only moment we can be sure somebody is watching. A server whose first
+	// screen does not produce one is a server that will be lost the first time
+	// its owner forgets a password — which is what happened for five milestones.
+	code, err := s.auth.IssueRecoveryCode(r.Context(), user.ID)
+	if err != nil {
+		// Setup itself succeeded, and refusing to sign the user in now would
+		// leave a claimed server nobody can enter. Report the account, say the
+		// code is missing, and let the security screen offer another.
+		s.log.Error("could not issue the first recovery code", "error", err)
+		s.issueSession(w, r, user, http.StatusCreated)
+		return
+	}
+
+	s.issueSessionWithExtra(w, r, user, http.StatusCreated, map[string]any{
+		"recovery_code": code,
+	})
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +297,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, user *auth.User, status int) {
+	s.issueSessionWithExtra(w, r, user, status, nil)
+}
+
+// issueSessionWithExtra signs the user in and returns additional fields
+// alongside the account — the recovery code, on the two occasions one is shown.
+func (s *Server) issueSessionWithExtra(w http.ResponseWriter, r *http.Request, user *auth.User, status int, extra map[string]any) {
 	token, expires, err := s.auth.CreateSession(r.Context(), user.ID, r.UserAgent())
 	if err != nil {
 		s.writeInternal(w, r, err)
@@ -289,10 +322,14 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, user *auth
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	writeJSON(w, status, map[string]any{
+	payload := map[string]any{
 		"user":       user,
 		"expires_at": expires.Format(time.RFC3339),
-	})
+	}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	writeJSON(w, status, payload)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, _ *auth.User) {

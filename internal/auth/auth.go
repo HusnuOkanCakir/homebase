@@ -208,6 +208,36 @@ func (s *Service) Authenticate(ctx context.Context, username, password string) (
 	return user, nil
 }
 
+// UserByName looks up an account without authenticating as it.
+//
+// Only for callers that have already established their right to act — the
+// console tool, which needs root on the machine to run at all. Nothing reachable
+// from the network may use this to turn a username into a yes-or-no answer about
+// whether that account exists.
+func (s *Service) UserByName(ctx context.Context, username string) (*User, error) {
+	var (
+		id          string
+		permissions string
+		created     string
+	)
+
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, permissions, created_at FROM users WHERE username = ?`,
+		strings.TrimSpace(username)).Scan(&id, &permissions, &created)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNoSuchUser
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	user := &User{ID: id, Username: strings.TrimSpace(username)}
+	_ = json.Unmarshal([]byte(permissions), &user.Permissions)
+	user.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+	return user, nil
+}
+
 // CreateSession issues a session token.
 //
 // The token is returned once and never stored — only its SHA-256 is kept, so a
@@ -304,6 +334,19 @@ const (
 	argonSaltLen = 16
 )
 
+// hashSlots bounds how many argon2 computations run at once.
+//
+// Each one reserves 64 MiB by design, and the endpoints that trigger them —
+// sign in, first-run setup, recovery — are all unauthenticated. Without a bound,
+// enough simultaneous requests exhaust the memory of a machine that may only
+// have four gigabytes, and no credentials are needed to send them. Four at a
+// time caps that at 256 MiB; the rest queue, which is the correct behaviour when
+// the alternative is the kernel choosing a process to kill.
+var hashSlots = make(chan struct{}, 4)
+
+func acquireHashSlot() { hashSlots <- struct{}{} }
+func releaseHashSlot() { <-hashSlots }
+
 // dummyHash is verified against when a username does not exist, so that the
 // response time does not reveal which usernames are real.
 var dummyHash = mustHash("this password is never correct")
@@ -322,6 +365,9 @@ func HashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
+
+	acquireHashSlot()
+	defer releaseHashSlot()
 
 	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 
@@ -373,7 +419,9 @@ func VerifyPassword(password, encoded string) (bool, error) {
 		return false, fmt.Errorf("password hash has zeroed parameters")
 	}
 
+	acquireHashSlot()
 	got := argon2.IDKey([]byte(password), salt, iterations, memory, threads, uint32(len(want)))
+	releaseHashSlot()
 
 	// Constant time: a byte-by-byte comparison leaks how much of the hash
 	// matched, which is enough to attack it given enough attempts.

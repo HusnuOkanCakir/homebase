@@ -129,6 +129,11 @@ func run(log *slog.Logger, addr, dbPath, socket, staticDir string) error {
 	// somebody who thinks to look.
 	go api.NewSpaceWatcher(host, eventRecorder).Watch(ctx)
 
+	// Forget rate-limit buckets nobody has used lately, so a machine being
+	// sprayed with requests from many addresses does not accumulate one entry
+	// per address for as long as it stays up.
+	go server.MaintainRateLimits(ctx)
+
 	// The dashboard is optional. During development it is served by Vite on
 	// another port, and a missing build directory is not a reason for the API
 	// to refuse to start — a server nobody can reach is harder to diagnose
