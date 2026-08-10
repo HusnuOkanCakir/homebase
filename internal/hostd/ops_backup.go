@@ -615,20 +615,42 @@ func describePreview(preview RestorePreview) string {
 
 	if preview.WouldOverwrite > 0 {
 		parts = append(parts, fmt.Sprintf(
-			"%d files on this server would be replaced. Nothing else is deleted: "+
-				"anything added since this backup stays.", preview.WouldOverwrite))
+			"%s on this server would be replaced. Nothing else is deleted: "+
+				"anything added since this backup stays.",
+			count(preview.WouldOverwrite, "file")))
 	} else {
 		parts = append(parts, "Nothing on this server would be replaced.")
 	}
 
 	if len(preview.UnavailableApps) > 0 {
 		parts = append(parts, fmt.Sprintf(
-			"%d applications in this backup are not available on this server, so their "+
-				"files will be restored but they cannot be reinstalled: %s.",
-			len(preview.UnavailableApps), strings.Join(preview.UnavailableApps, ", ")))
+			"%s in this backup %s not available on this server, so their files will be "+
+				"restored but they cannot be reinstalled: %s.",
+			count(len(preview.UnavailableApps), "application"),
+			isAre(len(preview.UnavailableApps)),
+			strings.Join(preview.UnavailableApps, ", ")))
 	}
 
 	return strings.Join(parts, " ")
+}
+
+// count renders a number and its noun, pluralised.
+//
+// Worth the eight lines: "1 files would be replaced" is the sort of thing that
+// makes somebody trust the rest of a sentence less, and this sentence is asking
+// them to agree to something irreversible.
+func count(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+func isAre(n int) string {
+	if n == 1 {
+		return "is"
+	}
+	return "are"
 }
 
 func humanDate(rfc3339 string) string {

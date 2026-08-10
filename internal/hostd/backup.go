@@ -410,23 +410,48 @@ func describeVerification(result VerificationResult, total int) string {
 	switch {
 	case result.Valid && len(result.Unexpected) > 0:
 		return fmt.Sprintf(
-			"All %d files are present and unchanged. %d other files are in the folder that "+
-				"Homebase did not put there.", total, len(result.Unexpected))
+			"All %d files are present and unchanged. %s in the folder that Homebase did "+
+				"not put there.", total, somethingElse(len(result.Unexpected)))
 	case result.Valid:
 		return fmt.Sprintf("All %d files are present and unchanged.", total)
 	case len(result.Corrupt) > 0 && len(result.Missing) > 0:
 		return fmt.Sprintf(
-			"%d files are missing and %d have been damaged. This backup cannot be relied on.",
-			len(result.Missing), len(result.Corrupt))
+			"%s missing and %d damaged. This backup cannot be relied on.",
+			countIs(len(result.Missing), "file"), len(result.Corrupt))
 	case len(result.Corrupt) > 0:
 		return fmt.Sprintf(
-			"%d files have been damaged since this backup was made. The disk may be failing.",
-			len(result.Corrupt))
+			"%s been damaged since this backup was made. The disk may be failing.",
+			countHas(len(result.Corrupt), "file"))
 	default:
 		return fmt.Sprintf(
-			"%d files are missing. This backup was probably never finished — the disk may "+
-				"have filled up.", len(result.Missing))
+			"%s missing. This backup was probably never finished — the disk may "+
+				"have filled up.", countIs(len(result.Missing), "file"))
 	}
+}
+
+// Pluralisation, because "1 files are missing" makes somebody trust the rest of
+// the sentence less — and these sentences are telling them whether their backup
+// is any good.
+
+func countIs(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun + " is"
+	}
+	return fmt.Sprintf("%d %ss are", n, noun)
+}
+
+func countHas(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun + " has"
+	}
+	return fmt.Sprintf("%d %ss have", n, noun)
+}
+
+func somethingElse(n int) string {
+	if n == 1 {
+		return "1 other file is"
+	}
+	return fmt.Sprintf("%d other files are", n)
 }
 
 // --- Paths ---------------------------------------------------------------------

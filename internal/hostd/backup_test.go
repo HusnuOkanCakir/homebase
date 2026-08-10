@@ -598,3 +598,32 @@ func TestAnUnusableDestinationIsRefusedEarly(t *testing.T) {
 		})
 	}
 }
+
+// "1 files are missing" makes somebody trust the rest of a sentence less, and
+// these sentences are telling them whether their backup is any good.
+func TestMessagesCountThingsProperly(t *testing.T) {
+	one := VerificationResult{Missing: []string{"a"}}
+	if got := describeVerification(one, 5); !strings.Contains(got, "1 file is missing") {
+		t.Errorf("one missing file reads as: %q", got)
+	}
+
+	several := VerificationResult{Missing: []string{"a", "b"}}
+	if got := describeVerification(several, 5); !strings.Contains(got, "2 files are missing") {
+		t.Errorf("two missing files read as: %q", got)
+	}
+
+	damaged := VerificationResult{Corrupt: []string{"a"}}
+	if got := describeVerification(damaged, 5); !strings.Contains(got, "1 file has been damaged") {
+		t.Errorf("one damaged file reads as: %q", got)
+	}
+
+	if got := count(1, "file"); got != "1 file" {
+		t.Errorf("count(1) = %q", got)
+	}
+	if got := count(3, "file"); got != "3 files" {
+		t.Errorf("count(3) = %q", got)
+	}
+	if got := count(1, "application"); got != "1 application" {
+		t.Errorf("count(1, application) = %q", got)
+	}
+}
