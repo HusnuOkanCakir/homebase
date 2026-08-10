@@ -147,13 +147,11 @@ def install(vm: VM, built: dict[str, Path]) -> None:
         write_file(vm, f"/etc/systemd/system/{unit}",
                    (REPO_ROOT / "packaging" / "systemd" / unit).read_text())
 
-    # Listen on all interfaces so the forwarded port reaches it. In production
-    # core listens on localhost behind Caddy; this override exists for the test
-    # and is not what ships.
-    ssh(vm, ["sudo", "mkdir", "-p", "/etc/systemd/system/homebase-core.service.d"])
-    write_file(vm, "/etc/systemd/system/homebase-core.service.d/test-listen.conf",
-               "[Service]\nExecStart=\n"
-               "ExecStart=/usr/libexec/homebase/core --listen 0.0.0.0:8080\n")
+    # No listen override here any more. The shipped unit sets HOMEBASE_LISTEN,
+    # so this test now reaches core the same way a phone on the same network
+    # would — which is the point. The override that used to live here said "not
+    # what ships", and was one of the two places quietly compensating for a
+    # default that made a real installation unreachable.
 
     ssh(vm, ["sudo", "systemctl", "daemon-reload"])
     ssh(vm, ["sudo", "systemctl", "enable", "--now", "homebase-hostd.socket"])

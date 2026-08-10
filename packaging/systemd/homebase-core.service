@@ -10,6 +10,24 @@ ExecStart=/usr/libexec/homebase/core
 Restart=on-failure
 RestartSec=2s
 
+# Reachable from the rest of the house.
+#
+# The binary's own default is 127.0.0.1, which is right for something somebody
+# has just built and run, and wrong for this: a Homebase that answers only on
+# its own keyboard is a Homebase nobody can use, since the entire product is
+# opening it from a phone in another room. This package exists to make an
+# appliance, so it says so here, once.
+#
+# It was previously left at the default and overridden in two other places —
+# the installer and the browser test — each for its own good reason, which is
+# exactly why nothing noticed that a real installation was unreachable.
+#
+# The firewall is what limits who can connect; the installer sets it. Milestone
+# 7 puts local HTTPS in front of this and changes this line, which is why it is
+# an environment variable rather than part of ExecStart: a drop-in that has to
+# restate the command line silently drops any flag added to it later.
+Environment=HOMEBASE_LISTEN=0.0.0.0:8080
+
 # Unprivileged, and the whole design rests on it staying that way. If a feature
 # appears to need more privilege here, it needs a new hostd operation instead.
 User=homebase

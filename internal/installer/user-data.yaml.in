@@ -126,23 +126,47 @@ autoinstall:
     - chmod 0440 /target/etc/sudoers.d/homebase-console
     - curtin in-target --target=/target -- visudo -cf /etc/sudoers.d/homebase-console
 
-    # Listen on the network, not only on the machine itself.
+    # What the machine's own screen says once it has come up.
     #
-    # core's own default is 127.0.0.1, which is the right default for a package
-    # and the wrong one for an appliance: the entire point of this machine is
-    # being opened from a phone in another room. Left alone, the dashboard is
-    # reachable only from the server's own keyboard — which is exactly the thing
-    # the product promises you will never need.
+    # This is the only thing standing between somebody who has just installed
+    # Homebase and a machine they have no way of reaching. They are looking at a
+    # laptop in a cupboard showing a login prompt, and the address of the
+    # dashboard is not something they can guess.
     #
-    # This is a Milestone 6 shape, and it is plain HTTP on a home network.
-    # Milestone 7 puts local HTTPS in front of it and this drop-in goes away.
-    - mkdir -p /target/etc/systemd/system/homebase-core.service.d
+    # The address is worked out when the message is shown rather than written in
+    # now: the interface has no stable name across machines, DHCP hands out a
+    # different address on a different network, and a screen confidently showing
+    # the wrong one is worse than a screen showing none.
     - |
-      cat > /target/etc/systemd/system/homebase-core.service.d/listen.conf <<'LISTEN'
-      [Service]
-      ExecStart=
-      ExecStart=/usr/libexec/homebase/core --listen 0.0.0.0:8080
-      LISTEN
+      cat > /target/etc/update-motd.d/99-homebase <<'MOTD'
+      #!/bin/sh
+      # Shown on the machine's own screen. See ADR-0016.
+      address=$(ip -4 -brief address show scope global 2>/dev/null \
+                | awk '{print $3}' | cut -d/ -f1 | head -n 1)
+
+      echo
+      echo "  Homebase is installed on this machine."
+      echo
+      if [ -n "$address" ]; then
+        echo "  Open a browser on your phone or computer, on the same"
+        echo "  network, and go to:"
+        echo
+        echo "      http://$address:8080"
+      else
+        echo "  This machine is not on a network yet. Plug in a network"
+        echo "  cable, and this screen will show the address to open."
+      fi
+      echo
+      echo "  You do not need to type anything here."
+      echo
+      MOTD
+    - chmod 0755 /target/etc/update-motd.d/99-homebase
+
+    # Ubuntu's own motd is a page of advertising and update counts, which buries
+    # the one line that matters on a screen somebody is squinting at.
+    - rm -f /target/etc/update-motd.d/10-help-text
+    - rm -f /target/etc/update-motd.d/50-motd-news
+    - rm -f /target/etc/update-motd.d/00-header
 
     # A firewall that allows what the dashboard needs and nothing else. The
     # server sits on a home network with a smart television and a doorbell

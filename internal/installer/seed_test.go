@@ -98,26 +98,46 @@ func TestConsoleAccountCanBecomeRoot(t *testing.T) {
 	}
 }
 
-// The dashboard has to be reachable from another device, which is the entire
-// point of the machine. core's own default is 127.0.0.1 — right for a package,
-// useless for an appliance — so the installer overrides it.
-//
-// Found by the installer test: every machine-side check passed while the
-// dashboard was reachable only from the server's own keyboard, and the firewall
-// rule opened a port nothing was listening on.
-func TestTheDashboardIsReachableFromTheNetwork(t *testing.T) {
+// The seed opens the firewall for the dashboard. That the dashboard is
+// *listening* is the packaged unit's business, not the seed's — the two used to
+// disagree, and a hole for a port nothing listened on is how that showed up.
+func TestTheFirewallLetsTheDashboardThrough(t *testing.T) {
 	rendered, err := Render(Values{Hostname: "homebase"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	config := withoutComments(rendered)
 
-	if !strings.Contains(config, "--listen 0.0.0.0:8080") {
-		t.Error("core is left listening on localhost, so the dashboard cannot be " +
-			"opened from a phone — which is the one thing this machine is for")
-	}
 	if !strings.Contains(config, "ufw allow 8080/tcp") {
 		t.Error("the firewall does not let the dashboard through")
+	}
+	if !strings.Contains(config, "ufw default deny incoming") {
+		t.Error("the firewall does not deny everything else")
+	}
+}
+
+// The machine's own screen is the only thing between somebody who has just
+// installed Homebase and a machine they cannot reach. They cannot guess the
+// address, and there is nowhere else to learn it.
+func TestTheMachineSaysWhereToGo(t *testing.T) {
+	rendered, err := Render(Values{Hostname: "homebase"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := withoutComments(rendered)
+
+	if !strings.Contains(config, "update-motd.d/99-homebase") {
+		t.Fatal("nothing is shown on the machine's screen, so somebody who has " +
+			"just installed it has no way of finding the dashboard")
+	}
+	if !strings.Contains(config, "ip -4 -brief address") {
+		t.Error("the address is not worked out when the message is shown. " +
+			"A screen confidently showing the wrong address is worse than one " +
+			"showing none")
+	}
+	if !strings.Contains(config, "not on a network yet") {
+		t.Error("a machine with no network says nothing, leaving somebody " +
+			"staring at a screen with no address and no explanation")
 	}
 }
 
