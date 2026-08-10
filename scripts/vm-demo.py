@@ -144,7 +144,13 @@ def main() -> int:
 
         vm = create(VM_NAME, force=True)
         if not args.no_disk:
-            create_removable_disk(vm, size_gb=2)
+            # Two, because Homebase refuses to put a backup on a disk an
+            # application keeps its files on — so a machine with one spare disk
+            # can try Storage or try Backup, but not both. That is the rule
+            # working, and a demo that cannot reach half the product is a poor
+            # demonstration of it.
+            create_removable_disk(vm, size_gb=2, slot=0)
+            create_removable_disk(vm, size_gb=2, slot=1)
         start(vm)
         wait_for_ssh(vm)
         wait_for_boot_complete(vm)
@@ -153,8 +159,10 @@ def main() -> int:
         install(vm, packages)
 
         if not args.no_disk:
-            attach_removable_disk(vm)
-            info("a blank 2 GB disk is plugged in, for trying Storage")
+            attach_removable_disk(vm, slot=0)
+            attach_removable_disk(vm, slot=1)
+            info("two blank 2 GB disks are plugged in: one for an application, "
+                 "one for backups")
 
         url = wait_for_dashboard(vm)
 
@@ -169,8 +177,11 @@ def main() -> int:
         print()
         print("  Things worth trying:")
         print("    • Applications → install Hello Homebase, then use it")
-        print("    • Storage      → erase and prepare the blank disk, then give")
+        print("    • Storage      → erase and prepare a blank disk, then give")
         print("                     it to File Browser under Applications")
+        print("    • Backup       → set up the *other* disk, then back the")
+        print("                     whole server up onto it")
+        print("    • Security     → your recovery code, and how to replace it")
         print("    • This server  → restart it, and watch the page notice")
         print()
         print("  This is a real installation on a real machine: hostd runs as")
