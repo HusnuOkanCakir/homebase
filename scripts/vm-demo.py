@@ -13,7 +13,7 @@ machine:
   * hostd runs as root and core as the `homebase` account, so the privilege
     boundary is the real one
   * restarting the server restarts the VM rather than your laptop
-  * a spare disk is plugged in, so storage can actually be tried
+  * two spare disks are plugged in, so storage and backup can both be tried
 
 Run with `make vm-run`, and `make vm-run-destroy` when finished.
 """
@@ -124,7 +124,7 @@ def main() -> int:
     parser.add_argument("--destroy", action="store_true",
                         help="destroy the demo machine and stop")
     parser.add_argument("--no-disk", action="store_true",
-                        help="do not plug in the spare disk")
+                        help="do not plug in the spare disks")
     parser.add_argument("--version", default="0.0.0~demo")
     args = parser.parse_args()
 
