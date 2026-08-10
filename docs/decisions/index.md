@@ -26,6 +26,7 @@ downside, and writing it down is how we avoid pretending otherwise.
 | [0012](0012-hostd-owns-the-catalogue.md) | **hostd owns the catalogue; core never sends a container spec** | Accepted |
 | [0013](0013-storage-identity-and-mounting.md) | **Disks identified by filesystem UUID; mounted by systemd units, never fstab** | Accepted |
 | [0014](0014-backups-are-readable-without-homebase.md) | **A backup is plain files, readable without Homebase; restore is the feature** | Accepted |
+| [0015](0015-password-recovery.md) | **A recovery code the user holds, and a console reset behind it** | Accepted |
 
 **[ADR-0006](0006-privilege-split.md) is the one to read.** The others describe how Homebase
 is built; that one describes a boundary the project is not permitted to cross, and it is the
