@@ -7,7 +7,8 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–5 complete. Milestone 6 next.**
+**Current position: Milestones 0–5 complete. Milestone 6 in progress — the installer
+works; the graphical controller and the guided first-use flow remain.**
 
 ---
 
@@ -209,16 +210,37 @@ It also forced the auth endpoints to be rate limited. Sign-in, setup and recover
 verify an argon2id hash, which reserves 64 MiB by design, and all three are reachable
 without credentials — an unbounded one is memory exhaustion that needs no account.
 
-### Milestone 6 — Installer and first-use ← *next*
+### Milestone 6 — Installer and first-use ← *in progress*
 
-- [ ] `homebasectl installer create`, then a graphical controller (Tauri)
-- [ ] Ubuntu autoinstall: hardware detection, disk enumeration, Windows detection
-- [ ] Target confirmation, whole-disk install, firewall, laptop power behaviour
-- [ ] First-use flow: administrator, server name, storage, updates, backups, first app
-      (the recovery code arrived early, in Milestone 5)
+- [x] `homebasectl installer create`, and `installer devices` to say what may be written to
+- [x] Ubuntu autoinstall: whole-disk install onto a Windows-occupied disk
+- [x] Firewall, laptop power behaviour, and a screen that says where to browse to
+- [ ] A graphical controller (Tauri) — split out, so the media logic could be proven first
+- [ ] First-use flow: server name, storage, updates, backups, first app
+      (the administrator and the recovery code arrived early, in Milestone 5)
 
 **Done when:** starting from a Windows-occupied disk, the installer produces a working
-server that reaches the dashboard and installs an application — with no Linux commands.
+server that reaches the dashboard and installs an application — with no Linux commands. ✅
+
+Proven by `make vm-test-installer`, which boots the media `homebasectl installer create`
+writes — one USB drive, Ubuntu's image byte for byte with a Homebase partition appended
+after it — onto a disk carrying a real GPT with Windows' partition types and an NTFS
+signature. It answers Ubuntu's confirmation prompt by pressing keys, waits for the machine
+to come back up as the system it installed, then creates an administrator and installs an
+application through the API.
+
+[ADR-0016](docs/decisions/0016-installation-media.md): **Canonical's ISO is never
+repacked.** The autoinstall configuration and Homebase's own packages travel beside it on a
+partition of their own, so the boot path stays the one Ubuntu publishes and tests, and the
+image can still be checked against its publisher. The cost is visible and written down:
+Ubuntu stops once to ask whether to continue, and that prompt does not say which disk it is
+about to erase.
+
+The test found two bugs that nothing else could have. The console account could not run
+`sudo`, so the recovery path from Milestone 5 would have failed on every real installation.
+And an installed server listened on `127.0.0.1` — every machine-side check passing while the
+one thing the product is for did not work, invisible because two other places each set the
+address for their own good reasons.
 
 ### Milestone 7 — Networking and private access
 

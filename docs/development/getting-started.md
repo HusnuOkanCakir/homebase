@@ -84,6 +84,7 @@ make vm-test-apps            # install an app, reboot, remove it; data must surv
 make vm-test-storage         # a real disk, unplugged mid-use; nothing may corrupt
 make vm-test-backup          # back up one machine, restore onto a different one
 make vm-test-packages        # install, upgrade, reboot and purge the .debs
+make vm-test-installer       # a Windows disk becomes a server, from real media (~15 min)
 make vm-destroy
 ```
 

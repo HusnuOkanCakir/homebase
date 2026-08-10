@@ -174,7 +174,32 @@ restored onto it. Restoring onto the machine that made the backup would prove al
 
 **`make vm-test-packages`** installs, upgrades, reinstalls, reboots and purges the `.deb`s
 on a clean machine, with a real administrator account and a real file intact throughout —
-including after purge, which deliberately keeps user data.
+including after purge, which deliberately keeps user data. It also reaches the dashboard
+**from outside the machine**: everything else in that file talks to the API by running curl
+inside the VM, which cannot tell a server the household can use from one that answers only
+its own keyboard.
+
+**`make vm-test-installer`** is the slowest and the most faithful. It writes installation
+media with `homebasectl installer create`, boots a machine from it, answers Ubuntu's
+"Continue with autoinstall?" by pressing keys, and installs onto a disk carrying a real GPT
+with Windows' partition types and an NTFS signature. What comes up afterwards is a machine
+somebody could use, and the test drives it the rest of the way: create an administrator,
+receive a recovery code, install an application.
+
+It is unlike every other VM test in three ways, each learned by watching it fail:
+
+- **The machine has a screen, and the test reads it.** Ubuntu's live-server ISO does not
+  redirect its console to serial the way the cloud images do, so with no display the
+  installer has nowhere to write and a machine waiting on a question looks exactly like one
+  that has crashed.
+- **Progress is the target disk growing**, because there is no log to follow. That also
+  separates the two failures worth telling apart: crashed, and quietly waiting.
+- **"The screen stopped changing" is not "two screenshots are identical."** The cursor
+  blinks, so a still console alternates between exactly two images for ever.
+
+It needs about 3.5 GB of free memory and refuses to start without it, because an
+out-of-memory kill arrives four minutes in and looks identical to the installer crashing.
+`HOMEBASE_KEEP_VM=1` leaves the machine running to be looked at.
 
 ### What they have caught that nothing else would
 
@@ -194,6 +219,8 @@ list is the argument for why these tests are worth their twelve minutes.
 | `vm-test-storage` | …and it then restarted every two seconds, 673 times, with no start limit. Because the socket belongs to systemd, clients connected and hung rather than failing |
 | `vm-test-backup` | The database export was never exercised, because `core` was not running so there was no database to export — the most delicate part of a backup, silently untested |
 | `vm-test-dashboard` | Rate limiting counted successful sign-ins, so a household signing in over an evening was rationed exactly like somebody guessing. Unit tests sign in once; only a journey that signs in thirty-three times notices |
+| `vm-test-installer` | The console account could not run `sudo`. Its password is locked by design, so the recovery path it exists for — `sudo homebasectl recovery-code` — would have failed on every real installation |
+| `vm-test-installer` | An installed server listened on `127.0.0.1`, so the dashboard was reachable only from the server's own keyboard. Every machine-side check passed while the one thing the product is for did not work. It was invisible because two *other* places each set the address for their own good reasons |
 
 The pattern is worth naming: every one is a property of the *deployment* rather than of the
 code, and every one is silent. Nothing crashed, no test went red, and `systemctl status`

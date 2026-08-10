@@ -127,6 +127,23 @@ Milestone 0 — contracts and project machinery. No product code.
 - `make vm-test-backup`: two machines. One is set up, backed up onto a USB disk and
   destroyed; a second is created from scratch and the backup restored onto it. It reads a
   backed-up file with `cat`, without Homebase doing the reading
+- **An installer** ([ADR-0016](docs/decisions/0016-installation-media.md)).
+  `homebasectl installer create` writes a USB stick: Canonical's Ubuntu Server image byte for
+  byte, with the autoinstall configuration and Homebase's own packages on a partition
+  appended after it. The image is never repacked, so the boot path stays the one Ubuntu
+  publishes and the media can still be checked against its publisher
+- The packages travel on the stick rather than coming from the network, so a house with no
+  working internet still ends up with a server. Applications still need the internet, because
+  a container image comes from a registry however the machine was installed
+- `homebasectl installer devices` lists what may be written to and, more usefully, refuses
+  what may not: anything holding a mounted filesystem, anything not removable, anything too
+  small. Writing to a drive asks for its name to be typed first
+- The installed machine behaves like a server rather than a laptop: a firewall that allows
+  the dashboard and nothing else, a closed lid that does not switch it off, and no suspending
+  itself while nobody is looking
+- Its own screen says where to browse to, worked out when the message is shown rather than
+  written in at install time — a screen confidently showing the wrong address is worse than
+  one showing none
 - **Password recovery** ([ADR-0015](docs/decisions/0015-password-recovery.md)). A recovery
   code shown once at first-run setup: 125 bits, five groups of five, from an alphabet with
   no `I`, `L`, `O` or `U` because it is copied off paper by hand. Stored as an argon2id

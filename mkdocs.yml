@@ -112,6 +112,7 @@ nav:
       - Versioning: release/versioning.md
   - User guide:
       - Overview: user-guide/index.md
+      - Installing Homebase: user-guide/installing.md
       - Applications: user-guide/applications.md
       - Storage: user-guide/storage.md
       - Backup and restore: user-guide/backup.md
