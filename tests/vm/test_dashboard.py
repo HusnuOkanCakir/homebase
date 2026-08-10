@@ -200,6 +200,7 @@ def run_browser_tests(vm: VM) -> None:
     info("then: be refused a backup onto that disk → set up a second one")
     info("then: back the whole thing up, check it, and preview restoring it")
     info("then: lose the password, and use the recovery code to get back in")
+    info("then: be told what to do next, and give the server a name")
     print()
 
     env = {

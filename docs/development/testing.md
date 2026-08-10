@@ -221,6 +221,8 @@ list is the argument for why these tests are worth their twelve minutes.
 | `vm-test-dashboard` | Rate limiting counted successful sign-ins, so a household signing in over an evening was rationed exactly like somebody guessing. Unit tests sign in once; only a journey that signs in thirty-three times notices |
 | `vm-test-installer` | The console account could not run `sudo`. Its password is locked by design, so the recovery path it exists for — `sudo homebasectl recovery-code` — would have failed on every real installation |
 | `vm-test-installer` | An installed server listened on `127.0.0.1`, so the dashboard was reachable only from the server's own keyboard. Every machine-side check passed while the one thing the product is for did not work. It was invisible because two *other* places each set the address for their own good reasons |
+| `vm-test-dashboard` | Renaming the server wrote to `/etc/hostname` and got "read-only file system". `hostd` runs under `ProtectSystem=strict`, and replacing a file in `/etc` atomically needs the *directory* writable — so the fix was to stop writing it at all and ask systemd-hostnamed, which already owns it |
+| `vm-test-dashboard` | …and then the rename worked while the dashboard went on showing the old name for ever. `ProtectHostname=yes` gives the service a private UTS namespace, so `hostd` — the thing that reports the machine's name and checks the restart confirmation against it — was the only part of the system that could not see the machine had been renamed |
 
 The pattern is worth naming: every one is a property of the *deployment* rather than of the
 code, and every one is silent. Nothing crashed, no test went red, and `systemctl status`

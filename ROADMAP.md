@@ -215,9 +215,10 @@ without credentials — an unbounded one is memory exhaustion that needs no acco
 - [x] `homebasectl installer create`, and `installer devices` to say what may be written to
 - [x] Ubuntu autoinstall: whole-disk install onto a Windows-occupied disk
 - [x] Firewall, laptop power behaviour, and a screen that says where to browse to
+- [x] First-use flow: a getting-started list that says what is worth doing and why, and
+      naming the server (the administrator and the recovery code arrived early, in
+      Milestone 5)
 - [ ] A graphical controller (Tauri) — split out, so the media logic could be proven first
-- [ ] First-use flow: server name, storage, updates, backups, first app
-      (the administrator and the recovery code arrived early, in Milestone 5)
 
 **Done when:** starting from a Windows-occupied disk, the installer produces a working
 server that reaches the dashboard and installs an application — with no Linux commands. ✅
@@ -241,6 +242,14 @@ The test found two bugs that nothing else could have. The console account could 
 And an installed server listened on `127.0.0.1` — every machine-side check passing while the
 one thing the product is for did not work, invisible because two other places each set the
 address for their own good reasons.
+
+First use is a checklist rather than a wizard. A wizard has to be finished, so it either
+blocks somebody who has not bought a USB disk yet or teaches them that skipping is normal.
+The list says what is worth doing and why, reads its state from what the server actually
+reports rather than remembering what was clicked, and stops mentioning each thing once it is
+true. Naming the server is the one step that happens on the list itself — and also under
+**This server**, permanently, because a machine that can only be renamed during its first
+week is one nobody can rename.
 
 ### Milestone 7 — Networking and private access
 

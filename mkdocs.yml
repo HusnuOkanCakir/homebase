@@ -113,6 +113,7 @@ nav:
   - User guide:
       - Overview: user-guide/index.md
       - Installing Homebase: user-guide/installing.md
+      - First steps: user-guide/first-steps.md
       - Applications: user-guide/applications.md
       - Storage: user-guide/storage.md
       - Backup and restore: user-guide/backup.md
