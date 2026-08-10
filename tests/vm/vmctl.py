@@ -653,7 +653,16 @@ def detach_removable_disk(vm: VM, slot: int = 0) -> None:
         "happens next is the thing being tested.")
 
 
-def ssh_args(vm: VM) -> list[str]:
+# The account tests reach a machine through.
+#
+# The development lab's cloud-init seed makes a user called `dev`. A machine
+# produced by Homebase's own installer has no such user — it has whatever the
+# autoinstall identity section named, which is `console`. Tests that install
+# rather than overlay set this.
+SSH_USER = "dev"
+
+
+def ssh_args(vm: VM, user: str | None = None) -> list[str]:
     return [
         "ssh",
         # A C locale in the guest, always.
@@ -670,7 +679,7 @@ def ssh_args(vm: VM) -> list[str]:
         "-o", "UserKnownHostsFile=/dev/null",
         "-o", "LogLevel=ERROR",
         "-o", f"ConnectTimeout={SSH_TIMEOUT_S}",
-        "dev@127.0.0.1",
+        f"{user or SSH_USER}@127.0.0.1",
     ]
 
 
