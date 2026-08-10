@@ -115,6 +115,7 @@ nav:
       - Applications: user-guide/applications.md
       - Storage: user-guide/storage.md
       - Backup and restore: user-guide/backup.md
+      - If you forget your password: user-guide/passwords.md
 
 extra:
   social:

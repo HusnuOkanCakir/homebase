@@ -139,6 +139,18 @@ WHAT IS NOT HERE
 
   Anyone holding this disk can read everything on it. Keep it somewhere you
   would keep a box of photographs.
+
+GETTING INTO THE RESTORED SERVER
+
+  Your own account comes back with the password it had when this backup was
+  made. If you have forgotten that password, restoring does not help on its
+  own -- you get the same locked door on a new machine.
+
+  The recovery code you wrote down when you first set the server up is in here
+  too, and still works after restoring. That is what gets you in.
+
+  Which also means: this disk and that piece of paper, together, are complete
+  access to your server. Do not keep them in the same place.
 `
 
 // --- Walking a tree into a backup ---------------------------------------------

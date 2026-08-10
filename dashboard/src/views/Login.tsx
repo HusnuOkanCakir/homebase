@@ -5,9 +5,10 @@ import { Message } from "../components/Message";
 
 interface Props {
   onSignedIn: (user: User) => void;
+  onForgotten: () => void;
 }
 
-export function Login({ onSignedIn }: Props) {
+export function Login({ onSignedIn, onForgotten }: Props) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<ReturnType<typeof describeError> | null>(null);
@@ -66,6 +67,16 @@ export function Login({ onSignedIn }: Props) {
 
         <button className="primary" type="submit" disabled={busy || !username || !password}>
           {busy ? "Signing in…" : "Sign in"}
+        </button>
+
+        {/*
+          Offered before it is needed, and in the words somebody would use
+          themselves. A recovery route nobody can find is one that does not
+          exist — and the moment this is wanted is the moment somebody is least
+          inclined to go looking for it.
+        */}
+        <button type="button" className="quiet" onClick={onForgotten} disabled={busy}>
+          I have forgotten my password
         </button>
       </form>
     </main>

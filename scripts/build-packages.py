@@ -340,6 +340,14 @@ def build_core(version: str, binaries: Path) -> Path:
     reset(root)
 
     install_file(binaries / "core", root / "usr/libexec/homebase/core", 0o755)
+
+    # The console tool goes on PATH rather than in libexec: it is the one part
+    # of Homebase a person is ever told to type, and it is what they reach for
+    # when they cannot sign in. /usr/bin rather than /usr/sbin so that running
+    # it without sudo produces the error message it writes for that case,
+    # instead of "command not found". See ADR-0015.
+    install_file(binaries / "homebasectl", root / "usr/bin/homebasectl", 0o755)
+
     install_file(
         REPO_ROOT / "packaging/systemd/homebase-core.service",
         root / "lib/systemd/system/homebase-core.service",

@@ -8,11 +8,13 @@ configure backups without ever opening a terminal or learning Linux.
 
 > **Status: pre-alpha. Milestones 0–5 complete.**
 > There is no installable release yet, and nothing here should be pointed at data you care
-> about. What works: setting up an administrator, reading live system information,
-> restarting the machine, installing and removing applications from a small catalogue, and
-> attaching a disk and giving it to an application, and backing the whole thing up onto
-> another disk — all from a browser. A backup restores onto a different machine, and can be
-> read without Homebase. What does not exist yet: an installer, and backups on a schedule.
+> about. What works, all from a browser: setting up an administrator, reading live system
+> information, restarting the machine, installing and removing applications from a small
+> catalogue, attaching a disk and giving it to an application, and backing the whole thing
+> up onto another disk. A backup restores onto a different machine, and can be read without
+> Homebase. A forgotten password is recoverable with a code written down at setup — which
+> travels with the backup, so it still works on a machine rebuilt from the disk.
+> What does not exist yet: an installer, and backups on a schedule.
 > See the [roadmap](ROADMAP.md).
 
 ## Try it
@@ -22,8 +24,8 @@ different questions.
 
 ### On a throwaway virtual machine — the closest thing to the real product
 
-This installs Homebase from its own Debian packages onto a clean Ubuntu machine, plugs a
-blank 2 GB disk into it, and leaves it running for you to use. Needs QEMU with KVM and
+This installs Homebase from its own Debian packages onto a clean Ubuntu machine, plugs two
+blank 2 GB disks into it, and leaves it running for you to use. Needs QEMU with KVM and
 about 40 GB of free disk:
 
 ```sh
@@ -33,9 +35,14 @@ cd homebase
 make vm-run
 ```
 
-It prints a URL when it is ready — open it and create an administrator. From there you can
-install an application and use it, prepare the blank disk and give it to File Browser, and
-restart the whole server and watch the page notice.
+It prints a URL when it is ready — open it, create an administrator, and write down the
+recovery code it gives you. From there you can install an application and use it, prepare
+one blank disk and give it to File Browser, back the whole server up onto the other, and
+restart the machine and watch the page notice.
+
+Two disks rather than one because Homebase refuses to put a backup on a disk an application
+keeps its files on — a copy on the same disk protects against deleting a file by accident
+and against nothing else.
 
 This is the real thing: `hostd` runs as root, `core` runs as the unprivileged `homebase`
 account, the socket between them is `root:homebase 0660`, and restarting the server restarts
@@ -55,8 +62,15 @@ make run
 ```
 
 Then open **<http://127.0.0.1:8080>**. It will ask you to create an administrator — any
-name, and a password of twelve characters or more — and then show you live information
-about the machine you are sitting at. `make run-fresh` starts over with an empty database.
+name, and a password of twelve characters or more — then show you a recovery code to write
+down, and then show you live information about the machine you are sitting at.
+`make run-fresh` starts over with an empty database.
+
+The recovery code is the only way back into a server whose password has been forgotten:
+there is no email to send a link to and no account with anybody. It is shown once and kept
+as an argon2id hash. `sudo homebasectl recovery-code` issues a fresh one from the machine
+itself, for when the paper is gone too — see
+[ADR-0015](docs/decisions/0015-password-recovery.md).
 
 Under **Applications** you can install something from the catalogue. That needs Docker on
 your machine; without it the list still appears and says it cannot see the container

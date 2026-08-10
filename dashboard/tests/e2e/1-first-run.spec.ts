@@ -54,7 +54,25 @@ test("first-run setup claims the server", async ({ page }) => {
   await expect(submit).toBeEnabled();
   await submit.click();
 
-  // Setup signs you straight in.
+  // Before the dashboard: the recovery code, which is the only moment it is
+  // ever visible. ADR-0015 — it is stored the way a password is, so a user who
+  // clicks past this screen has lost it, and finds out at the worst moment.
+  await expect(page.getByRole("heading", { name: "Write this down" })).toBeVisible();
+
+  const code = await page.getByTestId("recovery-code").innerText();
+  expect(code, "the code should be five groups of five characters").toMatch(
+    /^[0-9A-HJ-KM-NP-TV-Z]{5}(-[0-9A-HJ-KM-NP-TV-Z]{5}){4}$/,
+  );
+
+  // And it cannot be walked past. Not a "next" button: an explicit claim to
+  // have done the one thing that makes the code worth anything.
+  const carryOn = page.getByRole("button", { name: "Continue" });
+  await expect(carryOn).toBeDisabled();
+  await page.getByLabel(/written down my recovery code/i).check();
+  await expect(carryOn).toBeEnabled();
+  await carryOn.click();
+
+  // Then it signs you straight in.
   await expect(page.getByRole("heading", { name: SERVER_NAME })).toBeVisible();
 });
 

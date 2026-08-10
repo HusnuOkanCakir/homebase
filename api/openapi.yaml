@@ -44,6 +44,8 @@ tags:
     description: Disks, and the locations Homebase manages on them
   - name: backup
     description: Backing up this server, and putting it back
+  - name: auth
+    description: Sessions, and getting back in when the password is gone
   - name: events
     description: Structured events and the audit trail
 
@@ -1104,6 +1106,115 @@ paths:
         "428":
           $ref: "#/components/responses/ConfirmationRequired"
 
+  /auth/recover:
+    post:
+      tags: [auth]
+      summary: Set a new password using a recovery code
+      description: |
+        The only unauthenticated way to change a credential in Homebase, and the reason
+        [ADR-0015](../docs/decisions/0015-password-recovery.md) exists: there is no email
+        to send a link to, no second device, and frequently no internet. The secret is
+        held by the user, on paper, and this is where it is spent.
+
+        The code is compared case-insensitively with separators ignored, and `O`, `I` and
+        `L` are folded onto `0` and `1` — the alphabet excludes them precisely so that
+        handwriting can be forgiven.
+
+        On success: the password is replaced, **every session for that account is
+        destroyed**, the caller is signed in, and a replacement code is returned. It is
+        returned once and stored only as an argon2id hash.
+
+        A wrong code, an unknown username and an account with no code are answered
+        identically. Distinguishing them would say which accounts are worth attacking.
+      operationId: recoverPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, recovery_code, new_password]
+              properties:
+                username:
+                  type: string
+                recovery_code:
+                  type: string
+                  description: As written down, in any case, with or without separators.
+                  example: 7K2M9-QRVWX-3TZ4P-HNBCD-8FGJ5
+                new_password:
+                  type: string
+                  minLength: 12
+      responses:
+        "200":
+          description: |
+            The password was replaced and the caller is signed in. `recovery_code` is the
+            replacement, shown once — a user who recovers and is left without one is a
+            single forgotten password from where they started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveredSession"
+        "401":
+          description: |
+            The code was not right. Deliberately the same answer for an unknown account
+            and for an account that has no recovery code.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: The new password is shorter than the minimum.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+
+  /auth/recovery-code:
+    get:
+      tags: [auth]
+      summary: Whether this account has a recovery code
+      description: |
+        Never the code itself, which is stored the way a password is and cannot be shown
+        twice. This exists so somebody can discover they never wrote one down at a moment
+        when that is still fixable, rather than when they are already locked out.
+      operationId: getRecoveryStatus
+      responses:
+        "200":
+          description: The state of this account's recovery code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [auth]
+      summary: Issue a new recovery code
+      description: |
+        Replaces the current code, which stops working immediately. This is the answer to
+        lost paper, and the reason no reversible copy of a code needs to exist anywhere.
+
+        The password is unchanged and no session is ended: this is not a recovery, it is
+        a replacement key.
+      operationId: reissueRecoveryCode
+      responses:
+        "200":
+          description: The new code, shown once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recovery_code]
+                properties:
+                  recovery_code:
+                    type: string
+                    example: 7K2M9-QRVWX-3TZ4P-HNBCD-8FGJ5
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /events:
     get:
       tags: [events]
@@ -1285,6 +1396,24 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
+    TooManyAttempts:
+      description: |
+        Too many failed attempts from this address. Every endpoint that verifies a
+        password or a recovery code costs 64 MiB of memory by design, so an unlimited one
+        is a way to exhaust a machine that may only have four gigabytes — and none of
+        them needs a credential to reach. `Retry-After` says how long to wait.
+
+        Successful attempts are refunded: rationing correct sign-ins would punish the
+        household rather than the attacker.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before trying again
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     HostUnavailable:
       description: |
         `hostd` could not be reached, so the machine's real state is unknown. Deliberately not
@@ -1326,6 +1455,63 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    RecoveryStatus:
+      type: object
+      additionalProperties: false
+      required: [exists]
+      description: |
+        What can be said about a recovery code without revealing it. There is deliberately
+        no field that could carry the code: it is stored as an argon2id hash, and a code
+        the server can produce twice is a code an attacker who reads the database can use.
+      properties:
+        exists:
+          type: boolean
+          description: |
+            `false` means this account has no way back in from a browser. The dashboard
+            treats that as a warning rather than a neutral fact.
+        issued_at:
+          type: string
+          format: date-time
+          description: When the current code was created, so a user can tell whether the
+            paper they are holding is the current one.
+        last_used_at:
+          type: string
+          format: date-time
+          description: |
+            When a code was last used to recover this account. Carried forward when a code
+            is replaced: the interesting fact is that a reset happened at all, and somebody
+            who did not perform it needs to see it.
+
+    RecoveredSession:
+      type: object
+      additionalProperties: false
+      required: [user, expires_at, recovery_code]
+      properties:
+        user:
+          type: object
+          required: [id, username, permissions]
+          properties:
+            id:
+              type: string
+            username:
+              type: string
+            permissions:
+              type: array
+              items:
+                type: string
+            created_at:
+              type: string
+              format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        recovery_code:
+          type: string
+          description: |
+            The replacement, returned once and never retrievable again. Five groups of five
+            characters from an alphabet with no `I`, `L`, `O` or `U`.
+          example: 7K2M9-QRVWX-3TZ4P-HNBCD-8FGJ5
+
     Health:
       type: object
       additionalProperties: false

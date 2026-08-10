@@ -15,6 +15,7 @@
 | [Applications](applications.md) | Installing, running and removing applications |
 | [Storage](storage.md) | Adding a disk, giving it to an application, unplugging safely |
 | [Backup and restore](backup.md) | Making a backup, checking it, and getting your files back |
+| [If you forget your password](passwords.md) | Your recovery code, and how to get back into your own server |
 
 ## Planned
 

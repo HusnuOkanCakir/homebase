@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { api, type User } from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
+import { RecoveryCode } from "../components/RecoveryCode";
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -24,6 +25,11 @@ export function Setup({ onComplete }: Props) {
   const [error, setError] = useState<ReturnType<typeof describeError> | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Setup is finished on the server by the time this is set. The account exists
+  // and the session is live; what is left is making sure the code leaves this
+  // screen on a piece of paper rather than only in a database as a hash.
+  const [issued, setIssued] = useState<{ user: User; code: string } | null>(null);
+
   const passwordTooShort = password.length > 0 && password.length < MIN_PASSWORD_LENGTH;
   const mismatch = confirmation.length > 0 && password !== confirmation;
   const ready =
@@ -38,12 +44,33 @@ export function Setup({ onComplete }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const { user } = await api.createAdministrator(username.trim(), password);
-      onComplete(user);
+      const { user, recovery_code } = await api.createAdministrator(username.trim(), password);
+
+      // A server that could not issue a code is still a claimed server, and
+      // stopping here would leave it unusable. Go on, and let the security
+      // screen offer another — being signed in is what makes that reachable.
+      if (!recovery_code) {
+        onComplete(user);
+        return;
+      }
+      setIssued({ user, code: recovery_code });
+      setBusy(false);
     } catch (caught) {
       setError(describeError(caught));
       setBusy(false);
     }
+  }
+
+  if (issued) {
+    return (
+      <main className="centred">
+        <RecoveryCode
+          code={issued.code}
+          acknowledgement="I have written down my recovery code."
+          onAcknowledged={() => onComplete(issued.user)}
+        />
+      </main>
+    );
   }
 
   return (
@@ -103,8 +130,9 @@ export function Setup({ onComplete }: Props) {
         </button>
 
         <p className="hint">
-          There is no way to recover this password for you — nothing about your server
-          leaves it, including this. Write it down somewhere safe.
+          Nothing about your server leaves it, including this password — so no one can
+          reset it for you. Next, you will be given a recovery code to write down, which
+          is what gets you back in if you forget it.
         </p>
       </form>
     </main>

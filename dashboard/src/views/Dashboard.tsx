@@ -6,6 +6,7 @@ import { Overview } from "./Overview";
 import { Applications } from "./Applications";
 import { Storage } from "./Storage";
 import { Backup } from "./Backup";
+import { Security } from "./Security";
 import { Restarting } from "./Restarting";
 
 /**
@@ -19,7 +20,7 @@ import { Restarting } from "./Restarting";
 
 const REFRESH_MS = 5000;
 
-type Tab = "overview" | "applications" | "storage" | "backup";
+type Tab = "overview" | "applications" | "storage" | "backup" | "security";
 
 interface Props {
   user: User;
@@ -103,6 +104,13 @@ export function Dashboard({ user, onSignOut }: Props) {
         >
           Backup
         </button>
+        <button
+          className={tab === "security" ? "tab tab-current" : "tab"}
+          aria-current={tab === "security" ? "page" : undefined}
+          onClick={() => setTab("security")}
+        >
+          Security
+        </button>
       </nav>
 
       <main className="app-main">
@@ -125,8 +133,10 @@ export function Dashboard({ user, onSignOut }: Props) {
           <Applications canManage={user.permissions.includes("apps.manage")} />
         ) : tab === "storage" ? (
           <Storage canManage={user.permissions.includes("storage.modify")} />
-        ) : (
+        ) : tab === "backup" ? (
           <Backup canManage={user.permissions.includes("backup.run")} />
+        ) : (
+          <Security username={user.username} />
         )}
       </main>
     </div>

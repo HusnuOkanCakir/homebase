@@ -89,10 +89,14 @@ make vm-destroy
 
 ### Two ways to run it, answering different questions
 
-**`make vm-run`** installs the Debian packages onto a clean Ubuntu VM, plugs a blank 2 GB
-disk into it, and leaves it running with a URL to open. It takes about five minutes the first
-time. This is the one to use when the question is "does this work" — the privilege boundary
-is real, `hostd` is root and `core` is not, and restarting the server restarts the VM.
+**`make vm-run`** installs the Debian packages onto a clean Ubuntu VM, plugs two blank 2 GB
+disks into it, and leaves it running with a URL to open. It takes about five minutes the
+first time. This is the one to use when the question is "does this work" — the privilege
+boundary is real, `hostd` is root and `core` is not, and restarting the server restarts the
+VM.
+
+Two disks because Homebase refuses to back up onto a disk an application keeps files on, so
+one spare disk gets you Storage or Backup but not both.
 
 It is also the only way to exercise storage, which needs root to mount anything, and the only
 way to try a restart without restarting your own machine.
@@ -111,8 +115,9 @@ The `vm-test-*` targets each create a VM, exercise it, and destroy it — includ
 failure, after collecting diagnostics. A failing test that leaves a 20 GB disk image behind
 is a test people stop running.
 
-Run `make check` before pushing. It is the same tooling at the same pinned versions as CI, so
-a local pass should mean a CI pass — if the two ever disagree, that is a bug worth reporting
+Run `make check` before pushing. It runs everything the pull-request checks run, Go
+formatting and `go vet` included, at the same pinned versions as CI — so a local pass should
+mean a CI pass. If the two ever disagree, that is a bug worth reporting
 rather than working around ([ADR-0009](../decisions/0009-python-docs-toolchain.md)).
 
 ## Making a change

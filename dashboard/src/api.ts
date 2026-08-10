@@ -143,6 +143,16 @@ export interface User {
   created_at: string;
 }
 
+/**
+ * What the server will say about a recovery code, which is never the code
+ * itself. It is stored the way a password is and cannot be shown twice.
+ */
+export interface RecoveryStatus {
+  exists: boolean;
+  issued_at?: string;
+  last_used_at?: string;
+}
+
 export interface SystemInfo {
   hostname: string;
   os: string;
@@ -399,11 +409,37 @@ export const api = {
 
   setupStatus: () => get<{ needs_setup: boolean }>("/setup"),
 
+  /**
+   * Claim the server. The response carries the recovery code, which is the only
+   * time it is ever sent — it is stored hashed and cannot be produced again.
+   */
   createAdministrator: (username: string, password: string) =>
-    post<{ user: User; expires_at: string }>("/setup", { username, password }),
+    post<{ user: User; expires_at: string; recovery_code?: string }>("/setup", {
+      username,
+      password,
+    }),
 
   login: (username: string, password: string) =>
     post<{ user: User; expires_at: string }>("/auth/login", { username, password }),
+
+  /**
+   * Set a new password using the code from first-run setup, and sign in.
+   *
+   * Returns a replacement code, because somebody who recovers and is left
+   * without one is a single forgotten password from where they started.
+   */
+  recover: (username: string, recoveryCode: string, newPassword: string) =>
+    post<{ user: User; expires_at: string; recovery_code: string }>("/auth/recover", {
+      username,
+      recovery_code: recoveryCode,
+      new_password: newPassword,
+    }),
+
+  /** Whether a recovery code exists, and when it was issued. Never the code. */
+  recoveryStatus: () => get<RecoveryStatus>("/auth/recovery-code"),
+
+  /** A fresh code, for somebody who has lost the paper. Invalidates the old one. */
+  reissueRecoveryCode: () => post<{ recovery_code: string }>("/auth/recovery-code"),
 
   logout: () => post<void>("/auth/logout"),
 

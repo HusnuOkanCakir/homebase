@@ -12,6 +12,9 @@ Turn an old laptop into a home server you can actually manage.
     Backups work, and restore onto a different machine — but they are not automatic, so
     nothing here holds the only copy of anything until you have made one.
 
+    A forgotten password is recoverable with a code written down at first-run setup, and
+    that code travels with the backup, so it still opens a machine rebuilt from the disk.
+
     Much of what follows still describes intent rather than behaviour — everything from
     Milestone 6 onward. Where the documentation and the implementation eventually disagree,
     the documentation is the target and the gap is a bug.

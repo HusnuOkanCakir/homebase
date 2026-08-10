@@ -127,6 +127,24 @@ Milestone 0 — contracts and project machinery. No product code.
 - `make vm-test-backup`: two machines. One is set up, backed up onto a USB disk and
   destroyed; a second is created from scratch and the backup restored onto it. It reads a
   backed-up file with `cat`, without Homebase doing the reading
+- **Password recovery** ([ADR-0015](docs/decisions/0015-password-recovery.md)). A recovery
+  code shown once at first-run setup: 125 bits, five groups of five, from an alphabet with
+  no `I`, `L`, `O` or `U` because it is copied off paper by hand. Stored as an argon2id
+  hash, single-use, and using it signs out every session
+- A signed-in administrator can see whether a code exists and issue a fresh one, under
+  **Security**. The code itself is never shown twice, which is what lets it be stored the
+  way a password is
+- `homebasectl recovery-code`, for when the paper is gone too. It deliberately does not set
+  passwords: typing one at a terminal leaves it in scrollback, and the browser already does
+  that job correctly
+- A recovery code travels with a backup, so the paper written at setup opens the machine
+  rebuilt from the disk. Without it, restoring after being locked out restores the lock —
+  which is what made this urgent rather than merely missing
+- Sign-in, first-run setup and recovery are rate limited per address, and argon2 is bounded
+  to four concurrent computations. Each verification reserves 64 MiB by design and none of
+  the three needs a credential to reach, so an unbounded one is memory exhaustion by
+  anonymous request. Successful attempts are refunded: rationing correct sign-ins would
+  punish the household rather than the attacker
 - CI now checks `api/openapi.yaml` against the routes `core` actually serves, in both
   directions. A specification that has drifted is worse than none: it reads
   authoritatively and is wrong

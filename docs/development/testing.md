@@ -105,6 +105,24 @@ Required where applicable to the change:
 - [ ] Reboot behaviour, if this touches state on disk
 - [ ] Existing user data survives an upgrade
 - [ ] Failure messages are comprehensible to a non-technical user
+- [ ] **No assertion that depends on chance.** A test whose expectation only usually holds
+      is one that fails on somebody else's branch, for reasons that have nothing to do with
+      their change
+
+`make check` runs everything the pull-request checks run, Go formatting and `go vet`
+included. If something is worth failing CI over, it is worth failing before the push — a
+check you have to remember to run separately catches things afterwards.
+
+### Tests that depend on chance
+
+`vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.
+A backup id ends in eight hex characters, so roughly one run in forty-four produces one with
+no letters in it — and the "wrong" confirmation is then the correct one. The assertion fails,
+having performed a real restore on the way.
+
+It passed for weeks. The fix is not to retry it: build the wrong value so that it is
+*always* wrong, and assert the case-sensitive property only when changing the case changes
+the string.
 
 ## The VM tests
 
@@ -121,6 +139,17 @@ pass a unit test while being wrong in production.
 against a real machine, including a real reboot. It is not a mocked API: those conditions
 are phrased as things a person does, and a mock would let every assertion pass while the
 thing a user touches was broken.
+
+The machine it builds has **two spare disks**, which is not an implementation detail: one
+goes to an application, and Homebase refuses to put a backup on a disk an application keeps
+files on. A machine with a single spare disk cannot reach a backup at all — the rule working
+correctly, and a shape the test has to match rather than work around.
+
+It finishes outside the browser, running `homebasectl` against the database `core` has been
+using all journey and spending the code it prints against the live API. That is the only way
+to learn whether a second process can open the database while `core` holds it with a
+write-ahead log, and a recovery tool that cannot is one that fails at the moment it is
+wanted.
 
 **`make vm-test-apps`** installs an application, uses it over HTTP, restarts the machine,
 and removes it. The assertion it exists for is that a file written into the application's
@@ -164,6 +193,7 @@ list is the argument for why these tests are worth their twelve minutes.
 | `vm-test-storage` | `hostd` exited `226/NAMESPACE` before running a line of Go, because its unit hard-required a directory *core's* package creates. Installing `homebase-hostd` alone was impossible |
 | `vm-test-storage` | …and it then restarted every two seconds, 673 times, with no start limit. Because the socket belongs to systemd, clients connected and hung rather than failing |
 | `vm-test-backup` | The database export was never exercised, because `core` was not running so there was no database to export — the most delicate part of a backup, silently untested |
+| `vm-test-dashboard` | Rate limiting counted successful sign-ins, so a household signing in over an evening was rationed exactly like somebody guessing. Unit tests sign in once; only a journey that signs in thirty-three times notices |
 
 The pattern is worth naming: every one is a property of the *deployment* rather than of the
 code, and every one is silent. Nothing crashed, no test went red, and `systemctl status`

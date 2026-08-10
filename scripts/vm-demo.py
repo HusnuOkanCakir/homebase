@@ -13,7 +13,7 @@ machine:
   * hostd runs as root and core as the `homebase` account, so the privilege
     boundary is the real one
   * restarting the server restarts the VM rather than your laptop
-  * a spare disk is plugged in, so storage can actually be tried
+  * two spare disks are plugged in, so storage and backup can both be tried
 
 Run with `make vm-run`, and `make vm-run-destroy` when finished.
 """
@@ -124,7 +124,7 @@ def main() -> int:
     parser.add_argument("--destroy", action="store_true",
                         help="destroy the demo machine and stop")
     parser.add_argument("--no-disk", action="store_true",
-                        help="do not plug in the spare disk")
+                        help="do not plug in the spare disks")
     parser.add_argument("--version", default="0.0.0~demo")
     args = parser.parse_args()
 
@@ -144,7 +144,13 @@ def main() -> int:
 
         vm = create(VM_NAME, force=True)
         if not args.no_disk:
-            create_removable_disk(vm, size_gb=2)
+            # Two, because Homebase refuses to put a backup on a disk an
+            # application keeps its files on — so a machine with one spare disk
+            # can try Storage or try Backup, but not both. That is the rule
+            # working, and a demo that cannot reach half the product is a poor
+            # demonstration of it.
+            create_removable_disk(vm, size_gb=2, slot=0)
+            create_removable_disk(vm, size_gb=2, slot=1)
         start(vm)
         wait_for_ssh(vm)
         wait_for_boot_complete(vm)
@@ -153,8 +159,10 @@ def main() -> int:
         install(vm, packages)
 
         if not args.no_disk:
-            attach_removable_disk(vm)
-            info("a blank 2 GB disk is plugged in, for trying Storage")
+            attach_removable_disk(vm, slot=0)
+            attach_removable_disk(vm, slot=1)
+            info("two blank 2 GB disks are plugged in: one for an application, "
+                 "one for backups")
 
         url = wait_for_dashboard(vm)
 
@@ -169,8 +177,11 @@ def main() -> int:
         print()
         print("  Things worth trying:")
         print("    • Applications → install Hello Homebase, then use it")
-        print("    • Storage      → erase and prepare the blank disk, then give")
+        print("    • Storage      → erase and prepare a blank disk, then give")
         print("                     it to File Browser under Applications")
+        print("    • Backup       → set up the *other* disk, then back the")
+        print("                     whole server up onto it")
+        print("    • Security     → your recovery code, and how to replace it")
         print("    • This server  → restart it, and watch the page notice")
         print()
         print("  This is a real installation on a real machine: hostd runs as")

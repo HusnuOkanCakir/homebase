@@ -33,8 +33,15 @@ User data is first for a reason. Every other compromise on this list can be reco
 firmware, a guest's laptop, a doorbell camera. Homebase must not assume the LAN is trusted.
 
 Defended by: authentication on every endpoint including on the LAN; no unauthenticated
-service beyond mDNS discovery; local HTTPS; rate limiting; no default credentials — first-run
-setup requires creating an administrator.
+service beyond mDNS discovery; local HTTPS; no default credentials — first-run setup requires
+creating an administrator.
+
+Rate limiting is per client address on the three endpoints that verify an argon2id hash —
+sign in, first-run setup and recovery. Each costs 64 MiB by design and none needs a
+credential to reach, so the limit is there to bound memory as much as to slow guessing.
+Concurrent hashing is capped independently, because a limiter keyed on address does not help
+against many addresses. Successful attempts are refunded: rationing correct sign-ins would
+punish the household rather than the attacker.
 
 ### A malicious or compromised application image
 
@@ -164,6 +171,8 @@ Stated plainly, because a threat model that hides its compromises is marketing.
 | **`hostd` bugs are full compromise** | It must be privileged to do its job | Kept small, few dependencies, security review, memory-safe language |
 | **Single maintainer reviews security changes** | The project has one maintainer | Required CI checks; approvals go to 1 when a second joins |
 | **No hash pinning in `requirements-dev.txt`** | Milestone 0 tooling only, not shipped | Dependabot; scheduled for Milestone 8 |
+| **The recovery code is a bearer credential on paper that never expires** | The alternative is a user permanently locked out of their own photographs, which is both worse and far likelier than a household adversary finding the paper | 125 bits; argon2id at rest; single use; rate limited; using it destroys every session and raises a non-recoverable event ([ADR-0015](../decisions/0015-password-recovery.md)) |
+| **A backup disk plus a written recovery code is complete access to the server** | Both must survive the machine to be worth anything, and encrypting either moves the failure to a key the user has lost | Stated in the backup README, the user guide and the manifest — keep them in different places |
 
 ## What is out of scope
 
