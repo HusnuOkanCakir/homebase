@@ -126,6 +126,24 @@ autoinstall:
     - chmod 0440 /target/etc/sudoers.d/homebase-console
     - curtin in-target --target=/target -- visudo -cf /etc/sudoers.d/homebase-console
 
+    # Listen on the network, not only on the machine itself.
+    #
+    # core's own default is 127.0.0.1, which is the right default for a package
+    # and the wrong one for an appliance: the entire point of this machine is
+    # being opened from a phone in another room. Left alone, the dashboard is
+    # reachable only from the server's own keyboard — which is exactly the thing
+    # the product promises you will never need.
+    #
+    # This is a Milestone 6 shape, and it is plain HTTP on a home network.
+    # Milestone 7 puts local HTTPS in front of it and this drop-in goes away.
+    - mkdir -p /target/etc/systemd/system/homebase-core.service.d
+    - |
+      cat > /target/etc/systemd/system/homebase-core.service.d/listen.conf <<'LISTEN'
+      [Service]
+      ExecStart=
+      ExecStart=/usr/libexec/homebase/core --listen 0.0.0.0:8080
+      LISTEN
+
     # A firewall that allows what the dashboard needs and nothing else. The
     # server sits on a home network with a smart television and a doorbell
     # camera on it, and the threat model assumes that network is hostile.

@@ -98,6 +98,29 @@ func TestConsoleAccountCanBecomeRoot(t *testing.T) {
 	}
 }
 
+// The dashboard has to be reachable from another device, which is the entire
+// point of the machine. core's own default is 127.0.0.1 — right for a package,
+// useless for an appliance — so the installer overrides it.
+//
+// Found by the installer test: every machine-side check passed while the
+// dashboard was reachable only from the server's own keyboard, and the firewall
+// rule opened a port nothing was listening on.
+func TestTheDashboardIsReachableFromTheNetwork(t *testing.T) {
+	rendered, err := Render(Values{Hostname: "homebase"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := withoutComments(rendered)
+
+	if !strings.Contains(config, "--listen 0.0.0.0:8080") {
+		t.Error("core is left listening on localhost, so the dashboard cannot be " +
+			"opened from a phone — which is the one thing this machine is for")
+	}
+	if !strings.Contains(config, "ufw allow 8080/tcp") {
+		t.Error("the firewall does not let the dashboard through")
+	}
+}
+
 func TestSSHIsInstalledOnlyWhenThereIsAKey(t *testing.T) {
 	without, err := Render(Values{Hostname: "homebase"})
 	if err != nil {
