@@ -408,10 +408,30 @@ def preview_before_restoring(vm: VM, backup_id: str) -> None:
     check(result.returncode != 0, "and previewing wrote nothing")
 
 
+def near_miss(backup_id: str) -> str:
+    """The same id with one character changed.
+
+    The confirmation somebody produces by mistyping the thing they are copying,
+    which is the case worth refusing — and, unlike changing the case, it is
+    guaranteed to differ from the real id whatever the id happens to contain.
+    """
+    last = backup_id[-1]
+    return backup_id[:-1] + ("0" if last != "0" else "1")
+
+
 def restore_onto_the_replacement(vm: VM, backup_id: str) -> None:
     step("Restoring")
 
-    for confirmation in ("", "yes", "restore", backup_id.upper()):
+    # A backup id ends in eight hex characters, so roughly one run in forty-four
+    # produces one with no letters in it at all — and `backup_id.upper()` is then
+    # the *correct* confirmation rather than a wrong one. That flake took a
+    # passing suite and a real restore with it. Case is only worth asserting when
+    # changing it changes the string.
+    wrong = ["", "yes", "restore", near_miss(backup_id)]
+    if backup_id.upper() != backup_id:
+        wrong.append(backup_id.upper())
+
+    for confirmation in wrong:
         status, body = op(vm, "backup.restore",
                           {"location": BACKUP_DISK, "id": backup_id, "confirm": confirmation},
                           confirmed=True, timeout=120)
