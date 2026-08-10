@@ -530,3 +530,67 @@ button:focus-visible {
     opacity: 0.4;
   }
 }
+
+/* --- Recovery codes ------------------------------------------------------ */
+
+/*
+ * A code somebody is copying onto paper, character by character. Large, spaced
+ * and monospaced so that the two things that go wrong on paper — losing your
+ * place, and confusing similar glyphs — are as hard as they can be made. The
+ * alphabet already excludes I, L, O and U for the same reason.
+ */
+.recovery-code {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--surface-sunken, transparent);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-align: center;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.code-input {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.check {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin: 1rem 0;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.check input {
+  width: auto;
+  margin: 0.15rem 0 0;
+  flex: none;
+}
+
+/* Only the code survives printing: the rest of the page is of no use on paper. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .recovery-code,
+  .recovery-code * {
+    visibility: visible;
+  }
+
+  .recovery-code {
+    position: absolute;
+    inset: 2rem auto auto 0;
+    width: 100%;
+    border: none;
+    font-size: 1.25rem;
+  }
+}

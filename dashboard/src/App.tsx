@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, NetworkError, type User } from "./api";
 import { Setup } from "./views/Setup";
 import { Login } from "./views/Login";
+import { Recover } from "./views/Recover";
 import { Dashboard } from "./views/Dashboard";
 import { Message } from "./components/Message";
 
@@ -10,6 +11,7 @@ type Screen =
   | { kind: "unreachable"; detail: string }
   | { kind: "setup" }
   | { kind: "login" }
+  | { kind: "recover" }
   | { kind: "signed-in"; user: User };
 
 export function App() {
@@ -99,7 +101,14 @@ export function App() {
       return <Setup onComplete={signedIn} />;
 
     case "login":
-      return <Login onSignedIn={signedIn} />;
+      return (
+        <Login onSignedIn={signedIn} onForgotten={() => setScreen({ kind: "recover" })} />
+      );
+
+    case "recover":
+      return (
+        <Recover onRecovered={signedIn} onCancel={() => setScreen({ kind: "login" })} />
+      );
 
     case "signed-in":
       return <Dashboard user={screen.user} onSignOut={() => void signOut()} />;
