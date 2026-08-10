@@ -110,6 +110,23 @@ Milestone 0 — contracts and project machinery. No product code.
 - Disks filling up are noticed before applications start failing to write. A server that
   runs out of space does not announce it: applications fail in whatever way each of them
   fails, and the common cause is visible only to somebody who thinks to look
+- **Backup and restore.** A backup is plain files with a JSON manifest, readable without
+  Homebase ([ADR-0014](docs/decisions/0014-backups-are-readable-without-homebase.md)). Six
+  operations in `hostd`, six endpoints in `core`, a dashboard screen built around restoring
+  rather than around backing up, and a README inside every backup written for somebody
+  whose server has died and who is looking at the disk on a borrowed computer
+- The database is exported with `VACUUM INTO`, never copied. A live SQLite database has a
+  write-ahead log beside it, and copying the main file gives something stale or corrupt —
+  usually stale, which is worse, because it restores successfully and is quietly missing the
+  last week
+- Homebase refuses to back up onto a disk an application keeps its files on, and says which
+  application and why. A copy on the same disk protects against deleting a file by accident
+  and against nothing else
+- Restoring is a merge, not a mirror: nothing the backup does not contain is deleted, and a
+  file whose checksum no longer matches is skipped rather than written over a good one
+- `make vm-test-backup`: two machines. One is set up, backed up onto a USB disk and
+  destroyed; a second is created from scratch and the backup restored onto it. It reads a
+  backed-up file with `cat`, without Homebase doing the reading
 - CI now checks `api/openapi.yaml` against the routes `core` actually serves, in both
   directions. A specification that has drifted is worse than none: it reads
   authoritatively and is wrong

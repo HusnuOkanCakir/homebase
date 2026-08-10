@@ -184,8 +184,13 @@ test("the storage screen speaks about disks, not about mount points", async ({ p
 // --- Helpers -----------------------------------------------------------------
 
 /** The removable disk QEMU plugged in, as opposed to the system disk. */
+/**
+ * The first spare disk. The machine has two, because a backup may not live on
+ * the disk an application keeps its files on — 4-backup.spec.ts takes the other
+ * one. This spec only ever wants the first.
+ */
 function usbDisk(page: Page) {
-  return page.locator("li.storage-row", { hasText: "USB" });
+  return page.locator("li.storage-row", { hasText: "USB" }).first();
 }
 
 async function openStorage(page: Page) {

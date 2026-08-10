@@ -38,7 +38,7 @@ make check
 | 2 — Core slice ✅ | Go 1.23+, Node 20+ | `core`, `hostd`, the dashboard |
 | 3 — Applications ✅ | Docker (Engine API 1.41+) | Container lifecycle |
 | 4 — Storage ✅ | A spare USB disk, or a second qcow2 attached to a VM | Nothing about disks can be tested without one |
-| 5 — Backup | Somewhere to back up *to* — a second disk | Restore is the half that has to work |
+| 5 — Backup ✅ | `sqlite3`, and a second disk to back up *to* | Restore is the half that has to work |
 
 Three things worth checking in advance rather than mid-task, because each has cost this
 project time already:
@@ -82,6 +82,7 @@ make vm-test-core            # the API vertical slice
 make vm-test-dashboard       # the user journey, in a browser
 make vm-test-apps            # install an app, reboot, remove it; data must survive
 make vm-test-storage         # a real disk, unplugged mid-use; nothing may corrupt
+make vm-test-backup          # back up one machine, restore onto a different one
 make vm-test-packages        # install, upgrade, reboot and purge the .debs
 make vm-destroy
 ```

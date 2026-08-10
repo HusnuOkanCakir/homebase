@@ -42,6 +42,8 @@ tags:
     description: Installing and running applications
   - name: storage
     description: Disks, and the locations Homebase manages on them
+  - name: backup
+    description: Backing up this server, and putting it back
   - name: events
     description: Structured events and the audit trail
 
@@ -858,6 +860,250 @@ paths:
         "404":
           $ref: "#/components/responses/AppNotFound"
 
+  /backups:
+    get:
+      tags: [backup]
+      summary: List the backups on a disk
+      description: |
+        Requires `backup.read`. Newest first.
+
+        A backup with `complete: false` has no readable manifest — it was interrupted. It is
+        listed rather than hidden, because a folder that looks like a backup and is not is
+        exactly what nobody must rely on.
+      operationId: listBackups
+      parameters:
+        - $ref: "#/components/parameters/BackupLocation"
+      responses:
+        "200":
+          description: The backups on that disk
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, total, location]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BackupSummary"
+                  total:
+                    type: integer
+                  location:
+                    type: string
+        "400":
+          description: No disk was named
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+    post:
+      tags: [backup]
+      summary: Back this server up onto a disk
+      description: |
+        Requires `backup.run`.
+
+        `include_data: false` copies settings only and takes seconds. `true` copies the files
+        on your storage disks as well, and on a large collection can take hours — the two are
+        separate because somebody wanting the first should not be made to wait for the second.
+
+        **Homebase refuses to back up onto a disk an application keeps its files on.** A copy
+        on the same disk protects against deleting a file by accident and against nothing
+        else: disks fail whole, and presenting that as a backup is worse than having none.
+
+        A backup is plain files with a JSON manifest, readable without Homebase. See
+        [ADR-0014](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0014-backups-are-readable-without-homebase.md).
+      operationId: createBackup
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [location]
+              properties:
+                location:
+                  type: string
+                  description: The managed storage location to write the backup to.
+                include_data:
+                  type: boolean
+                  default: false
+                  description: Copy the files on your storage disks as well as the settings.
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "400":
+          description: No disk was named
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /backups/{backup_id}/preview:
+    get:
+      tags: [backup]
+      summary: What restoring this backup would change
+      description: |
+        Requires `backup.read`. **Changes nothing.**
+
+        Its own endpoint rather than a flag on restore, because a preview a client can forget
+        to ask for is a preview nobody sees. Restoring has the highest ratio of irreversible
+        to understood of anything in Homebase: the user is anxious, often in a hurry, and may
+        be about to overwrite something they still needed.
+
+        `would_overwrite` is the number that actually matters — how much of what is on the
+        machine now would be replaced. `verified` reports whether the backup's checksums still
+        match, because restoring from an unverified backup is a guess.
+      operationId: previewRestore
+      parameters:
+        - $ref: "#/components/parameters/BackupID"
+        - $ref: "#/components/parameters/BackupLocation"
+      responses:
+        "200":
+          description: What would change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestorePreview"
+        "400":
+          description: No disk was named
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/BackupNotFound"
+
+  /backups/{backup_id}/verify:
+    post:
+      tags: [backup]
+      summary: Check every file in a backup against its checksum
+      description: |
+        Requires `backup.read`. Reads the whole backup, so on a large one this takes as long
+        as writing it did.
+
+        **A damaged backup fails the job** rather than succeeding with a footnote: somebody
+        skimming the job list must not read it as fine.
+
+        This is what catches the failures that are otherwise silent — a disk that bit-rots in
+        a drawer, a backup truncated because the disk filled up, a file quietly overwritten.
+        Every one of those is discovered at the worst possible moment unless something looks
+        first.
+      operationId: verifyBackup
+      parameters:
+        - $ref: "#/components/parameters/BackupID"
+        - $ref: "#/components/parameters/BackupLocation"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "400":
+          description: No disk was named, or the request carried settings this endpoint does not accept
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/BackupNotFound"
+
+  /backups/{backup_id}/restore:
+    post:
+      tags: [backup]
+      summary: Put a backup back onto this server
+      description: |
+        Requires `backup.run`, and a confirmation naming the backup.
+
+        **A restore is a merge, not a mirror.** Nothing the backup does not contain is
+        deleted: somebody recovering one application from last month's backup does not lose
+        the three they added since.
+
+        Files whose checksum no longer matches are skipped rather than written — restoring
+        corruption on top of working data is the worst outcome available here.
+
+        `confirm` must be the backup's own id, typed. This is the third operation in Homebase
+        that destroys data irreversibly, and the only one where what it overwrites is usually
+        what somebody is trying to save.
+      operationId: restoreBackup
+      parameters:
+        - $ref: "#/components/parameters/BackupID"
+        - $ref: "#/components/parameters/BackupLocation"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NamedConfirmation"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "400":
+          description: No disk was named
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/BackupNotFound"
+        "428":
+          $ref: "#/components/responses/ConfirmationRequired"
+
+  /backups/{backup_id}/delete:
+    post:
+      tags: [backup]
+      summary: Delete one backup from a disk
+      description: |
+        Requires `backup.run` and a confirmation naming the backup. Other backups on the disk
+        are untouched.
+      operationId: deleteBackup
+      parameters:
+        - $ref: "#/components/parameters/BackupID"
+        - $ref: "#/components/parameters/BackupLocation"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NamedConfirmation"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/BackupNotFound"
+        "428":
+          $ref: "#/components/responses/ConfirmationRequired"
+
   /events:
     get:
       tags: [events]
@@ -967,6 +1213,26 @@ components:
       schema:
         type: string
         pattern: "^[a-z][a-z0-9-]{1,38}[a-z0-9]$"
+    BackupID:
+      name: backup_id
+      in: path
+      required: true
+      description: |
+        A backup's id — the date it was taken, then some randomness. Sortable, so listing
+        newest-first needs no manifest parsing, and readable, so somebody looking at four
+        folders on a disk can tell which is which without opening any of them.
+      schema:
+        type: string
+        pattern: "^[a-z0-9-]{10,64}$"
+    BackupLocation:
+      name: location
+      in: query
+      required: true
+      description: |
+        The managed storage location the backups are on. Required everywhere: a backup lives
+        on a disk, and which disk is not something Homebase guesses.
+      schema:
+        type: string
     LocationID:
       name: location_id
       in: path
@@ -995,6 +1261,12 @@ components:
       description: |
         This server has no such application. Not "not installed" — the manifest is not on the
         machine at all, and no package ships it.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    BackupNotFound:
+      description: That backup is not on this disk.
       content:
         application/json:
           schema:
@@ -1461,6 +1733,110 @@ components:
             reason everywhere else in Homebase: a `true` a client can send by default is not a
             confirmation, and one that names its target cannot be replayed against a different
             disk.
+
+    BackupSummary:
+      type: object
+      additionalProperties: false
+      required: [id, location, complete]
+      properties:
+        id:
+          type: string
+        location:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        hostname:
+          type: string
+          description: The machine that wrote it, so three folders on a disk can be told apart.
+        version:
+          type: string
+        kind:
+          type: string
+          enum: [configuration, full]
+          description: |
+            `configuration` is settings only and takes seconds. `full` includes the files on
+            your storage disks.
+        files:
+          type: integer
+        total_bytes:
+          type: integer
+        applications:
+          type: array
+          items:
+            type: string
+        notes:
+          type: array
+          items:
+            type: string
+          description: |
+            What was deliberately left out, in words — so somebody reading this is not misled
+            about what they have.
+        complete:
+          type: boolean
+          description: |
+            False for a backup with no readable manifest: it was interrupted. Listed rather
+            than hidden, because a folder that looks like a backup and is not is exactly what
+            nobody must rely on.
+        problem:
+          type: string
+
+    RestorePreview:
+      type: object
+      additionalProperties: false
+      required: [id, location, files_to_write, would_overwrite, verified, message]
+      properties:
+        id:
+          type: string
+        location:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        hostname:
+          type: string
+        kind:
+          type: string
+        applications:
+          type: array
+          items:
+            type: string
+        unavailable_applications:
+          type: array
+          items:
+            type: string
+          description: |
+            In the backup, but not in this server's catalogue. Their files are restored, but
+            they cannot be installed again — data with nothing to read it.
+        applications_to_install:
+          type: array
+          items:
+            type: string
+        files_to_write:
+          type: integer
+        bytes_to_write:
+          type: integer
+        would_overwrite:
+          type: integer
+          description: |
+            How many files on this server would be replaced. The number somebody actually
+            needs before agreeing. Everything else is added, and nothing is deleted.
+        verified:
+          type: boolean
+          description: |
+            Whether the backup's checksums still match, checked before it is offered rather
+            than after it has been agreed to. Restoring from an unverified backup is a guess.
+        integrity_issues:
+          type: array
+          items:
+            type: string
+        notes:
+          type: array
+          items:
+            type: string
+        message:
+          type: string
+          description: The whole of the above, in one paragraph a person can read.
 
     EventList:
       type: object

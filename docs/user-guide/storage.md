@@ -6,8 +6,9 @@ Homebase to use it.
 
 !!! warning "Pre-alpha"
 
-    Nothing here backs anything up. Do not put something on this server that you do not have
-    another copy of somewhere else.
+    Homebase can [back up to another disk](backup.md), but not on a schedule — you have to
+    make the backup. Until you have, do not put anything on this server that you do not have
+    another copy of.
 
 ## Adding a disk
 
@@ -102,8 +103,8 @@ somewhere else.
 
 ## What Homebase does not do yet
 
-- **No backups.** This is Milestone 5, and it is the reason nothing here should hold the
-  only copy of anything.
+- Backups exist now — see [Backup and restore](backup.md) — but they are not automatic.
+  You have to make them.
 - **Warnings when a disk is nearly full** arrive as events in the history, not yet as
   anything on screen.
 - **Nothing spanning several disks.** No pooling, no mirroring, no RAID. One disk is one

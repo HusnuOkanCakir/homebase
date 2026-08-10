@@ -28,18 +28,26 @@ import (
 const SessionCookie = "homebase_session"
 
 type Server struct {
-	auth    *auth.Service
-	jobs    *jobs.Manager
-	host    *hostclient.Client
-	events  *events.Recorder
-	log     *slog.Logger
-	version string
-	started time.Time
-	static  http.Handler
+	auth   *auth.Service
+	jobs   *jobs.Manager
+	host   *hostclient.Client
+	events *events.Recorder
+	// lastBackup remembers how the most recent backup to each disk went, so the
+	// dashboard can say "your last backup failed" without anybody going looking
+	// through the job history.
+	lastBackup *lastBackupState
+	log        *slog.Logger
+	version    string
+	started    time.Time
+	static     http.Handler
 }
 
 func NewServer(a *auth.Service, j *jobs.Manager, h *hostclient.Client, e *events.Recorder, log *slog.Logger, version string) *Server {
-	return &Server{auth: a, jobs: j, host: h, events: e, log: log, version: version, started: time.Now()}
+	return &Server{
+		auth: a, jobs: j, host: h, events: e,
+		lastBackup: newLastBackupState(),
+		log:        log, version: version, started: time.Now(),
+	}
 }
 
 // SetStatic makes core serve the built dashboard alongside the API.
@@ -72,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 
 	s.registerAppRoutes(mux)
 	s.registerStorageRoutes(mux)
+	s.registerBackupRoutes(mux)
 	s.registerEventRoutes(mux)
 
 	// The dashboard, when it is present. Registered last and at the root, so

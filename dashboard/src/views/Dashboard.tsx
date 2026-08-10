@@ -5,6 +5,7 @@ import { Message } from "../components/Message";
 import { Overview } from "./Overview";
 import { Applications } from "./Applications";
 import { Storage } from "./Storage";
+import { Backup } from "./Backup";
 import { Restarting } from "./Restarting";
 
 /**
@@ -18,7 +19,7 @@ import { Restarting } from "./Restarting";
 
 const REFRESH_MS = 5000;
 
-type Tab = "overview" | "applications" | "storage";
+type Tab = "overview" | "applications" | "storage" | "backup";
 
 interface Props {
   user: User;
@@ -95,6 +96,13 @@ export function Dashboard({ user, onSignOut }: Props) {
         >
           Storage
         </button>
+        <button
+          className={tab === "backup" ? "tab tab-current" : "tab"}
+          aria-current={tab === "backup" ? "page" : undefined}
+          onClick={() => setTab("backup")}
+        >
+          Backup
+        </button>
       </nav>
 
       <main className="app-main">
@@ -115,8 +123,10 @@ export function Dashboard({ user, onSignOut }: Props) {
           )
         ) : tab === "applications" ? (
           <Applications canManage={user.permissions.includes("apps.manage")} />
-        ) : (
+        ) : tab === "storage" ? (
           <Storage canManage={user.permissions.includes("storage.modify")} />
+        ) : (
+          <Backup canManage={user.permissions.includes("backup.run")} />
         )}
       </main>
     </div>

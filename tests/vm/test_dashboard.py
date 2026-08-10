@@ -33,6 +33,7 @@ from vmctl import (  # noqa: E402
     info,
     attach_removable_disk,
     create_removable_disk,
+    apt,
     install_docker,
     ok,
     ssh,
@@ -106,6 +107,12 @@ def install(vm: VM, built: dict[str, Path]) -> None:
     ssh(vm, ["sudo", "chown", "homebase:homebase",
              "/var/lib/homebase", "/srv/homebase", "/srv/homebase/apps",
              "/var/log/homebase"])
+
+    # sqlite3, because a backup exports the database with VACUUM INTO rather
+    # than copying it.
+    result = apt(vm, "install -y -qq sqlite3")
+    if result.returncode != 0:
+        raise TestFailure("installing sqlite3 failed\n" + result.stdout[-400:])
 
     for name in ("core", "hostd"):
         copy_to(vm, built[name], f"/usr/libexec/homebase/{name}", mode="0755")
@@ -184,6 +191,8 @@ def run_browser_tests(vm: VM) -> None:
     info("first-run setup → overview → restart → real reboot → sign out")
     info("then: install an application → use it → reboot → remove it, data kept")
     info("then: prepare a blank disk → set it up → give it to an application")
+    info("then: be refused a backup onto that disk → set up a second one")
+    info("then: back the whole thing up, check it, and preview restoring it")
     print()
 
     env = {
@@ -238,10 +247,16 @@ def main() -> int:
         ok("chromium ready")
 
         vm = create(VM_NAME, force=True)
-        # A blank disk, so the storage journey has something to prepare. Plugged
-        # in after boot rather than present from the start, because that is how
-        # a user meets one.
-        create_removable_disk(vm, size_gb=2)
+        # Two blank disks. One is for the storage journey to prepare and give to
+        # an application; the other is for the backup journey, because Homebase
+        # refuses to back up onto a disk an application keeps its files on. With
+        # a single disk the browser journey cannot reach a backup at all — which
+        # is the product being right, and is also what a real user needs.
+        #
+        # Plugged in after boot rather than present from the start, because that
+        # is how a user meets one.
+        create_removable_disk(vm, size_gb=2, slot=0)
+        create_removable_disk(vm, size_gb=2, slot=1)
         start(vm)
         wait_for_ssh(vm)
         wait_for_boot_complete(vm)
@@ -249,7 +264,8 @@ def main() -> int:
         install_docker(vm, prepull=["traefik/whoami:v1.10.4",
                                     "filebrowser/filebrowser:v2.32.0"])
         install(vm, built)
-        attach_removable_disk(vm)
+        attach_removable_disk(vm, slot=0)
+        attach_removable_disk(vm, slot=1)
         verify_reachable(vm)
         run_browser_tests(vm)
 

@@ -325,6 +325,53 @@ export interface ApplicationStorage {
   ready: boolean;
 }
 
+// --- Backup -------------------------------------------------------------------
+
+export interface BackupSummary {
+  id: string;
+  location: string;
+  created_at?: string;
+  hostname?: string;
+  version?: string;
+  kind?: "configuration" | "full";
+  files?: number;
+  total_bytes?: number;
+  applications?: string[];
+  notes?: string[];
+  /**
+   * False for a backup with no readable manifest — it was interrupted.
+   *
+   * Shown rather than hidden: a folder that looks like a backup and is not is
+   * exactly what nobody must rely on.
+   */
+  complete: boolean;
+  problem?: string;
+}
+
+export interface RestorePreview {
+  id: string;
+  location: string;
+  created_at?: string;
+  hostname?: string;
+  kind?: string;
+
+  applications?: string[];
+  unavailable_applications?: string[];
+  applications_to_install?: string[];
+
+  files_to_write: number;
+  bytes_to_write?: number;
+  /** How many files on this server would be replaced. The number that matters. */
+  would_overwrite: number;
+
+  /** Whether the backup's checksums still match, checked before it is offered. */
+  verified: boolean;
+  integrity_issues?: string[];
+
+  notes?: string[];
+  message: string;
+}
+
 export type EventSeverity = "info" | "warning" | "error" | "critical";
 
 export interface Event {
@@ -468,6 +515,47 @@ export const api = {
       storage_id: storageID,
       location,
     }),
+
+  // --- Backup ----------------------------------------------------------------
+
+  backups: (location: string) =>
+    get<{ items: BackupSummary[]; total: number }>(
+      `/backups?location=${encodeURIComponent(location)}`,
+      60_000,
+    ),
+
+  createBackup: (location: string, includeData: boolean) =>
+    post<Job>("/backups", { location, include_data: includeData }),
+
+  /**
+   * What restoring would do. Changes nothing.
+   *
+   * Asked before restoring is offered, never after — a preview somebody can skip
+   * is a preview nobody sees.
+   */
+  previewRestore: (location: string, id: string) =>
+    get<RestorePreview>(
+      `/backups/${encodeURIComponent(id)}/preview?location=${encodeURIComponent(location)}`,
+      300_000,
+    ),
+
+  verifyBackup: (location: string, id: string) =>
+    post<Job>(
+      `/backups/${encodeURIComponent(id)}/verify?location=${encodeURIComponent(location)}`,
+    ),
+
+  /** `confirm` must be the backup's own id — this overwrites what is here. */
+  restoreBackup: (location: string, id: string, confirm: string) =>
+    post<Job>(
+      `/backups/${encodeURIComponent(id)}/restore?location=${encodeURIComponent(location)}`,
+      { confirm },
+    ),
+
+  deleteBackup: (location: string, id: string, confirm: string) =>
+    post<Job>(
+      `/backups/${encodeURIComponent(id)}/delete?location=${encodeURIComponent(location)}`,
+      { confirm },
+    ),
 
   // --- Events ---------------------------------------------------------------
 

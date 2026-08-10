@@ -50,6 +50,16 @@ EXPECTED = {
     "storage.remove_location": ("medium", "required"),
     "storage.unmount": ("medium", "required"),
     "storage.list_disks": ("read", "none"),
+    # Backup. restore is the third operation that destroys data irreversibly,
+    # and the only one where what it overwrites is usually what somebody is
+    # trying to save. preview must stay read-only: it is what a user is shown
+    # before agreeing, and an operation that changed something while previewing
+    # would make the preview a lie.
+    "backup.restore": ("critical", "explicit"),
+    "backup.delete": ("medium", "required"),
+    "backup.preview": ("read", "none"),
+    "backup.verify": ("read", "none"),
+    "backup.create": ("low", "none"),
 }
 
 
