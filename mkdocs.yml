@@ -94,6 +94,7 @@ nav:
       - 0011 hostd protocol: decisions/0011-hostd-protocol.md
       - 0012 hostd owns the catalogue: decisions/0012-hostd-owns-the-catalogue.md
       - 0013 Storage identity and mounting: decisions/0013-storage-identity-and-mounting.md
+      - 0014 Backups readable without Homebase: decisions/0014-backups-are-readable-without-homebase.md
       - Template: decisions/template.md
   - Security:
       - Threat model: security/threat-model.md

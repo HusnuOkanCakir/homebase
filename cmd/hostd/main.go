@@ -36,16 +36,19 @@ const (
 
 func main() {
 	var (
-		socketPath = flag.String("socket", defaultSocket, "Unix socket to listen on")
-		auditPath  = flag.String("audit-log", defaultAuditLog, "append-only audit log")
-		peerUser   = flag.String("peer-user", defaultPeerUser, "the unprivileged user permitted to connect")
-		catalogue  = flag.String("catalogue", hostd.DefaultCatalogueDir, "directory of application manifests")
-		dockerSock = flag.String("docker-socket", "", "Docker socket (default /var/run/docker.sock)")
-		appData    = flag.String("app-data", hostd.DefaultAppDataRoot, "directory holding application data")
-		stateDir   = flag.String("state-dir", hostd.DefaultStateDir, "hostd's own state directory")
-		storageDir = flag.String("storage-root", hostd.DefaultStorageRoot, "where managed disks are mounted")
-		describe   = flag.Bool("describe", false, "print the operation registry as JSON and exit")
-		version    = flag.Bool("version", false, "print the version and exit")
+		socketPath   = flag.String("socket", defaultSocket, "Unix socket to listen on")
+		auditPath    = flag.String("audit-log", defaultAuditLog, "append-only audit log")
+		peerUser     = flag.String("peer-user", defaultPeerUser, "the unprivileged user permitted to connect")
+		catalogue    = flag.String("catalogue", hostd.DefaultCatalogueDir, "directory of application manifests")
+		dockerSock   = flag.String("docker-socket", "", "Docker socket (default /var/run/docker.sock)")
+		appData      = flag.String("app-data", hostd.DefaultAppDataRoot, "directory holding application data")
+		stateDir     = flag.String("state-dir", hostd.DefaultStateDir, "hostd's own state directory")
+		storageDir   = flag.String("storage-root", hostd.DefaultStorageRoot, "where managed disks are mounted")
+		databasePath = flag.String("database", "/var/lib/homebase/homebase.db",
+			"core's database, exported into a backup")
+		configDir = flag.String("config-dir", "/etc/homebase", "configuration to back up")
+		describe  = flag.Bool("describe", false, "print the operation registry as JSON and exit")
+		version   = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
 
@@ -63,8 +66,11 @@ func main() {
 	storage := hostd.NewStorageServices(*storageDir, *stateDir)
 	hostd.RegisterStorageOperations(registry, storage)
 
-	hostd.RegisterAppOperations(registry,
-		hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir).WithStorage(storage))
+	appServices := hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir).WithStorage(storage)
+	hostd.RegisterAppOperations(registry, appServices)
+
+	hostd.RegisterBackupOperations(registry, hostd.NewBackupServices(
+		storage, appServices, *databasePath, *configDir, *stateDir, buildVersion()))
 
 	// --describe needs no socket, no root and no audit log. It exists so that
 	// the privileged surface can be inspected — by a reviewer, by the docs

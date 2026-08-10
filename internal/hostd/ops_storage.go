@@ -885,6 +885,27 @@ func (s *StorageServices) ResolveLocation(id string) (string, bool) {
 	return state.MountPoint, true
 }
 
+// Locations returns every managed location with its current state.
+//
+// Exported for the backup operations, which need to know which disks hold data
+// worth copying — and, more importantly, which one is the destination, because a
+// backup must never be written to a disk it is backing up.
+func (s *StorageServices) Locations() ([]LocationState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	locations, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+
+	states := make([]LocationState, 0, len(locations))
+	for _, location := range locations {
+		states = append(states, s.describe(location))
+	}
+	return states, nil
+}
+
 // LocationByID returns a managed location and its current state.
 func (s *StorageServices) LocationByID(id string) (LocationState, bool) {
 	s.mu.Lock()
