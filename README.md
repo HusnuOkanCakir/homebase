@@ -55,8 +55,15 @@ make run
 ```
 
 Then open **<http://127.0.0.1:8080>**. It will ask you to create an administrator — any
-name, and a password of twelve characters or more — and then show you live information
-about the machine you are sitting at. `make run-fresh` starts over with an empty database.
+name, and a password of twelve characters or more — then show you a recovery code to write
+down, and then show you live information about the machine you are sitting at.
+`make run-fresh` starts over with an empty database.
+
+The recovery code is the only way back into a server whose password has been forgotten:
+there is no email to send a link to and no account with anybody. It is shown once and kept
+as an argon2id hash. `sudo homebasectl recovery-code` issues a fresh one from the machine
+itself, for when the paper is gone too — see
+[ADR-0015](docs/decisions/0015-password-recovery.md).
 
 Under **Applications** you can install something from the catalogue. That needs Docker on
 your machine; without it the list still appears and says it cannot see the container

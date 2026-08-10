@@ -170,6 +170,8 @@ Before the installer ships, because real users start storing data immediately.
 - [x] Configuration backup (settings, manifests, app config, database export)
 - [x] Data backup (user-selected directories and volumes)
 - [x] Integrity verification, restore preview, failure reporting
+- [x] Password recovery, brought forward from Milestones 6 and 8 — backups made the gap
+      worse rather than better
 - [ ] Scheduling — you have to press the button. Carried to Milestone 8 with the
       update timers, which need the same machinery
 
@@ -191,13 +193,29 @@ broke is the machine the backup software was on.
 The VM test reads a backed-up file with `cat`, on a machine, without Homebase doing the
 reading.
 
+Password recovery arrived here rather than in Milestone 6, because finishing backups made
+the hole in it obvious: a backup restores the password hash faithfully, so somebody
+restoring *because* they were locked out restores the account they cannot sign into.
+Backups protect against a lost machine, not a lost password, and treating those as one
+problem is what left a forgotten password meaning a lost server for five milestones.
+
+[ADR-0015](docs/decisions/0015-password-recovery.md): **a recovery code the user holds, and
+a console command behind it.** 125 bits on a piece of paper, stored as an argon2id hash,
+single-use, and it travels with the backup — so the paper written at setup opens the machine
+rebuilt from the disk. `sudo homebasectl recovery-code` is the last resort for when the
+paper is gone too.
+
+It also forced the auth endpoints to be rate limited. Sign-in, setup and recovery each
+verify an argon2id hash, which reserves 64 MiB by design, and all three are reachable
+without credentials — an unbounded one is memory exhaustion that needs no account.
+
 ### Milestone 6 — Installer and first-use ← *next*
 
 - [ ] `homebasectl installer create`, then a graphical controller (Tauri)
 - [ ] Ubuntu autoinstall: hardware detection, disk enumeration, Windows detection
 - [ ] Target confirmation, whole-disk install, firewall, laptop power behaviour
-- [ ] First-use flow: administrator, server name, storage, updates, backups, first app,
-      recovery code
+- [ ] First-use flow: administrator, server name, storage, updates, backups, first app
+      (the recovery code arrived early, in Milestone 5)
 
 **Done when:** starting from a Windows-occupied disk, the installer produces a working
 server that reaches the dashboard and installs an application — with no Linux commands.
@@ -219,8 +237,8 @@ while the internet is down.
       rebuilding between channels
 - [ ] Signed packages, SBOMs, build attestations, downgrade protection
 - [ ] Pre-update snapshot, health check after update, automatic and manual rollback
-- [ ] Recovery: diagnostic bundle, credential reset, service repair, reinstall preserving
-      data, factory reset
+- [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
+      (credential reset shipped in Milestone 5)
 
 **Done when:** interrupting an update at any stage leaves a bootable machine with intact
 application data.

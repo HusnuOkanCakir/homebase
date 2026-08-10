@@ -101,12 +101,19 @@ anybody expected.
 
 **It does not bring back saved application passwords.** You will be asked for those again.
 
+**It does bring back your own account, and your recovery code with it.** The password you
+had when the backup was made is the password that works afterwards — so if you are
+restoring because you were locked out, restoring alone does not help. The recovery code you
+wrote down does, and it still works on the rebuilt machine. See
+[If you forget your password](passwords.md).
+
 ## Things Homebase does not do yet
 
 - **No automatic backups on a schedule.** You have to press the button. This is the next
   thing to build.
 - **No encryption.** Anyone holding the backup disk can read everything on it. Keep it
-  somewhere you would keep a box of photographs.
+  somewhere you would keep a box of photographs — and do not keep your recovery code with
+  it, because the disk and the code together are complete access to your server.
 - **No backing up to another computer or to the internet.** A disk you plug in, and that is
   all.
 - **Every backup is a full copy.** Ten backups of a 200 GB collection need two terabytes.
