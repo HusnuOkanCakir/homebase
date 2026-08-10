@@ -7,7 +7,7 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–4 complete. Milestone 5 next.**
+**Current position: Milestones 0–5 complete. Milestone 6 next.**
 
 ---
 
@@ -163,18 +163,35 @@ a device path was by then pointing at nothing. And a malformed `fstab` entry sto
 and drops the machine to an emergency shell, which on a laptop in a cupboard is a brick
 caused by a disk somebody unplugged. Every unit Homebase writes carries `nofail`.
 
-### Milestone 5 — Backup and restore ← *next*
+### Milestone 5 — Backup and restore ✅
 
 Before the installer ships, because real users start storing data immediately.
 
-- [ ] Configuration backup (settings, manifests, app config, database export)
-- [ ] Data backup (user-selected directories and volumes)
-- [ ] Scheduling, integrity verification, restore preview, failure reporting
+- [x] Configuration backup (settings, manifests, app config, database export)
+- [x] Data backup (user-selected directories and volumes)
+- [x] Integrity verification, restore preview, failure reporting
+- [ ] Scheduling — you have to press the button. Carried to Milestone 8 with the
+      update timers, which need the same machinery
 
 **Done when:** a clean machine restores another machine's backup and comes up with its apps,
-configuration and data.
+configuration and data. ✅
 
-### Milestone 6 — Installer and first-use
+Proven with two machines. The first is set up, used, backed up onto a USB disk and
+destroyed; the disk survives; a second machine is created from scratch and the backup is
+restored onto it. Restoring onto the machine that made the backup would prove almost nothing
+— the files are already there and half of what a restore has to reconstruct was never lost.
+
+The load-bearing decision is
+[ADR-0014](docs/decisions/0014-backups-are-readable-without-homebase.md): **a backup is
+plain files with a JSON manifest, readable without Homebase.** No deduplication, no
+compression, no incremental format, and a full copy every time — all real costs, accepted
+because the alternative fails in exactly the situation a backup exists for. The machine that
+broke is the machine the backup software was on.
+
+The VM test reads a backed-up file with `cat`, on a machine, without Homebase doing the
+reading.
+
+### Milestone 6 — Installer and first-use ← *next*
 
 - [ ] `homebasectl installer create`, then a graphical controller (Tauri)
 - [ ] Ubuntu autoinstall: hardware detection, disk enumeration, Windows detection

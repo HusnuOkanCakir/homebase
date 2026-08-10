@@ -137,6 +137,12 @@ it a different name, that a managed mount survives a reboot, that not even root 
 into the mount point while the disk is absent, and that an application whose disk is gone
 refuses to start rather than running without its files.
 
+**`make vm-test-backup`** is the only test that uses two machines, because the milestone's
+exit condition is about the second one. The first is set up, used, backed up onto a USB disk
+and destroyed; the disk survives; a second machine is created from scratch and the backup is
+restored onto it. Restoring onto the machine that made the backup would prove almost nothing
+— the files are already there, and half of what a restore has to reconstruct was never lost.
+
 **`make vm-test-packages`** installs, upgrades, reinstalls, reboots and purges the `.deb`s
 on a clean machine, with a real administrator account and a real file intact throughout —
 including after purge, which deliberately keeps user data.
@@ -157,6 +163,7 @@ list is the argument for why these tests are worth their twelve minutes.
 | `vm-test-storage` | A `0555` mount point does not stop root — and an application container frequently runs as root, so the protection worked against every writer except the most likely one |
 | `vm-test-storage` | `hostd` exited `226/NAMESPACE` before running a line of Go, because its unit hard-required a directory *core's* package creates. Installing `homebase-hostd` alone was impossible |
 | `vm-test-storage` | …and it then restarted every two seconds, 673 times, with no start limit. Because the socket belongs to systemd, clients connected and hung rather than failing |
+| `vm-test-backup` | The database export was never exercised, because `core` was not running so there was no database to export — the most delicate part of a backup, silently untested |
 
 The pattern is worth naming: every one is a property of the *deployment* rather than of the
 code, and every one is silent. Nothing crashed, no test went red, and `systemctl status`

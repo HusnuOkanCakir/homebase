@@ -6,13 +6,14 @@ Homebase installs a complete server operating system onto a spare machine, then 
 the way behind a local web dashboard. You install applications, attach storage, and
 configure backups without ever opening a terminal or learning Linux.
 
-> **Status: pre-alpha. Milestones 0–4 complete.**
+> **Status: pre-alpha. Milestones 0–5 complete.**
 > There is no installable release yet, and nothing here should be pointed at data you care
 > about. What works: setting up an administrator, reading live system information,
 > restarting the machine, installing and removing applications from a small catalogue, and
-> attaching a disk and giving it to an application — all from a browser. What does not exist
-> yet: an installer, and backups. Nothing here backs anything up, so nothing here should hold
-> the only copy of anything. See the [roadmap](ROADMAP.md).
+> attaching a disk and giving it to an application, and backing the whole thing up onto
+> another disk — all from a browser. A backup restores onto a different machine, and can be
+> read without Homebase. What does not exist yet: an installer, and backups on a schedule.
+> See the [roadmap](ROADMAP.md).
 
 ## Try it
 
@@ -89,6 +90,7 @@ place a reboot is a reboot:
 | `make vm-test-dashboard` | The whole journey in a browser, including a real reboot |
 | `make vm-test-apps` | Install an application, use it, reboot, remove it — the data must survive |
 | `make vm-test-storage` | Add a real USB disk, reboot, pull it out, plug it back in — nothing may corrupt |
+| `make vm-test-backup` | Back up one machine, destroy it, restore onto a different one |
 | `make vm-test-packages` | Install, upgrade, reboot and purge the `.deb`s |
 
 ## What it is
