@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-09
 - **Milestone:** 5 — Backup and restore
-- **Related:** [ADR-0004](0004-state-store.md), [ADR-0012](0012-hostd-owns-the-catalogue.md),
+- **Related:** [ADR-0004](0004-sqlite.md), [ADR-0012](0012-hostd-owns-the-catalogue.md),
   [ADR-0013](0013-storage-identity-and-mounting.md)
 
 ## Context
@@ -58,7 +58,7 @@ A live SQLite database has a write-ahead log beside it, and copying the main fil
 service is running produces a file that is either stale or corrupt — usually stale, which is
 worse, because it restores successfully and is silently missing the last week. `VACUUM INTO`
 asks SQLite for a consistent snapshot and is the only supported way to get one from a
-running database ([ADR-0004](0004-state-store.md)).
+running database ([ADR-0004](0004-sqlite.md)).
 
 ### A backup never goes on the disk it is backing up
 

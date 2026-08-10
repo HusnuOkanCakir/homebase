@@ -665,3 +665,11 @@ func TestFailedOperationRecordsAnErrorEventWithItsReason(t *testing.T) {
 	}
 	t.Error("a failed install recorded no error event")
 }
+
+// hostclientError builds an error envelope for the fake hostd to return.
+func hostclientError(code, message string, status int) hostclient.Error {
+	return hostclient.Error{
+		Code: code, Message: message, Status: status,
+		Recoverable: true, Recovery: "Try again.",
+	}
+}
