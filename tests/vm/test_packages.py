@@ -168,6 +168,25 @@ def verify_installed(vm: VM) -> None:
           "homebasectl is on PATH and can read the database",
           (listing.stdout + listing.stderr).strip()[:300])
 
+    # Everything hostd shells out to must be pulled in by the packages.
+    #
+    # This is the check that was missing. hostd exports the database with
+    # `VACUUM INTO` via the sqlite3 binary, and nothing declared a dependency on
+    # it — so backup failed on every machine except one installed from the ISO,
+    # whose autoinstall happened to list sqlite3 for its own reasons. The VM
+    # tests installed it by hand, which hid the gap rather than finding it.
+    #
+    # Checked by asking the machine, not by reading the control file: a
+    # dependency that is declared and not installed is the same failure.
+    for tool, why in [
+        ("sqlite3", "hostd exports core's database with it when backing up"),
+    ]:
+        found = ssh(vm, ["sh", "-c", f"command -v {tool}"], check=False)
+        check(found.returncode == 0,
+              f"{tool} is on the machine — {why}",
+              f"The packages must depend on it. Installing Homebase and then "
+              f"discovering a feature does not work is not a thing a user can debug.")
+
     # Without sudo it must explain itself rather than appearing not to exist:
     # /usr/bin rather than /usr/sbin is what buys that.
     unprivileged = ssh(vm, ["homebasectl", "list-accounts"], check=False)

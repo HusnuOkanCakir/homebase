@@ -316,7 +316,13 @@ def build_hostd(version: str, binaries: Path) -> Path:
         package="homebase-hostd",
         version=version,
         architecture="amd64",
-        depends="systemd, adduser",
+        # sqlite3 is not optional. hostd exports core's database with
+        # `VACUUM INTO` when it backs up, and it shells out to do it because
+        # hostd carries no third-party Go dependencies (ADR-0002). Without the
+        # binary, every backup fails at the point of writing the settings —
+        # which is what happened on every machine not installed from the ISO,
+        # since only the installer's autoinstall happened to pull it in.
+        depends="systemd, adduser, sqlite3",
         description=(
             "Homebase privileged host service\n"
             " The only component of Homebase that runs as root. It accepts a fixed,\n"
