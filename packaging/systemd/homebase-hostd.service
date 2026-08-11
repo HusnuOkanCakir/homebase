@@ -91,6 +91,18 @@ ReadWritePaths=/etc/systemd/system
 # which is a slow `sudo` rather than anything lost.
 ReadWritePaths=-/etc/hosts
 
+# Choosing an update channel writes apt's source and the pin that goes with it.
+#
+# Two directories, not /etc/apt. hostd never touches apt's own configuration,
+# its keyrings or its trusted.gpg.d — only the two files it writes itself, whose
+# names are constants in the code rather than anything derived from a request.
+#
+# What hostd deliberately does *not* get is the ability to run apt. The line
+# below this block is why: with no AF_INET it cannot reach a repository, and the
+# fix for that is not to widen this sandbox but to let systemd run
+# homebase-update-check.service, which is a fixed unit installed by the package.
+ReadWritePaths=-/etc/apt/sources.list.d -/etc/apt/preferences.d
+
 # AF_UNIX for the socket; AF_NETLINK for reading network state later. No
 # AF_INET: hostd never talks to the network, and should not be able to.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK

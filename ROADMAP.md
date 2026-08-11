@@ -335,9 +335,13 @@ charging for it.
       around the transaction
 - [x] `update.status` and `GET /system/update` — what version this machine runs, whether its
       components agree, and whether dpkg left a transaction unfinished
-- [ ] Channels: development, alpha, beta, stable — promoting the *same* artifact, never
-      rebuilding between channels
-- [ ] Signed packages, SBOMs, build attestations, downgrade protection
+- [x] Channels: development, alpha, beta, stable — `scripts/build-repo.py` publishes and
+      promotes, and **refuses to promote a rebuilt artifact**: the index entry records the
+      SHA-256 the source channel tested, so different bytes under the same version are
+      caught rather than shipped
+- [x] A signed archive, and a machine that updates from it — `update.configure` and
+      `update.check`, proven by `make vm-test-update` (146s)
+- [ ] Signed release artifacts in CI, SBOMs, build attestations, downgrade protection
 - [ ] Pre-update snapshot, health check after update, automatic and manual rollback
 - [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
@@ -345,6 +349,14 @@ charging for it.
 
 **Done when:** interrupting an update at any stage leaves a bootable machine with intact
 application data.
+
+**`hostd` does not run apt, and that was not planned.** Its unit sets
+`RestrictAddressFamilies=AF_UNIX AF_NETLINK` — the root service that manages the machine
+cannot open a network socket at all. Giving it `AF_INET` so it could run `apt-get update`
+would have traded a real structural property for a convenience, so the work that reaches the
+network happens in fixed units the package installs and `hostd` starts through systemd. The
+action is not a parameter and they are not template units: nothing from a request becomes
+part of a unit name or a command line.
 
 **Reporting comes before changing.** The interruption matrix asserts against `update.status`,
 and a broken update is diagnosed with it — so it is built first, and it reports the set of

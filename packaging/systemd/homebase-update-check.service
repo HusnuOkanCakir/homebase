@@ -1,0 +1,41 @@
+[Unit]
+Description=Homebase — ask whether a newer version has been published
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0018-updates-are-a-signed-apt-repository.md
+
+# Nothing to do without an update source, and failing here is better than
+# apt failing with a message written for somebody who knows what apt is.
+ConditionPathExists=/etc/apt/sources.list.d/homebase.sources
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+
+# A fixed command with a literal argument.
+#
+# This unit is what hostd starts instead of running apt itself, because
+# homebase-hostd.service sets RestrictAddressFamilies=AF_UNIX AF_NETLINK and
+# therefore cannot open a network socket. Keeping that restriction is worth
+# more than the indirection: it means the root service that manages this
+# machine cannot talk to the internet at all.
+#
+# The action is not parameterised and this is not a template unit. Nothing a
+# caller sends ever becomes part of a unit name or a command line — the only
+# thing hostd chooses is *which* of these units to start.
+ExecStart=/usr/libexec/homebase/update-run check
+
+# Deliberately unsandboxed, and it is worth being plain about why rather than
+# copying hardening from the other units. This talks to the network and, in the
+# apply case, writes packages across the whole filesystem. A sandbox that has to
+# permit both is not a sandbox; writing one here would be decoration that reads
+# like a guarantee.
+#
+# What bounds it instead is that it is a fixed command in a package-installed
+# unit, reachable only through hostd's typed operations.
+User=root
+
+# Long enough for a slow connection on a machine in a cupboard, short enough
+# that a hung mirror does not leave a root process running for ever.
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

@@ -77,6 +77,42 @@ After apt returns, `hostd` runs a health check. If it fails, the previous versio
 reinstalled from `.deb` files still in apt's cache — no network needed, which matters because
 one of the ways an update fails is by breaking the network — and the snapshot is restored.
 
+### hostd does not run apt
+
+This was not planned. It was forced by a line already in
+`homebase-hostd.service`, and the right answer turned out to be to keep that line
+rather than relax it:
+
+```
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+```
+
+**The privileged service cannot open a network socket.** A root process that
+cannot reach the internet is a much smaller thing to get wrong, and giving it
+`AF_INET` so that it could run `apt-get update` would trade a genuine structural
+property for a convenience.
+
+So the work that must reach the network happens in fixed units the package
+installs — `homebase-update-check.service`, and later its apply counterpart —
+which `hostd` starts through systemd. `systemctl start` is a message to PID 1
+over a Unix socket, which is permitted. The action is not a parameter and these
+are not template units: nothing from a request ever becomes part of a unit name
+or a command line. The only thing `hostd` chooses is *which* of a fixed set to
+start.
+
+Those units are deliberately unsandboxed, and that is worth stating plainly
+rather than dressing up. They talk to the network and, when applying, write
+packages across the whole filesystem; a sandbox permitting both is not a sandbox,
+and writing one would be decoration that reads like a guarantee. What bounds them
+is that they are fixed commands in package-installed files, reachable only
+through `hostd`'s typed operations.
+
+`hostd` does write apt's source and pin files directly, which cost it two
+narrowly-scoped entries in `ReadWritePaths` — `/etc/apt/sources.list.d` and
+`/etc/apt/preferences.d`, not `/etc/apt`. It never touches apt's own
+configuration or its keyrings, and the two filenames it writes are constants in
+the code rather than anything derived from a request.
+
 ### Downgrades are refused unless somebody asks
 
 `hostd` refuses a target version lower than what is installed unless the caller is explicitly
@@ -147,6 +183,15 @@ responsibilities, and the key is now the most valuable secret in the project.
 **Updates depend on apt behaving.** A broken `sources.list.d` entry or a held package can
 block updates in ways whose error messages are apt's rather than ours, and those messages are
 not written for this audience. Translating them is work this milestone owns.
+
+**apt's defaults are written for a machine with many sources, and this one has one.**
+`apt-get update` exits `0` when a source fails — including when its signature does not
+verify — on the assumption that other sources will cover it. Homebase refreshes exactly one
+source, so "some source failed" and "the update source failed" are the same event, and the
+default meant an archive signed by the wrong key was reported as reachable and up to date.
+`APT::Update::Error-Mode=any` corrects it. This was found by the test that tampers with the
+archive on purpose, and it is the argument for having one: the failure was in the code that
+*reacts* to verification, which a correct-archive test can never reach.
 
 ### Security impact
 

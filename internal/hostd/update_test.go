@@ -138,3 +138,47 @@ func TestAMachineWithNoUpdateSourceHasNoChannel(t *testing.T) {
 		t.Errorf("got channel %q origin %q, want both empty", channel, origin)
 	}
 }
+
+func TestOnlyChannelsHomebasePublishesAreAccepted(t *testing.T) {
+	for _, name := range knownChannels {
+		if !validChannel(name) {
+			t.Errorf("%q should be a valid channel", name)
+		}
+	}
+
+	// The rejected cases are not hypothetical tidiness. This string is written
+	// into apt's source file, which decides what code the machine runs as root,
+	// so anything that is not one of four known words has no business reaching
+	// it.
+	for _, name := range []string{
+		"", "STABLE", "nightly", "stable\nSuites: evil",
+		"../../../etc/apt/sources.list.d/evil", "main stable",
+	} {
+		if validChannel(name) {
+			t.Errorf("%q should not be accepted as a channel", name)
+		}
+	}
+}
+
+func TestAnUpdateSourceHasToBeAnAddress(t *testing.T) {
+	for _, origin := range []string{
+		"https://apt.homebase.computer",
+		"http://10.0.2.2:8000/repo",
+	} {
+		if err := validOrigin(origin); err != nil {
+			t.Errorf("%q should be accepted: %v", origin, err)
+		}
+	}
+
+	// file: is refused even though apt supports it. An update source on the
+	// local disk is not an update source; it is a way to install something
+	// that never crossed a signature check anybody watched.
+	for _, origin := range []string{
+		"", "file:///tmp/evil", "apt.homebase.computer", "https://",
+		"https://example.com\nSigned-By: /tmp/attacker.gpg",
+	} {
+		if err := validOrigin(origin); err == nil {
+			t.Errorf("%q should have been refused", origin)
+		}
+	}
+}

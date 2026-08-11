@@ -1,0 +1,93 @@
+#!/bin/sh
+#
+# The part of updating that has to reach the network.
+#
+# hostd does not run apt, and this script exists because of one line in
+# homebase-hostd.service:
+#
+#     RestrictAddressFamilies=AF_UNIX AF_NETLINK
+#
+# The privileged service cannot open a network socket. That is deliberate and
+# worth keeping — a root process that cannot talk to the internet is a much
+# smaller thing to get wrong — so the work that must talk to the internet
+# happens here instead, in a fixed unit installed by the package, started by
+# hostd through systemd and never composed from anything a caller sent.
+#
+# There is no argument taken from a request. The action is the first argument
+# and must be one of two literal words, because this script runs as root with no
+# sandbox at all: it installs system packages, which is not something that can
+# be done from inside one.
+#
+# Results are written as key=value lines rather than JSON. Emitting correct JSON
+# from shell means escaping, and escaping done by hand in the one place a
+# hostile value could arrive is not a trade worth making.
+
+set -eu
+
+RESULT_DIR=/var/lib/homebase
+SOURCE_PARTS=/etc/apt/sources.list.d
+
+export DEBIAN_FRONTEND=noninteractive
+export LC_ALL=C
+
+action="${1:-}"
+
+# Refresh only Homebase's own source.
+#
+# Ubuntu's mirrors have nothing to do with whether a Homebase update exists, and
+# a mirror that is slow or unreachable should not make Homebase's updates fail
+# for a reason that has nothing to do with Homebase.
+#
+# Error-Mode=any is not tidiness. By default `apt-get update` exits 0 when a
+# source fails — including when its signature does not verify — because it
+# assumes other sources will do. Only one source is being refreshed here, so
+# "some source failed" and "this failed" are the same event. Without this, an
+# archive signed by the wrong key was reported as reachable and up to date,
+# which is the exact failure the signing exists to prevent. Found by the test
+# that tampers with the archive on purpose.
+refresh() {
+    apt-get update \
+        -o Dir::Etc::SourceList=/dev/null \
+        -o "Dir::Etc::SourceParts=$SOURCE_PARTS" \
+        -o APT::Update::Error-Mode=any 2>&1
+}
+
+# The lines apt prefixes with E: or W: are the ones that say what went wrong.
+# The rest is a transcript of what it was doing.
+complaint() {
+    grep -E '^(E|W):' | tr '\n' ' ' | cut -c1-400
+}
+
+write_result() {
+    # Written and renamed, so hostd never reads half a result.
+    mv "$RESULT_DIR/.$action.new" "$RESULT_DIR/$action"
+}
+
+case "$action" in
+check)
+    output=$(refresh) && rc=0 || rc=$?
+
+    {
+        if [ "$rc" -ne 0 ]; then
+            echo "reachable=false"
+            echo "detail=$(printf '%s\n' "$output" | complaint)"
+        else
+            echo "reachable=true"
+            # apt-cache policy applies pinning and priorities, so it answers
+            # what would actually happen rather than what is published.
+            candidate=$(apt-cache policy homebase-core 2>/dev/null \
+                        | awk '/Candidate:/ {print $2; exit}')
+            [ "$candidate" = "(none)" ] && candidate=""
+            echo "available=$candidate"
+        fi
+        echo "finished=$(date -u +%s)"
+    } > "$RESULT_DIR/.$action.new"
+
+    write_result
+    exit 0
+    ;;
+*)
+    echo "update-run: unknown action '$action'" >&2
+    exit 64
+    ;;
+esac

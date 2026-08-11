@@ -215,6 +215,26 @@ Milestone 0 — contracts and project machinery. No product code.
 - The package suite stages a half-applied upgrade — two packages moved, two left behind —
   and asserts Homebase reports it. Every package still reads as fully installed and nothing
   has failed, which is why a single version string would call it healthy
+- **A signed APT repository, and a machine that updates from it.**
+  `scripts/build-repo.py` publishes a Debian archive with a suite per channel, signs the
+  `Release` that names every index's SHA-256, and **promotes without rebuilding** — the
+  index entry records the checksum the source channel tested, so an artifact rebuilt under
+  the same version is refused rather than shipped to stable
+- `update.configure` and `update.check`. The channel is validated against four literal words
+  before it reaches apt's configuration, because that file decides what code the machine runs
+  as root. `reachable` is reported separately from "no update available": they are the same
+  silence and very different facts
+- **`hostd` does not run apt.** Its unit sets `RestrictAddressFamilies=AF_UNIX AF_NETLINK`,
+  so the root service cannot open a network socket — deliberately. Rather than widen that,
+  the work that reaches the network happens in `homebase-update-check.service`, a fixed
+  unit the package installs and `hostd` starts through systemd. Nothing from a request
+  becomes part of a unit name or a command line
+- `make vm-test-update` (146s): a real archive over HTTP, a real machine, and the two checks
+  the design exists for. **An archive tampered with and re-signed by somebody else's key is
+  refused**, and the version inserted into it is never offered. **A package Homebase does not
+  ship is not installable from Homebase's origin** — `Signed-By` binds a key to a source, not
+  to package names, so without the origin pin one compromised key would replace anything on
+  the machine
 
 ### Changed
 
@@ -298,6 +318,12 @@ Milestone 0 — contracts and project machinery. No product code.
 - `homebase-hostd` declares its dependency on `sqlite3`. It was missing, and invisible,
   because a VM test had been made to pass by installing the package itself — which is the
   same failure as the two above: the test was run against a machine that was not the user's
+- **A signature failure is no longer reported as "up to date".** `apt-get update` exits `0`
+  when a source fails, on the assumption that other sources will cover it — but Homebase
+  refreshes exactly one source, so a repository signed by the wrong key was reported as
+  reachable and current. `APT::Update::Error-Mode=any` corrects it. Found by the test that
+  tampers with the archive on purpose, in the code that reacts to verification rather than
+  in verification itself, which is where a correct-archive test can never look
 - Disks smaller than 1 GiB are not offered as storage. They are boot partitions, EFI system
   partitions and card readers with nothing in them, and offering them invites somebody to
   give an application a disk that cannot hold anything

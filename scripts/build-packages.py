@@ -304,7 +304,18 @@ def build_hostd(version: str, binaries: Path) -> Path:
     reset(root)
 
     install_file(binaries / "hostd", root / "usr/libexec/homebase/hostd", 0o755)
-    for unit in ("homebase-hostd.service", "homebase-hostd.socket"):
+
+    # The part of updating that has to reach the network.
+    #
+    # hostd cannot: its unit sets RestrictAddressFamilies=AF_UNIX AF_NETLINK, so
+    # the root service that manages this machine cannot open a network socket at
+    # all. It starts this unit instead — a fixed command in a package-installed
+    # file, never anything composed from a request.
+    install_file(REPO_ROOT / "packaging/update-run",
+                 root / "usr/libexec/homebase/update-run", 0o755)
+
+    for unit in ("homebase-hostd.service", "homebase-hostd.socket",
+                 "homebase-update-check.service"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,

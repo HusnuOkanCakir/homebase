@@ -271,6 +271,10 @@ vm-test-backup: ## Back up one machine, destroy it, restore onto a different one
 vm-test-storage: ## Add a real USB disk, unplug it, reconnect it; nothing may corrupt
 	@python3 tests/vm/test_storage.py
 
+.PHONY: vm-test-update
+vm-test-update: ## Update from a signed archive, and refuse one that was tampered with
+	@python3 tests/vm/test_update.py
+
 .PHONY: vm-test-apps
 vm-test-apps: ## Install an application, use it, reboot, uninstall; data must survive
 	@python3 tests/vm/test_apps.py
