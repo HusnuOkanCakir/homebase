@@ -8,6 +8,7 @@ import { Storage } from "./Storage";
 import { Backup } from "./Backup";
 import { Security } from "./Security";
 import { Network } from "./Network";
+import { Updates } from "./Updates";
 import { FirstSteps } from "./FirstSteps";
 import { Restarting } from "./Restarting";
 
@@ -22,7 +23,14 @@ import { Restarting } from "./Restarting";
 
 const REFRESH_MS = 5000;
 
-type Tab = "overview" | "applications" | "storage" | "backup" | "network" | "security";
+type Tab =
+  | "overview"
+  | "applications"
+  | "storage"
+  | "backup"
+  | "network"
+  | "updates"
+  | "security";
 
 interface Props {
   user: User;
@@ -114,6 +122,13 @@ export function Dashboard({ user, onSignOut }: Props) {
           Network
         </button>
         <button
+          className={tab === "updates" ? "tab tab-current" : "tab"}
+          aria-current={tab === "updates" ? "page" : undefined}
+          onClick={() => setTab("updates")}
+        >
+          Updates
+        </button>
+        <button
           className={tab === "security" ? "tab tab-current" : "tab"}
           aria-current={tab === "security" ? "page" : undefined}
           onClick={() => setTab("security")}
@@ -154,6 +169,8 @@ export function Dashboard({ user, onSignOut }: Props) {
           <Backup canManage={user.permissions.includes("backup.run")} />
         ) : tab === "network" ? (
           <Network />
+        ) : tab === "updates" ? (
+          <Updates canManage={user.permissions.includes("update.manage")} />
         ) : (
           <Security username={user.username} />
         )}

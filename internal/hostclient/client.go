@@ -348,3 +348,74 @@ func (c *Client) UpdateStatus(ctx context.Context) (*UpdateStatus, error) {
 	}
 	return &status, nil
 }
+
+// UpdateCheckResult is what the archive offers, and whether it answered.
+type UpdateCheckResult struct {
+	Current   string `json:"current"`
+	Available string `json:"available"`
+
+	UpdateAvailable bool   `json:"update_available"`
+	Channel         string `json:"channel"`
+	Reachable       bool   `json:"reachable"`
+	Detail          string `json:"detail,omitempty"`
+}
+
+func (c *Client) UpdateCheck(ctx context.Context) (*UpdateCheckResult, error) {
+	var result UpdateCheckResult
+	if err := c.Call(ctx, "update.check", nil, false, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UpdateChannel is where a machine gets updates from.
+type UpdateChannel struct {
+	Channel   string `json:"channel"`
+	Origin    string `json:"origin"`
+	Reachable bool   `json:"reachable"`
+	Detail    string `json:"detail,omitempty"`
+}
+
+func (c *Client) ConfigureUpdates(ctx context.Context, channel string) (*UpdateChannel, error) {
+	var result UpdateChannel
+	// Confirmed here rather than asking the caller for a word to type. The
+	// dashboard's own warning is the confirmation, and hostd's requirement
+	// exists so that nothing reaches this operation by accident.
+	if err := c.Call(ctx, "update.configure",
+		map[string]string{"channel": channel}, true, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UpdateStarted is the answer to asking for an update, which is not the answer
+// to whether it worked: by the time that is known, hostd will have restarted.
+type UpdateStarted struct {
+	Started bool `json:"started"`
+}
+
+func (c *Client) ApplyUpdate(ctx context.Context) (*UpdateStarted, error) {
+	var result UpdateStarted
+	if err := c.Call(ctx, "update.apply", nil, true, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UpdateProgress is how far an update got, and how it ended.
+type UpdateProgress struct {
+	Stage   string `json:"stage"`
+	Result  string `json:"result,omitempty"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Running bool   `json:"running"`
+}
+
+func (c *Client) UpdateProgress(ctx context.Context) (*UpdateProgress, error) {
+	var progress UpdateProgress
+	if err := c.Call(ctx, "update.progress", nil, false, &progress); err != nil {
+		return nil, err
+	}
+	return &progress, nil
+}

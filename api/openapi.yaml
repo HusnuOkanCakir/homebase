@@ -7,8 +7,8 @@ info:
   description: |
     Every endpoint below is implemented and served. CI checks this specification against
     the routes `core` actually serves, in both directions, so a path documented here and
-    missing from the server fails the build. Updates and recovery arrive in Milestone 8 and
-    are not described yet.
+    missing from the server fails the build. The recovery tools — diagnostic bundle, service
+    repair, factory reset — arrive later in Milestone 8 and are not described yet.
 
     The dashboard, `homebasectl` and — from Stage 2 — the local AI operator are all clients
     of this API. Nothing bypasses it, and nothing that uses it holds privilege of its own:
@@ -1246,6 +1246,159 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /system/update/progress:
+    get:
+      tags: [update]
+      summary: How far an update has got
+      description: |
+        Requires `update.read`.
+
+        `result` is empty while the update is still running, and that emptiness is how a
+        client tells "in progress" from "finished" — `core` cannot remember anything across
+        an update, because the update restarts it.
+
+        `running` is asked of systemd rather than inferred from the file. A machine that lost
+        power mid-update comes back with a stage recorded and nothing running, which must not
+        read as an update still in progress for ever.
+      operationId: getUpdateProgress
+      responses:
+        "200":
+          description: Where the update got to
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateProgress"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /system/update/check:
+    post:
+      tags: [update]
+      summary: Ask whether a newer version has been published
+      description: |
+        Requires `update.read`.
+
+        A POST rather than a GET because it reaches the network and refreshes apt's index —
+        it changes nothing this server runs, but it is not a cheap repeatable read either.
+
+        `reachable` is reported separately from `update_available`. They are the same
+        silence and very different facts: one means you are up to date, the other means you
+        cannot find out.
+      operationId: checkForUpdate
+      responses:
+        "200":
+          description: What the channel offers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateCheck"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /system/update/channel:
+    post:
+      tags: [update]
+      summary: Choose which channel this server updates from
+      description: |
+        Requires `update.manage`.
+
+        The channel is validated against four literal words before it reaches apt's
+        configuration, because that file decides which code this machine will run as root.
+
+        `reachable` says whether the newly configured channel actually answered with an index
+        that verified. A failure there is reported rather than fatal: a machine that was
+        offline when its channel changed has still had its channel changed, and refusing to
+        record that would leave the file and the report disagreeing.
+      operationId: setUpdateChannel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [channel]
+              properties:
+                channel:
+                  type: string
+                  enum: [development, alpha, beta, stable]
+      responses:
+        "200":
+          description: The channel this server now updates from
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateChannel"
+        "400":
+          description: Not a channel Homebase publishes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /system/update/apply:
+    post:
+      tags: [update]
+      summary: Install the version this server's channel offers
+      description: |
+        Requires `update.manage`.
+
+        **Returns `202` and does not wait**, and unlike the rest of the API that is
+        structural rather than convention. The update replaces `homebase-hostd` and
+        `homebase-core` and restarts them, so the process holding this request open is the
+        process being replaced. There is no arrangement in which a response could describe
+        the outcome. Poll `/system/update/progress`.
+
+        Everything is downloaded and verified before anything is applied, so a failure while
+        fetching changes nothing. The database and `/etc/homebase` are snapshotted first, the
+        server is health-checked afterwards, and a failed check puts the previous version and
+        the snapshot back.
+
+        Refused with `409` if an earlier update did not finish: starting a new transaction on
+        a machine with an unfinished one is how a recoverable state becomes an unrecoverable
+        one.
+
+        See [ADR-0018](../docs/decisions/0018-updates-are-a-signed-apt-repository.md).
+      operationId: applyUpdate
+      responses:
+        "202":
+          description: The update was started. It has not finished.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [started]
+                properties:
+                  started:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: This server is not in a state where an update can be started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /auth/recover:
     post:
       tags: [auth]
@@ -1724,6 +1877,78 @@ components:
             dpkg's own word, passed through rather than reduced to a boolean. The difference
             between `not-installed` and `half-configured` is the difference between a
             machine that needs an install and one that needs finishing.
+
+    UpdateCheck:
+      type: object
+      additionalProperties: false
+      required: [current, available, update_available, channel, reachable]
+      properties:
+        current:
+          type: string
+          description: The version installed now.
+        available:
+          type: string
+          description: What the channel offers. Empty when the archive did not answer.
+        update_available:
+          type: boolean
+          description: |
+            Computed by `dpkg --compare-versions` rather than by comparing strings. Debian
+            ordering has epochs and tildes that sort before the empty string, and getting it
+            wrong means either hiding a real update or accepting a downgrade.
+        channel:
+          type: string
+        reachable:
+          type: boolean
+          description: Whether the archive answered with an index that verified.
+        detail:
+          type: string
+          description: What went wrong, in apt's words, when it did not.
+
+    UpdateChannel:
+      type: object
+      additionalProperties: false
+      required: [channel, origin, reachable]
+      properties:
+        channel:
+          type: string
+          enum: [development, alpha, beta, stable]
+        origin:
+          type: string
+        reachable:
+          type: boolean
+        detail:
+          type: string
+
+    UpdateProgress:
+      type: object
+      additionalProperties: false
+      required: [stage, running]
+      properties:
+        stage:
+          type: string
+          description: |
+            Where the update got to. Empty if none has ever been started on this server.
+          enum: ["", refreshing, downloading, snapshot, applying, health,
+                 rolling-back, rolled-back, rolled-back-failed, done]
+        result:
+          type: string
+          description: |
+            Empty while the update is still running. That emptiness is the signal: `core`
+            cannot remember anything across an update, because the update restarts it.
+          enum: [ok, failed]
+        from:
+          type: string
+        to:
+          type: string
+        detail:
+          type: string
+          description: What went wrong, and what was done about it.
+        running:
+          type: boolean
+          description: |
+            Whether systemd still has the update unit active. Asked as well as reading the
+            stage, because a machine that lost power mid-update comes back with a stage
+            recorded and nothing running.
 
     RecoveryStatus:
       type: object

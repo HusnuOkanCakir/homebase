@@ -121,11 +121,15 @@ async function request<T>(
 
 const get = <T>(path: string, timeoutMs?: number) =>
   request<T>(path, { method: "GET" }, timeoutMs);
-const post = <T>(path: string, body?: unknown) =>
-  request<T>(path, {
-    method: "POST",
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
+const post = <T>(path: string, body?: unknown, timeoutMs?: number) =>
+  request<T>(
+    path,
+    {
+      method: "POST",
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+    timeoutMs,
+  );
 
 // --- Types -------------------------------------------------------------------
 
@@ -151,6 +155,63 @@ export interface RecoveryStatus {
   exists: boolean;
   issued_at?: string;
   last_used_at?: string;
+}
+
+
+/** One of the four packages a Homebase installation is made of. */
+export interface Component {
+  package: string;
+  version: string;
+  state: string;
+}
+
+/**
+ * What this server is running.
+ *
+ * Four packages rather than one version string, because the interesting failure
+ * is that they disagree — they move together by dependency, so apt cannot
+ * produce a mixed set on purpose. Only an interrupted update can, and a machine
+ * in that state usually still works, which is why nothing else notices.
+ */
+export interface UpdateStatus {
+  version: string;
+  consistent: boolean;
+  interrupted: boolean;
+  components: Component[];
+  channel: string;
+  origin: string;
+}
+
+export interface UpdateCheck {
+  current: string;
+  available: string;
+  update_available: boolean;
+  channel: string;
+  reachable: boolean;
+  detail?: string;
+}
+
+export interface UpdateChannel {
+  channel: string;
+  origin: string;
+  reachable: boolean;
+  detail?: string;
+}
+
+/**
+ * How far an update got.
+ *
+ * `result` is empty while it is still running. That emptiness is the signal:
+ * the server cannot remember anything across an update, because the update
+ * restarts it.
+ */
+export interface UpdateProgress {
+  stage: string;
+  result?: "ok" | "failed";
+  from?: string;
+  to?: string;
+  detail?: string;
+  running: boolean;
 }
 
 /** One way the server is attached to a network. */
@@ -479,6 +540,30 @@ export const api = {
    * whether the internet is reachable means waiting for something not to answer.
    */
   network: () => get<NetworkStatus>("/network", 25_000),
+
+  /** What version this server is running. */
+  updateStatus: () => get<UpdateStatus>("/system/update"),
+
+  /**
+   * Ask the channel whether there is anything newer.
+   *
+   * Slow by nature: it reaches the network, and deciding a repository is
+   * unreachable means waiting for something not to answer.
+   */
+  checkForUpdate: () => post<UpdateCheck>("/system/update/check", undefined, 180_000),
+
+  setUpdateChannel: (channel: string) =>
+    post<UpdateChannel>("/system/update/channel", { channel }, 180_000),
+
+  /**
+   * Start an update. This returns as soon as the server has accepted it, and
+   * not when it has finished — the update restarts the server that is answering,
+   * so there is no response that could describe the outcome. Poll
+   * `updateProgress` afterwards.
+   */
+  applyUpdate: () => post<{ started: boolean }>("/system/update/apply", undefined, 60_000),
+
+  updateProgress: () => get<UpdateProgress>("/system/update/progress"),
 
   /**
    * Restart the server.

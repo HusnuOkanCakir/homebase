@@ -38,6 +38,7 @@ const (
 	PermBackupRead    = "backup.read"
 	PermBackupRun     = "backup.run"
 	PermUpdateRead    = "update.read"
+	PermUpdateManage  = "update.manage"
 )
 
 // AdministratorPermissions is what the first-run administrator receives.
@@ -47,7 +48,7 @@ var AdministratorPermissions = []string{
 	PermStorageRead, PermStorageModify,
 	PermNetworkDiag, PermNetworkModify,
 	PermBackupRead, PermBackupRun,
-	PermUpdateRead,
+	PermUpdateRead, PermUpdateManage,
 }
 
 const (

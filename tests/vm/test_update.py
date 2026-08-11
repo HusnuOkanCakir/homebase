@@ -665,6 +665,79 @@ def verify_power_loss_mid_update(vm: VM, archive: Archive, version: str, stage: 
     check(code == "200", f"and the dashboard answers ({code})")
 
 
+
+# --- talking to core, the way the dashboard does ------------------------------
+
+PASSWORD = "a-password-nobody-would-guess"
+
+
+def core_api(vm: VM, path: str, method: str = "GET", body: str | None = None) -> tuple[int, str]:
+    """Call core's HTTP API from inside the VM.
+
+    Not named `http`: that shadows the stdlib module this file imports for the
+    archive server, and the failure is an AttributeError three hundred lines
+    away from the cause."""
+    cmd = ["curl", "--silent", "--show-error", "--insecure",
+           "-c", "/tmp/update-cookies", "-b", "/tmp/update-cookies",
+           "-o", "/dev/stdout", "-w", "\\n%{http_code}", "-X", method,
+           "--max-time", "200"]
+    if body is not None:
+        cmd += ["-H", "Content-Type: application/json", "-d", body]
+    cmd.append(f"https://127.0.0.1/api/v1{path}")
+
+    result = ssh(vm, cmd, check=False, timeout=260)
+    output = result.stdout.strip()
+    if not output:
+        return 0, result.stderr.strip()
+    parts = output.rsplit("\n", 1)
+    return (int(parts[1]), parts[0]) if len(parts) == 2 else (int(output), "")
+
+
+def verify_the_api_exposes_all_of_this(vm: VM) -> None:
+    """The routes the dashboard actually calls.
+
+    Everything above this talks to hostd over its socket, which is how the
+    privileged half is tested but not how anybody uses Homebase. These are the
+    routes a browser reaches, behind a session and a permission check — and a
+    permission check that has never been exercised is a permission check nobody
+    knows the shape of.
+    """
+    step("The same thing, through the API a browser uses")
+
+    status, body = core_api(vm, "/setup", "POST",
+                        json.dumps({"username": "okan", "password": PASSWORD}))
+    check(status == 201, f"an administrator is created ({status})", body[:300])
+
+    status, body = core_api(vm, "/system/update")
+    check(status == 200, f"GET /system/update ({status})", body[:300])
+    reported = json.loads(body)
+    check(reported.get("version") == NEW,
+          f"and reports {reported.get('version')} through core, as it does through hostd")
+
+    status, body = core_api(vm, "/system/update/check", "POST")
+    check(status == 200, f"POST /system/update/check ({status})", body[:300])
+    check(json.loads(body).get("reachable") is True,
+          "and reaches the archive", body[:300])
+
+    status, body = core_api(vm, "/system/update/progress")
+    check(status == 200, f"GET /system/update/progress ({status})", body[:300])
+    check(json.loads(body).get("result") == "failed",
+          "and still remembers the rolled-back update from earlier",
+          body[:300])
+
+    # Signed out, the same routes must say nothing at all. The update surface
+    # can install root-level code on this machine; it is the last place an
+    # unauthenticated caller should get an answer.
+    ssh(vm, ["rm", "-f", "/tmp/update-cookies"], check=False)
+    for path, method in (("/system/update", "GET"),
+                         ("/system/update/check", "POST"),
+                         ("/system/update/apply", "POST"),
+                         ("/system/update/channel", "POST")):
+        status, _ = core_api(vm, path, method,
+                         '{"channel": "development"}' if "channel" in path else None)
+        check(status == 401, f"{method} {path} needs a session ({status})")
+
+
 def verify_the_archive_cannot_replace_other_packages(vm: VM, archive: Archive) -> None:
     """`Signed-By` binds a key to a source, not to package names.
 
@@ -788,6 +861,7 @@ def main() -> int:
         verify_applying_the_update(vm)
         verify_the_archive_cannot_replace_other_packages(vm, archive)
         verify_a_broken_release_is_rolled_back(vm, archive)
+        verify_the_api_exposes_all_of_this(vm)
 
         # Once per stage that matters. The first is the easy case and passes
         # by construction; the second is the one the milestone promises.
