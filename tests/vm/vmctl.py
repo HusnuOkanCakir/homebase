@@ -491,7 +491,19 @@ def create(name: str, force: bool = False) -> VM:
     return vm
 
 
-def start(vm: VM) -> None:
+def start(vm: VM, lan: int | None = None) -> None:
+    """Boot the machine.
+
+    `lan` joins it to a shared network segment with every other machine
+    given the same number. QEMU's user-mode networking isolates each VM
+    behind its own NAT, which is right for everything else and makes it
+    impossible to test the one claim this milestone rests on: that a server
+    is reachable *by name* from another device. mDNS is multicast, and
+    multicast needs a shared segment.
+
+    A multicast socket rather than a bridge or a tap: those need root, and
+    ADR-0010 says the VM lab does not.
+    """
     if vm.is_running():
         info(f"'{vm.name}' is already running (pid {vm.pid})")
         return
@@ -521,6 +533,17 @@ def start(vm: VM) -> None:
             f",hostfwd=tcp::{vm.dashboard_port}-:443"
         ),
         "-device", "virtio-net-pci,netdev=net0",
+    ]
+
+    if lan is not None:
+        # Same multicast group and port for every machine on this segment, so
+        # they see each other's broadcasts the way they would on one switch.
+        cmd += [
+            "-netdev", f"socket,id=lan0,mcast=230.0.0.{lan}:{11000 + lan}",
+            "-device", "virtio-net-pci,netdev=lan0",
+        ]
+
+    cmd += [
         "-serial", f"file:{vm.console_log}",
         "-monitor", "none",
         # A USB controller with nothing on it. Disks are attached at runtime

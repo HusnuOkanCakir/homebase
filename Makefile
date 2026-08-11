@@ -243,6 +243,10 @@ vm-test-core: ## The vertical slice: setup, sign in, read system, reboot, job re
 vm-test-dashboard: ## The milestone's user journey, in a real browser against a real VM
 	@python3 tests/vm/test_dashboard.py
 
+.PHONY: vm-test-network
+vm-test-network: ## Two machines: reachable by name from the other one
+	@python3 tests/vm/test_network.py
+
 .PHONY: vm-test-packages
 vm-test-packages: ## Install, upgrade and purge the .debs on a clean machine
 	@python3 tests/vm/test_packages.py
