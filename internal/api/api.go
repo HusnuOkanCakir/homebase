@@ -316,10 +316,21 @@ func (s *Server) issueSessionWithExtra(w http.ResponseWriter, r *http.Request, u
 		Path:     "/",
 		Expires:  expires,
 		HttpOnly: true,
-		// Secure is set even on plain HTTP during development: the dashboard is
-		// served over local HTTPS, and a cookie that works without it is one
-		// that will keep working after somebody removes the TLS by accident.
-		Secure:   true,
+		// Secure follows the connection this request actually arrived on.
+		//
+		// It used to be hard-coded true, on the reasoning that a cookie which
+		// works without TLS is one that keeps working after somebody removes
+		// the TLS by accident. That reasoning was sound and the consequence was
+		// not: browsers refuse a Secure cookie from a non-secure origin, so on
+		// a real installation reached at http://192.168.1.50:8080 the browser
+		// silently discarded the session and `/auth/me` answered 401 straight
+		// after a correct password. Every test missed it, because they all
+		// reach the server over loopback — the one origin browsers exempt.
+		//
+		// Set from the connection, this is both correct and self-enforcing:
+		// over TLS the flag is on, and over plain HTTP the cookie works rather
+		// than the product not working at all.
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -333,13 +344,28 @@ func (s *Server) issueSessionWithExtra(w http.ResponseWriter, r *http.Request, u
 	writeJSON(w, status, payload)
 }
 
+// isSecureRequest reports whether this request arrived over TLS.
+//
+// Read from the connection rather than from a header. `X-Forwarded-Proto` is
+// client-supplied, and a request that can claim to be secure is one an attacker
+// uses to have a Secure cookie issued over plain HTTP — which the browser would
+// then refuse to send back, locking the real user out. Homebase is reached
+// directly on the local network, so there is no proxy whose word would be worth
+// trusting anyway.
+func isSecureRequest(r *http.Request) bool {
+	return r.TLS != nil
+}
+
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	if cookie, err := r.Cookie(SessionCookie); err == nil {
 		_ = s.auth.DeleteSession(r.Context(), cookie.Value)
 	}
+	// The clearing cookie has to match the one being cleared: a browser will
+	// not replace a non-Secure cookie with a Secure one, so signing out over
+	// plain HTTP would leave the old cookie in place.
 	http.SetCookie(w, &http.Cookie{
 		Name: SessionCookie, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+		HttpOnly: true, Secure: isSecureRequest(r), SameSite: http.SameSiteLaxMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
