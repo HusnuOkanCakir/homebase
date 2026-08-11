@@ -22,21 +22,40 @@ RestartSec=2s
 # the installer and the browser test — each for its own good reason, which is
 # exactly why nothing noticed that a real installation was unreachable.
 #
-# The firewall is what limits who can connect; the installer sets it. Milestone
-# 7 puts local HTTPS in front of this and changes this line, which is why it is
-# an environment variable rather than part of ExecStart: a drop-in that has to
-# restate the command line silently drops any flag added to it later.
-Environment=HOMEBASE_LISTEN=0.0.0.0:8080
+# The firewall is what limits who can connect; the installer sets it. These are
+# environment variables rather than part of ExecStart because a drop-in that has
+# to restate the command line silently drops any flag added to it later.
+#
+# The ordinary ports, so the address somebody types is `https://attic.local`
+# rather than a name with a number after it. A port number in the address is a
+# thing to remember, get wrong, and be unable to guess — and this is the address
+# printed on the machine's own screen for somebody to copy onto a phone.
+#
+# Plain HTTP exists only to redirect: somebody who types the name without a
+# scheme lands on port 80, and browsers try http first.
+Environment=HOMEBASE_LISTEN=0.0.0.0:80
+Environment=HOMEBASE_LISTEN_TLS=0.0.0.0:443
 
 # Unprivileged, and the whole design rests on it staying that way. If a feature
 # appears to need more privilege here, it needs a new hostd operation instead.
 User=homebase
 Group=homebase
 
-# Empty capability bounding set: even a setuid binary would gain this process
-# nothing.
-CapabilityBoundingSet=
-AmbientCapabilities=
+# The one exception, and it is narrow: binding a port below 1024.
+#
+# Everything else about this process stays unprivileged — it cannot read another
+# user's files, cannot load modules, cannot change the system. CAP_NET_BIND_SERVICE
+# lets it answer on 80 and 443 and does nothing else. The alternative is a
+# reverse proxy running as root in front of it, which is a larger privileged
+# surface to obtain a smaller result, or an address with a port number in it,
+# which the person this is built for has to be told and has to remember.
+# The bounding set is this capability and nothing else, so even a setuid binary
+# would gain this process nothing further. Declared once: systemd takes the last
+# assignment, and a second empty one further down would silently undo this — the
+# kind of mistake that shows up as a service which will not bind port 443 and no
+# indication why.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
 
 ProtectSystem=strict

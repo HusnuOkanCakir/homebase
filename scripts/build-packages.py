@@ -365,7 +365,11 @@ def build_core(version: str, binaries: Path) -> Path:
         package="homebase-core",
         version=version,
         architecture="amd64",
-        depends=f"systemd, adduser, homebase-hostd (= {version})",
+        # avahi-daemon publishes <hostname>.local on the local network, which is
+        # how anybody reaches this server without being told an address that
+        # changes whenever the router feels like it. Without it the dashboard is
+        # only findable by a number somebody has to be given.
+        depends=f"systemd, adduser, avahi-daemon, homebase-hostd (= {version})",
         description=(
             "Homebase core service\n"
             " The unprivileged service: HTTP API, authentication, jobs and state. Runs as\n"

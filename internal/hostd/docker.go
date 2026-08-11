@@ -503,8 +503,12 @@ func (d *docker) removeContainer(ctx context.Context, name string, force bool) e
 
 type containerState struct {
 	State struct {
-		Status     string `json:"Status"`
-		Running    bool   `json:"Running"`
+		Status  string `json:"Status"`
+		Running bool   `json:"Running"`
+		// Restarting is true while Docker is bringing a container back after it
+		// exited. Docker reports Running as true at the same time, which is how a
+		// container crash-looping every two seconds was described as running.
+		Restarting bool   `json:"Restarting"`
 		ExitCode   int    `json:"ExitCode"`
 		StartedAt  string `json:"StartedAt"`
 		FinishedAt string `json:"FinishedAt"`

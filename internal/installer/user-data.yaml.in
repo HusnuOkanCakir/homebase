@@ -65,6 +65,10 @@ autoinstall:
     - ca-certificates
     - sqlite3
     - docker.io
+    # Publishes <hostname>.local, so the server can be reached by name rather
+    # than by an address that changes when the router restarts. The screen still
+    # shows an address, because mDNS does not work on every network.
+    - avahi-daemon
 
   # Security updates only, and no upgrade pass during installation: the machine
   # may be on a slow connection or none at all, and an installer that appears to
@@ -140,9 +144,10 @@ autoinstall:
     - |
       cat > /target/etc/update-motd.d/99-homebase <<'MOTD'
       #!/bin/sh
-      # Shown on the machine's own screen. See ADR-0016.
+      # Shown on the machine's own screen. See ADR-0016 and ADR-0017.
       address=$(ip -4 -brief address show scope global 2>/dev/null \
                 | awk '{print $3}' | cut -d/ -f1 | head -n 1)
+      name=$(hostname)
 
       echo
       echo "  Homebase is installed on this machine."
@@ -151,10 +156,31 @@ autoinstall:
         echo "  Open a browser on your phone or computer, on the same"
         echo "  network, and go to:"
         echo
-        echo "      http://$address:8080"
+        echo "      https://$name.local"
+        echo
+        echo "  or, if that does not work:"
+        echo
+        echo "      https://$address"
       else
         echo "  This machine is not on a network yet. Plug in a network"
         echo "  cable, and this screen will show the address to open."
+      fi
+
+      # The certificate is Homebase's own, so the browser will warn once. That
+      # warning is worth something only if there is something to check it
+      # against, which is what this is.
+      cert=/var/lib/homebase/tls/homebase.crt
+      if [ -r "$cert" ]; then
+        print=$(openssl x509 -in "$cert" -noout -fingerprint -sha256 2>/dev/null \
+                | cut -d= -f2)
+        if [ -n "$print" ]; then
+          echo
+          echo "  Your browser will warn you the first time, because this"
+          echo "  server signed its own certificate. Check these letters"
+          echo "  match what the browser shows, then continue:"
+          echo
+          echo "      $print" | fold -w 60 -s | sed 's/^/      /'
+        fi
       fi
       echo
       echo "  You do not need to type anything here."
@@ -173,8 +199,10 @@ autoinstall:
     # camera on it, and the threat model assumes that network is hostile.
     - curtin in-target --target=/target -- ufw default deny incoming
     - curtin in-target --target=/target -- ufw default allow outgoing
-    - curtin in-target --target=/target -- ufw allow 8080/tcp comment "Homebase dashboard"
-    - curtin in-target --target=/target -- ufw allow 8443/tcp comment "Homebase dashboard (TLS)"
+    - curtin in-target --target=/target -- ufw allow 80/tcp comment "Homebase (redirects to HTTPS)"
+    - curtin in-target --target=/target -- ufw allow 443/tcp comment "Homebase dashboard"
+    # mDNS, so the server answers to <hostname>.local on the local network.
+    - curtin in-target --target=/target -- ufw allow 5353/udp comment "Homebase discovery (mDNS)"
     - curtin in-target --target=/target -- sh -c '@SSH_FIREWALL@'
     - curtin in-target --target=/target -- ufw --force enable
 

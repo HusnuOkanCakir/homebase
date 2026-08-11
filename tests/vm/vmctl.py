@@ -517,8 +517,8 @@ def start(vm: VM) -> None:
         (
             f"user,id=net0"
             f",hostfwd=tcp::{vm.ssh_port}-:22"
-            f",hostfwd=tcp::{vm.api_port}-:8080"
-            f",hostfwd=tcp::{vm.dashboard_port}-:8443"
+            f",hostfwd=tcp::{vm.api_port}-:80"
+            f",hostfwd=tcp::{vm.dashboard_port}-:443"
         ),
         "-device", "virtio-net-pci,netdev=net0",
         "-serial", f"file:{vm.console_log}",

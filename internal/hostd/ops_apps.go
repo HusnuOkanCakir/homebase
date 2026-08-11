@@ -339,6 +339,14 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 
 	status.Installed = boolPtr(true)
 	switch {
+	// Checked before Running, because Docker reports both while a container is
+	// being brought back after it exited. An application crash-looping every two
+	// seconds was described as "running", which is how File Browser and Jellyfin
+	// spent four milestones unable to start while the tests — which asserted on
+	// exactly this word — stayed green.
+	case state.State.Restarting:
+		status.State = StateFailed
+
 	case state.State.Running:
 		status.State = StateRunning
 
