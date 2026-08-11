@@ -46,6 +46,8 @@ tags:
     description: Backing up this server, and putting it back
   - name: auth
     description: Sessions, and getting back in when the password is gone
+  - name: network
+    description: How the server is connected, and whether it is
   - name: events
     description: Structured events and the audit trail
 
@@ -1166,6 +1168,42 @@ paths:
         "428":
           $ref: "#/components/responses/ConfirmationRequired"
 
+  /network:
+    get:
+      tags: [network]
+      summary: How this server is connected
+      description: |
+        Requires `network.diagnose`.
+
+        Exists to tell three faults apart that are indistinguishable from a browser that
+        will not load: the server has no address, the server has no internet, or nothing
+        here is wrong and the problem is at the other end. A server that cannot make that
+        distinction sends its owner to restart a router for an hour over a problem with
+        their phone.
+
+        Read live from the kernel on every request — `/sys/class/net`, `/proc/net/route`
+        and `/etc/resolv.conf` — rather than from anything remembered. Reachability is
+        tested by opening a TCP connection to a well-known resolver *by address*: ICMP is
+        blocked on plenty of networks, and resolving a name first would make a broken
+        resolver look like a broken connection.
+
+        Slower than most reads, because deciding the internet is unreachable means waiting
+        for something not to answer.
+      operationId: getNetwork
+      responses:
+        "200":
+          description: How the server is connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /auth/recover:
     post:
       tags: [auth]
@@ -1515,6 +1553,80 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    NetworkStatus:
+      type: object
+      additionalProperties: false
+      required: [hostname, mdns_name, mdns_works, interfaces, online, reachable]
+      properties:
+        hostname:
+          type: string
+        mdns_name:
+          type: string
+          description: The `.local` name this server answers to.
+          example: attic.local
+        mdns_works:
+          type: boolean
+          description: |
+            Whether anything is actually publishing that name. Claimed only when a
+            responder is running: reporting a name the network cannot resolve is worse
+            than reporting none, because it sends somebody to type an address that will
+            never load.
+        reachable:
+          type: boolean
+          description: |
+            Whether this server has an address on something other than loopback — that is,
+            whether it can be reached from another room at all.
+        online:
+          type: boolean
+          description: |
+            Whether anything outside this network answered. Deliberately separate from
+            `reachable`: a server with a perfectly good address on a network whose
+            broadband is down is a different problem from a server with no address, and
+            telling somebody "not connected" when their server is fine sends them to the
+            wrong place entirely.
+        gateway:
+          type: string
+          description: The router everything else goes through. Absent means there is no
+            route off this machine, which is not the same as a route that does not work.
+        nameservers:
+          type: array
+          items:
+            type: string
+        interfaces:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetworkInterface"
+
+    NetworkInterface:
+      type: object
+      additionalProperties: false
+      required: [name, kind, up]
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [ethernet, wireless, loopback, container]
+          description: What a person would call it, rather than what the kernel does.
+        up:
+          type: boolean
+          description: |
+            The kernel's operational state, which is the honest answer to "is there a cable
+            in it": a socket with nothing plugged in reports down even when the interface
+            is configured.
+        addresses:
+          type: array
+          items:
+            type: string
+          description: |
+            Link-local addresses are deliberately excluded. A machine that has only handed
+            itself one has not been given an address by anybody, and listing 169.254.x.x
+            would read as a working network to somebody with no way to know otherwise.
+        mac:
+          type: string
+          description: What the router's list of connected devices matches against, which
+            is a real thing people have to do.
+
     RecoveryStatus:
       type: object
       additionalProperties: false

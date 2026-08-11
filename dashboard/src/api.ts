@@ -153,6 +153,33 @@ export interface RecoveryStatus {
   last_used_at?: string;
 }
 
+/** One way the server is attached to a network. */
+export interface NetworkInterface {
+  name: string;
+  kind: string;
+  up: boolean;
+  addresses?: string[];
+  mac?: string;
+}
+
+/**
+ * How the server is connected.
+ *
+ * `reachable` and `online` are separate deliberately: a server with an address
+ * on a network whose broadband is down is a different problem from a server
+ * with no address, and both look identical from a browser that will not load.
+ */
+export interface NetworkStatus {
+  hostname: string;
+  mdns_name: string;
+  mdns_works: boolean;
+  interfaces: NetworkInterface[];
+  gateway?: string;
+  nameservers?: string[];
+  online: boolean;
+  reachable: boolean;
+}
+
 export interface SystemInfo {
   hostname: string;
   os: string;
@@ -446,6 +473,12 @@ export const api = {
   me: () => get<User>("/auth/me"),
 
   system: () => get<SystemInfo>("/system"),
+
+  /**
+   * How the server is connected. Slower than most reads, because deciding
+   * whether the internet is reachable means waiting for something not to answer.
+   */
+  network: () => get<NetworkStatus>("/network", 25_000),
 
   /**
    * Restart the server.

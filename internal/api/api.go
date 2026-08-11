@@ -93,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAppRoutes(mux)
 	s.registerStorageRoutes(mux)
 	s.registerBackupRoutes(mux)
+	s.registerNetworkRoutes(mux)
 	s.registerEventRoutes(mux)
 
 	// The dashboard, when it is present. Registered last and at the root, so

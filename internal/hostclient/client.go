@@ -281,3 +281,38 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+// NetworkInterface is one way the server is attached to a network.
+type NetworkInterface struct {
+	Name      string   `json:"name"`
+	Kind      string   `json:"kind"`
+	Up        bool     `json:"up"`
+	Addresses []string `json:"addresses,omitempty"`
+	MAC       string   `json:"mac,omitempty"`
+}
+
+// NetworkStatus is how the server is connected, and whether it is.
+type NetworkStatus struct {
+	Hostname  string `json:"hostname"`
+	MDNSName  string `json:"mdns_name"`
+	MDNSWorks bool   `json:"mdns_works"`
+
+	Interfaces  []NetworkInterface `json:"interfaces"`
+	Gateway     string             `json:"gateway,omitempty"`
+	Nameservers []string           `json:"nameservers,omitempty"`
+
+	// Online and Reachable are separate on purpose. A server with an address on
+	// a network whose broadband is down is a different problem from a server
+	// with no address, and they look identical from a browser that will not
+	// load.
+	Online    bool `json:"online"`
+	Reachable bool `json:"reachable"`
+}
+
+func (c *Client) NetworkStatus(ctx context.Context) (*NetworkStatus, error) {
+	var status NetworkStatus
+	if err := c.Call(ctx, "network.status", nil, false, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}

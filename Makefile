@@ -40,9 +40,23 @@ $(STAMP): requirements-dev.txt
 # --- The full check ----------------------------------------------------------
 
 .PHONY: check
-check: hygiene lint validate docs-build go-lint ## Run every check CI runs
+check: hygiene lint validate docs-build go-lint go-check ## Run every check CI runs
 	@echo
 	@echo "All checks passed."
+
+# The Go tests, without the race detector.
+#
+# `check` used to stop at gofmt and vet, which is how a commit went out with a
+# failing test in it: the checks that ran all passed, and the one that would
+# have caught it was a separate command nobody had reason to think of. A gate
+# that does not cover what you changed is a gate you learn to trust wrongly.
+#
+# Without -race so this stays a few seconds rather than a minute; `make go-test`
+# runs the full thing and so does CI.
+.PHONY: go-check
+go-check:
+	@go test ./... > /dev/null || (go test ./...; exit 1)
+	@echo "Go: tests pass."
 
 # --- Individual checks -------------------------------------------------------
 
