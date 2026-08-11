@@ -344,18 +344,32 @@ charging for it.
 - [x] `update.apply` — download and verify everything first, snapshot what apt does not own,
       apply, health check, and put the previous version back if it fails. Downgrades are
       refused unless somebody is rolling back
+- [x] **Rollback, proven by forcing it.** A release that installs cleanly and then does not
+      work — core's binary replaced inside a real package — is detected by the health check
+      and the previous version is put back, with the database snapshot restored
+- [x] **The interruption matrix.** Power is cut with QMP `system_reset`, during downloading
+      and again *with dpkg running*. The machine boots both times with its data intact
 - [ ] Signed release artifacts in CI, SBOMs, build attestations
-- [ ] **The interruption matrix** — kill the update at each stage and assert the machine
-      still boots with its data intact. The exit condition, and not yet written
-- [ ] A test that makes the health check fail on purpose. Rollback is implemented and the
-      snapshot is taken, but nothing has yet forced it to run — so it is code, not a
-      proven property, and this list should not pretend otherwise
+- [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5
+- [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
 - [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
       (credential reset shipped in Milestone 5)
 
 **Done when:** interrupting an update at any stage leaves a bootable machine with intact
-application data.
+application data. **The exit condition is met** — the rest of this milestone is the release
+machinery and the recovery tools, not the update path.
+
+Proven by cutting power with QMP `system_reset` rather than by killing a process, because a
+killed process flushes its writes and a power cut does not. Triggered on a running `dpkg`
+rather than on the stage that precedes it: the stage is recorded a moment before apt is
+invoked, and a reset fired on the stage alone landed at the edge of the dangerous window and
+left the machine untouched — a real result, but not the one being claimed.
+
+With dpkg genuinely mid-write, the machine boots, the file in `/srv/homebase` is intact, and
+`update.status` reports `interrupted`. That last part is the loop closing: the field was
+built in this milestone's first commit for exactly this state, and `dpkg --configure -a` —
+the command the error message names — finishes the job.
 
 **`hostd` does not run apt, and that was not planned.** Its unit sets
 `RestrictAddressFamilies=AF_UNIX AF_NETLINK` — the root service that manages the machine

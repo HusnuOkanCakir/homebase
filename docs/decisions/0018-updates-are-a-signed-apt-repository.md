@@ -179,12 +179,20 @@ and a server that only patches when Homebase releases is a server running an unp
 ### What this costs
 
 **`dpkg` is not atomic, and this is the honest weak point.** Power loss during unpack leaves a
-package half-configured, and the machine needs `dpkg --configure -a` to finish. That is
-detected on start and run automatically. The exit condition still holds — the machine boots,
-because the packages being replaced are not the boot path, and application data is untouched
-because nothing in the update writes to it — but "recovers cleanly" here means "Debian's
-recovery path, which is decades old", not "atomic". An A/B image is what buys atomicity, and
-that is the trade being made.
+package half-configured, and the machine needs `dpkg --configure -a` to finish. "Recovers
+cleanly" here means "Debian's recovery path, which is decades old", not "atomic". An A/B
+image is what buys atomicity, and that is the trade being made.
+
+This is now measured rather than reasoned about. Cutting power with QMP `system_reset` while
+`dpkg` is genuinely mid-write leaves a machine that boots, with `/srv/homebase` intact,
+reporting `interrupted` — and `dpkg --configure -a` finishes it. The exit condition holds
+because the packages being replaced are not the boot path, and because nothing in the update
+writes to application data.
+
+What makes that survivable rather than merely lucky is that the machine **says so**.
+`update.status` reporting `interrupted` is what turns a half-applied transaction from a
+mystery into a named state with a named remedy, and it is why the read half of this milestone
+was built before the write half.
 
 **Homebase has to host a repository and hold a signing key.** Both are new operational
 responsibilities, and the key is now the most valuable secret in the project.

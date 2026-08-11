@@ -248,7 +248,15 @@ Milestone 0 — contracts and project machinery. No product code.
 - `publish` keeps the version it replaces in the channel's index. Rollback is
   `apt-get install homebase-core=<previous>`, and apt can only install a version its index
   lists — an archive indexing one version per suite is one you cannot roll back from
-- `make vm-test-update` (160s): a real archive over HTTP, a real machine, and the checks
+- **Milestone 8's exit condition is met**: power is cut with QMP `system_reset` while `dpkg`
+  is mid-write, and the machine boots with its application data intact, reports itself
+  `interrupted`, and is finished by the `dpkg --configure -a` its own error message names.
+  A killed process flushes its writes and a power cut does not, which is why this uses a
+  reset rather than a signal
+- Rollback is proven by forcing it. A release that installs cleanly and then does not
+  work — core's binary replaced inside an otherwise real package — fails the health check,
+  and the previous version and the database snapshot are put back
+- `make vm-test-update` (308s): a real archive over HTTP, a real machine, and the checks
   the design exists for. **An archive tampered with and re-signed by somebody else's key is
   refused**, and the version inserted into it is never offered. **A package Homebase does not
   ship is not installable from Homebase's origin** — `Signed-By` binds a key to a source, not

@@ -41,6 +41,7 @@ from vmctl import (  # noqa: E402
     fail,
     info,
     ok,
+    qmp,
     ssh,
     start,
     step,
@@ -59,6 +60,12 @@ HOST_FROM_GUEST = "10.0.2.2"
 
 OLD = "0.8.0"
 NEW = "0.9.0"
+
+# A release that installs cleanly and then does not work, and the good one that
+# follows it.
+BROKEN = "0.9.1"
+RECOVERED = "0.9.2"
+LATEST = "0.9.3"
 
 
 class TestFailure(Exception):
@@ -421,21 +428,7 @@ def verify_applying_the_update(vm: VM) -> None:
     check(started.get("started") is True, "the update was accepted and started",
           json.dumps(started))
 
-    deadline = time.time() + 600
-    progress: dict = {}
-    while time.time() < deadline:
-        time.sleep(5)
-        try:
-            progress = must(vm, "update.progress")
-        except TestFailure:
-            # Expected, and worth not papering over: hostd is being restarted
-            # underneath this call. The whole point of writing progress to a
-            # file is that the answer outlives the process that reports it.
-            continue
-        if progress.get("result"):
-            break
-    else:
-        raise TestFailure(f"the update never finished: {json.dumps(progress)}")
+    progress = wait_for_update_to_finish(vm)
 
     check(progress.get("result") == "ok",
           f"it finished, and reports {progress.get('result')}",
@@ -464,6 +457,212 @@ def verify_applying_the_update(vm: VM) -> None:
     kept = ssh(vm, ["sudo", "cat", "/srv/homebase/important.txt"], check=False).stdout.strip()
     check(kept == "a photograph",
           f"and the file that was there before the update still is ({kept!r})")
+
+
+
+def publish_broken(archive: Archive, version: str) -> None:
+    """Publish a version that installs cleanly and then does not work.
+
+    The realistic failure. A release that fails to *install* is caught by apt
+    and never reaches the health check; the one rollback exists for is a release
+    that installs perfectly and leaves the server unusable, which nothing before
+    the health check can notice.
+
+    Built normally, then core's binary is replaced inside the package — so
+    everything else about it is a real Homebase release, including the
+    dependencies and the maintainer scripts that run on the way in.
+    """
+    step(f"Publishing {version}, which installs and then does not work")
+    archive.build(version)
+
+    deb = REPO_ROOT / "dist" / f"homebase-core_{version}_amd64.deb"
+    work = archive.root / "broken"
+    if work.exists():
+        shutil.rmtree(work)
+
+    subprocess.run(["dpkg-deb", "-R", str(deb), str(work)],
+                   capture_output=True, text=True, check=True)
+    binary = work / "usr" / "libexec" / "homebase" / "core"
+    binary.write_text("#!/bin/sh\nexit 1\n")
+    binary.chmod(0o755)
+    subprocess.run(["dpkg-deb", "--build", "--root-owner-group", str(work), str(deb)],
+                   capture_output=True, text=True, check=True)
+
+    ok(f"homebase-core {version} will start and immediately exit")
+    archive.publish(version)
+
+
+def wait_for_update_to_finish(vm: VM, timeout: int = 900) -> dict:
+    """Poll until the update reports an outcome.
+
+    Failures to reach hostd are expected rather than exceptional: it is being
+    restarted underneath these calls. That the answer outlives the process
+    reporting it is the reason progress is written to a file at all.
+    """
+    deadline = time.time() + timeout
+    progress: dict = {}
+    while time.time() < deadline:
+        time.sleep(5)
+        try:
+            progress = must(vm, "update.progress")
+        except (TestFailure, VMError):
+            continue
+        if progress.get("result"):
+            return progress
+    raise TestFailure(f"the update never finished: {json.dumps(progress)}")
+
+
+def verify_a_broken_release_is_rolled_back(vm: VM, archive: Archive) -> None:
+    """The property rollback exists for, forced to happen.
+
+    Until this test, rollback was code rather than a proven property: the
+    snapshot was taken and the branch was written, but nothing had ever made
+    the health check fail, so nothing had ever run it.
+    """
+    step("A release that installs and then does not work")
+
+    publish_broken(archive, BROKEN)
+
+    must(vm, "update.apply", confirmed=True)
+    progress = wait_for_update_to_finish(vm)
+
+    check(progress.get("result") == "failed",
+          f"the update reports that it failed ({progress.get('result')})",
+          json.dumps(progress, indent=4))
+    check(progress.get("stage") == "rolled-back",
+          f"having put the machine back ({progress.get('stage')})",
+          json.dumps(progress, indent=4))
+    # Which of the three health questions caught it is not fixed: core's binary
+    # exits immediately, so systemd notices before the dashboard is ever asked.
+    # What matters is that the report names the thing that failed rather than
+    # saying the update went wrong.
+    detail = progress.get("detail") or ""
+    check("homebase-core" in detail or "dashboard" in detail,
+          f"and says what was wrong ({detail[:140]})")
+    check(f"put back on {NEW}" in detail,
+          "and that it put the previous version back",
+          detail[:200])
+
+    status = must(vm, "update.status")
+    check(status.get("version") == NEW,
+          f"the server is running {status.get('version')} again, not {BROKEN}")
+    check(status.get("consistent") is True,
+          "with all four packages agreeing",
+          json.dumps(status.get("components")))
+
+    code = ssh(vm, ["curl", "--silent", "--insecure", "--max-time", "15",
+                    "-o", "/dev/null", "-w", "%{http_code}",
+                    "https://127.0.0.1/api/v1/health"], check=False).stdout.strip()
+    check(code == "200", f"and the dashboard answers again ({code})")
+
+    kept = ssh(vm, ["sudo", "cat", "/srv/homebase/important.txt"], check=False).stdout.strip()
+    check(kept == "a photograph", f"and the file is still there ({kept!r})")
+
+
+def current_stage(vm: VM) -> str:
+    out = ssh(vm, ["sudo", "cat", "/var/lib/homebase/apply"], check=False).stdout
+    for line in out.splitlines():
+        if line.startswith("stage="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+def wait_inside_for_stage(vm: VM, stage: str, timeout: int = 300) -> None:
+    """Block until the update inside the VM reaches a stage.
+
+    The waiting happens *in* the guest rather than by polling over SSH. A round
+    trip is a couple of hundred milliseconds and `applying` can be over in a few
+    seconds, so polling from outside decides which stage gets interrupted by
+    accident — which would make this test quietly assert something easier than
+    it claims.
+    """
+    # For `applying`, waiting for the stage is not enough. The stage is written
+    # just before apt is invoked, and apt spends a moment resolving before dpkg
+    # touches anything — so a reset triggered on the stage alone lands at the
+    # edge of the dangerous window rather than inside it, and the machine comes
+    # back untouched. That is a real result, but it is not the one this claims
+    # to test. Waiting for a running dpkg puts the power cut where the promise
+    # is actually made.
+    trigger = ("pgrep -x dpkg >/dev/null"
+               if stage == "applying"
+               else f"grep -q '^stage={stage}$' /var/lib/homebase/apply 2>/dev/null")
+
+    watch = (f"end=$(( $(date +%s) + {timeout} )); "
+             f"while [ $(date +%s) -lt $end ]; do "
+             f"  if {trigger}; then exit 0; fi; "
+             f"  grep -qE '^stage=(done|rolled-back)$' /var/lib/homebase/apply 2>/dev/null && exit 2; "
+             f"  sleep 0.05; "
+             f"done; exit 1")
+
+    result = ssh(vm, ["sudo", "sh", "-c", watch], check=False, timeout=timeout + 60)
+    if result.returncode == 2:
+        raise TestFailure(f"the update finished before reaching '{stage}'")
+    if result.returncode != 0:
+        raise TestFailure(f"the update never reached '{stage}' "
+                          f"(it is at {current_stage(vm)!r})")
+
+
+def verify_power_loss_mid_update(vm: VM, archive: Archive, version: str, stage: str) -> None:
+    """Milestone 8's exit condition.
+
+    Not a clean shutdown and not a killed process — `system_reset` through QMP,
+    which is the guest losing power with its caches dirty. This runs on a laptop
+    in a cupboard; power loss during an update is expected rather than
+    exceptional, and the promise is a machine that still boots with its data
+    intact.
+
+    Run once per dangerous stage rather than once at whichever stage happens to
+    be caught. `downloading` is the easy case and passes by design — nothing has
+    been changed yet. `applying` is the one the promise is actually about: dpkg
+    is part way through replacing the running system.
+    """
+    step(f"Losing power during '{stage}'")
+
+    archive.build(version)
+    archive.publish(version)
+
+    must(vm, "update.apply", confirmed=True)
+    wait_inside_for_stage(vm, stage)
+
+    qmp(vm, "system_reset")
+    ok(f"power cut during '{stage}'"
+       + (" — with dpkg running" if stage == "applying" else ""))
+
+    wait_for_ssh(vm)
+    wait_for_boot_complete(vm)
+    ok("the machine boots again")
+
+    kept = ssh(vm, ["sudo", "cat", "/srv/homebase/important.txt"], check=False).stdout.strip()
+    check(kept == "a photograph",
+          f"and the application data is intact ({kept!r})",
+          "This is the exit condition. Everything else on this page is detail.")
+
+    # Whatever state it came back in, it has to describe that state correctly.
+    # A machine that reports itself healthy while dpkg has work outstanding is
+    # one nobody can help.
+    status = must(vm, "update.status")
+    info(f"after the power cut: version={status.get('version')} "
+         f"consistent={status.get('consistent')} interrupted={status.get('interrupted')}")
+
+    if status.get("interrupted") or not status.get("consistent"):
+        ok("it admits the update did not finish")
+
+        # And the way out is the one the error message names.
+        ssh(vm, ["sudo", "dpkg", "--configure", "-a"], check=False, timeout=300)
+        ssh(vm, ["sudo", "systemctl", "restart", "homebase-core.service"], check=False)
+        time.sleep(5)
+
+        status = must(vm, "update.status")
+        check(status.get("interrupted") is False and status.get("consistent") is True,
+              "and `dpkg --configure -a` finishes it",
+              json.dumps(status, indent=4))
+    else:
+        ok("it came back complete, and says so")
+
+    code = ssh(vm, ["curl", "--silent", "--insecure", "--max-time", "20",
+                    "-o", "/dev/null", "-w", "%{http_code}",
+                    "https://127.0.0.1/api/v1/health"], check=False).stdout.strip()
+    check(code == "200", f"and the dashboard answers ({code})")
 
 
 def verify_the_archive_cannot_replace_other_packages(vm: VM, archive: Archive) -> None:
@@ -588,6 +787,12 @@ def main() -> int:
         create_data(vm)
         verify_applying_the_update(vm)
         verify_the_archive_cannot_replace_other_packages(vm, archive)
+        verify_a_broken_release_is_rolled_back(vm, archive)
+
+        # Once per stage that matters. The first is the easy case and passes
+        # by construction; the second is the one the milestone promises.
+        verify_power_loss_mid_update(vm, archive, RECOVERED, "downloading")
+        verify_power_loss_mid_update(vm, archive, LATEST, "applying")
 
         elapsed = int(time.time() - started)
         print()
