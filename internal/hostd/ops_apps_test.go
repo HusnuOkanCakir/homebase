@@ -27,7 +27,7 @@ func TestEveryDirectoryUnderTheDataRootIsCreated(t *testing.T) {
 	s := appServices(t)
 
 	target := filepath.Join(s.dataRoot, "some-app", "config")
-	if err := s.makeOwnedDir(target); err != nil {
+	if err := s.makeOwnedDir(target, testOwner()); err != nil {
 		t.Fatalf("makeOwnedDir: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestMakeOwnedDirIsIdempotent(t *testing.T) {
 	target := filepath.Join(s.dataRoot, "some-app", "config")
 
 	for i := 0; i < 3; i++ {
-		if err := s.makeOwnedDir(target); err != nil {
+		if err := s.makeOwnedDir(target, testOwner()); err != nil {
 			t.Fatalf("call %d: %v", i+1, err)
 		}
 	}
@@ -77,7 +77,7 @@ func TestMakeOwnedDirRefusesPathsOutsideTheDataRoot(t *testing.T) {
 		filepath.Join(s.dataRoot, "app", "..", "..", "escaped"),
 		s.dataRoot + "-sibling", // a prefix match that is not a child
 	} {
-		if err := s.makeOwnedDir(path); err == nil {
+		if err := s.makeOwnedDir(path, testOwner()); err == nil {
 			t.Errorf("%s was accepted", path)
 		}
 	}
@@ -115,7 +115,7 @@ func TestContainerIsBuiltLockedDown(t *testing.T) {
 	manifest.Container.Version = "1.0.0"
 	manifest.Network.InternalPort = 8080
 
-	config := s.buildContainer(manifest, []string{"/data:/config:rw"})
+	config := s.buildContainer(manifest, []string{"/data:/config:rw"}, owner{uid: 900, gid: 900})
 
 	if config.HostConfig.Privileged {
 		t.Error("the container is privileged")
@@ -162,7 +162,7 @@ func TestRequestedCapabilitiesDoNotUndoTheDrop(t *testing.T) {
 	manifest.Container.Version = "1.0.0"
 	manifest.Permissions.Capabilities = []string{"NET_ADMIN"}
 
-	config := s.buildContainer(manifest, nil)
+	config := s.buildContainer(manifest, nil, owner{uid: 900, gid: 900})
 
 	if len(config.HostConfig.CapDrop) != 1 || config.HostConfig.CapDrop[0] != "ALL" {
 		t.Errorf("CapDrop = %v; a manifest asking for one capability kept the rest",
@@ -419,7 +419,7 @@ func TestAnApplicationWithNoDiskChosenRefusesToStart(t *testing.T) {
 			Description: "The folder holding your films"},
 	}
 
-	_, err := s.prepareStorage(manifest)
+	_, err := s.prepareStorage(manifest, testOwner())
 	if err == nil {
 		t.Fatal("an application with unassigned storage was prepared anyway")
 	}
@@ -465,7 +465,7 @@ func TestAnApplicationWhoseDiskIsUnpluggedRefusesToStart(t *testing.T) {
 		{ID: "media", Type: "user-selected", MountPath: "/media"},
 	}
 
-	_, err := s.prepareStorage(manifest)
+	_, err := s.prepareStorage(manifest, testOwner())
 	if err == nil {
 		t.Fatal("an application started with its disk unplugged")
 	}
@@ -640,7 +640,7 @@ func TestADeviceThatIsNotOnThisMachineIsLeftOut(t *testing.T) {
 	manifest.Network.InternalPort = 8096
 	manifest.Permissions.Devices = []string{"dri", "dvb"}
 
-	config := s.buildContainer(manifest, nil)
+	config := s.buildContainer(manifest, nil, owner{uid: 900, gid: 900})
 
 	for _, device := range config.HostConfig.Devices {
 		if _, err := os.Stat(device.PathOnHost); err != nil {
@@ -666,7 +666,7 @@ func TestADeviceThatExistsIsPassedThrough(t *testing.T) {
 	manifest.Network.InternalPort = 8096
 	manifest.Permissions.Devices = []string{"dri"}
 
-	config := s.buildContainer(manifest, nil)
+	config := s.buildContainer(manifest, nil, owner{uid: 900, gid: 900})
 
 	if len(config.HostConfig.Devices) != 1 {
 		t.Fatalf("got %d devices, want the one that exists", len(config.HostConfig.Devices))
@@ -675,3 +675,7 @@ func TestADeviceThatExistsIsPassedThrough(t *testing.T) {
 		t.Errorf("passed through %q", got)
 	}
 }
+
+// testOwner is whoever is running the tests. These run unprivileged, so the only
+// ownership a chown can succeed in setting is the one the files already have.
+func testOwner() owner { return owner{uid: os.Getuid(), gid: os.Getgid()} }

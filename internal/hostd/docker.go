@@ -384,7 +384,10 @@ func (d *docker) pullImage(ctx context.Context, reference string, progress func(
 // core — that is the whole point of ADR-0012, and the reason this type is not
 // exported.
 type containerConfig struct {
-	Image        string              `json:"Image"`
+	Image string `json:"Image"`
+	// User is the account inside the container, as "uid:gid". Every application
+	// runs as its own — see appuser.go.
+	User         string              `json:"User,omitempty"`
 	Cmd          []string            `json:"Cmd,omitempty"`
 	Env          []string            `json:"Env,omitempty"`
 	Labels       map[string]string   `json:"Labels,omitempty"`

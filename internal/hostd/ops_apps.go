@@ -430,12 +430,19 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 
 	// Private directories are created before the container so the bind mounts
 	// have somewhere to land. Owned by the service account, mode 0750.
-	binds, err := s.prepareStorage(manifest)
+	// The account this application runs as, and which owns everything it can
+	// reach. Created on first install and reused afterwards.
+	as, err := ensureAppOwner(s.stateDir, manifest.ID)
+	if err != nil {
+		return nil, internalError("preparing an account for " + manifest.Name + ": " + err.Error())
+	}
+
+	binds, err := s.prepareStorage(manifest, as)
 	if err != nil {
 		return nil, err
 	}
 
-	config := s.buildContainer(manifest, binds)
+	config := s.buildContainer(manifest, binds, as)
 	if _, err := s.docker.createContainer(ctx, name, config); err != nil {
 		return nil, wrapDockerError(err,
 			"create_failed",
@@ -687,10 +694,14 @@ func (s *AppServices) logs(ctx context.Context, params AppLogsParams) (any, erro
 // Everything here comes from the manifest hostd read off disk. Nothing comes
 // from the caller, which is what makes this safe to do in a root process — see
 // ADR-0012.
-func (s *AppServices) buildContainer(manifest Manifest, binds []string) containerConfig {
+func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner) containerConfig {
 	config := containerConfig{
 		Image: manifest.Container.Reference(),
-		Cmd:   manifest.Container.Command,
+		// The application's own account, which is also what owns every file it
+		// can reach. Without this the container runs as root with no
+		// CAP_DAC_OVERRIDE and cannot write its own data directory.
+		User: as.String(),
+		Cmd:  manifest.Container.Command,
 		Labels: map[string]string{
 			"homebase.app":      manifest.ID,
 			"homebase.managed":  "true",
@@ -793,7 +804,7 @@ var deviceePaths = map[string]string{
 // one, which is storage.assign's job and lands with the storage milestone. An
 // application declaring user-selected storage installs and runs without it
 // rather than refusing.
-func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
+func (s *AppServices) prepareStorage(manifest Manifest, as owner) ([]string, error) {
 	var binds []string
 
 	assignments := map[string]Assignment{}
@@ -803,7 +814,7 @@ func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 
 	for _, storage := range manifest.Storage {
 		if storage.Type == "user-selected" {
-			bind, err := s.prepareUserSelected(manifest, storage, assignments)
+			bind, err := s.prepareUserSelected(manifest, storage, assignments, as)
 			if err != nil {
 				return nil, err
 			}
@@ -828,13 +839,25 @@ func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 		// /srv/homebase/apps/<id> as 0750 root:root. core then cannot traverse
 		// into it, which means it cannot back the data up: a silent failure of
 		// the one thing a user would most notice missing.
-		if err := s.makeOwnedDir(hostPath); err != nil {
+		if err := s.makeOwnedDir(hostPath, as); err != nil {
 			return nil, &Error{
 				Code:        "app.storage_unavailable",
 				Message:     "Homebase could not create somewhere for " + manifest.Name + " to keep its files.",
 				Detail:      err.Error(),
 				Recoverable: false,
 				Status:      500,
+			}
+		}
+
+		// makeOwnedDir only touches what it creates, so a directory that was
+		// already there keeps whoever owned it before — which on any machine
+		// installed before applications had identifiers of their own is the
+		// shared service account, and the application still cannot write.
+		// Handing the tree over is what makes an upgrade work rather than
+		// only a fresh install.
+		if os.Geteuid() == 0 {
+			if err := giveTo(hostPath, as); err != nil {
+				return nil, internalError("setting ownership on " + hostPath + ": " + err.Error())
 			}
 		}
 
@@ -869,7 +892,7 @@ func (s *AppServices) requireStorage(manifest Manifest) error {
 		if storage.Type != "user-selected" {
 			continue
 		}
-		if _, err := s.prepareUserSelected(manifest, storage, assignments); err != nil {
+		if _, err := s.locateUserSelected(manifest, storage, assignments); err != nil {
 			return err
 		}
 	}
@@ -883,7 +906,46 @@ func (s *AppServices) requireStorage(manifest Manifest) error {
 // disk: it produces a media server with an empty library, a database rebuilt
 // from nothing, and a root filesystem quietly filling up. Refusing is worse in
 // the moment and better every time after it. See ADR-0013.
-func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment) (string, error) {
+// prepareUserSelected resolves the disk *and* creates the directory on it.
+//
+// Split from locateUserSelected because requireStorage runs before the image is
+// downloaded, purely to answer "can this run at all" — and a check that creates
+// directories and changes their ownership is not a check.
+func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment, as owner) (string, error) {
+	hostPath, err := s.locateUserSelected(manifest, storage, assignments)
+	if err != nil {
+		return "", err
+	}
+
+	if err := os.MkdirAll(hostPath, 0o750); err != nil {
+		return "", &Error{
+			Code:        "app.storage_unavailable",
+			Message:     "Homebase could not use that disk for " + manifest.Name + ".",
+			Detail:      err.Error(),
+			Recoverable: true,
+			Recovery:    "The disk may be full, faulty or read-only.",
+			Status:      500,
+		}
+	}
+	if os.Geteuid() == 0 {
+		// Recursive: on a machine that installed this application before it had
+		// an account of its own, the files are still owned by the shared
+		// service account and the container could not read them.
+		if err := giveTo(hostPath, as); err != nil {
+			return "", internalError("setting ownership on " + hostPath + ": " + err.Error())
+		}
+	}
+
+	mode := "rw"
+	if storage.ReadOnly() {
+		mode = "ro"
+	}
+	return hostPath + ":" + storage.MountPath + ":" + mode, nil
+}
+
+// locateUserSelected answers where an application's chosen disk puts its files,
+// and refuses if there is no answer. It reads; it never writes.
+func (s *AppServices) locateUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment) (string, error) {
 	described := storage.Description
 	if described == "" {
 		described = storage.ID
@@ -944,27 +1006,7 @@ func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestSto
 		return "", internalError("refusing to mount " + hostPath + ": outside " + mountPoint)
 	}
 
-	if err := os.MkdirAll(hostPath, 0o750); err != nil {
-		return "", &Error{
-			Code:        "app.storage_unavailable",
-			Message:     "Homebase could not use that disk for " + manifest.Name + ".",
-			Detail:      err.Error(),
-			Recoverable: true,
-			Recovery:    "The disk may be full, faulty or read-only.",
-			Status:      500,
-		}
-	}
-	if os.Geteuid() == 0 {
-		if err := chownToService(hostPath); err != nil {
-			return "", internalError("setting ownership on " + hostPath + ": " + err.Error())
-		}
-	}
-
-	mode := "rw"
-	if storage.ReadOnly() {
-		mode = "ro"
-	}
-	return hostPath + ":" + storage.MountPath + ":" + mode, nil
+	return hostPath, nil
 }
 
 // checkResources refuses an install the machine cannot support, before spending
@@ -1031,7 +1073,7 @@ func (s *AppServices) requireInstalled(ctx context.Context, manifest Manifest) e
 // Directories that already exist are left alone: an existing one may have been
 // set up deliberately, and quietly rewriting ownership on a path somebody else
 // manages is not this function's business.
-func (s *AppServices) makeOwnedDir(path string) error {
+func (s *AppServices) makeOwnedDir(path string, as owner) error {
 	relative, err := filepath.Rel(s.dataRoot, path)
 	if err != nil || strings.HasPrefix(relative, "..") {
 		return fmt.Errorf("%s is not under %s", path, s.dataRoot)
@@ -1062,7 +1104,7 @@ func (s *AppServices) makeOwnedDir(path string) error {
 		if os.Geteuid() != 0 {
 			continue
 		}
-		if err := chownToService(current); err != nil {
+		if err := os.Chown(current, as.uid, as.gid); err != nil {
 			return fmt.Errorf("setting ownership on %s: %w", current, err)
 		}
 	}
