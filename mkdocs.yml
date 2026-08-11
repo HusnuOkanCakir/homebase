@@ -98,6 +98,7 @@ nav:
       - 0015 Password recovery: decisions/0015-password-recovery.md
       - 0016 Installation media: decisions/0016-installation-media.md
       - 0017 Local HTTPS and discovery: decisions/0017-local-https-and-discovery.md
+      - 0018 Updates are a signed APT repository: decisions/0018-updates-are-a-signed-apt-repository.md
       - Template: decisions/template.md
   - Security:
       - Threat model: security/threat-model.md

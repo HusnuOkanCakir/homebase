@@ -328,17 +328,38 @@ third-party coordination network needs a decision record of its own rather than 
 here — the first principle in the README is that nobody can switch Homebase off or start
 charging for it.
 
-### Milestone 8 — Updates and recovery
+### Milestone 8 — Updates and recovery — in progress
 
+- [x] [ADR-0018](docs/decisions/0018-updates-are-a-signed-apt-repository.md) — the update
+      mechanism decided: a signed APT repository, with Homebase's own state snapshotted
+      around the transaction
+- [x] `update.status` and `GET /system/update` — what version this machine runs, whether its
+      components agree, and whether dpkg left a transaction unfinished
 - [ ] Channels: development, alpha, beta, stable — promoting the *same* artifact, never
       rebuilding between channels
 - [ ] Signed packages, SBOMs, build attestations, downgrade protection
 - [ ] Pre-update snapshot, health check after update, automatic and manual rollback
+- [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
       (credential reset shipped in Milestone 5)
 
 **Done when:** interrupting an update at any stage leaves a bootable machine with intact
 application data.
+
+**Reporting comes before changing.** The interruption matrix asserts against `update.status`,
+and a broken update is diagnosed with it — so it is built first, and it reports the set of
+four packages rather than one version string. They depend on each other with `(= version)`,
+so apt cannot produce a mixed set on purpose; only an interruption can. A machine in that
+state usually still works, which is exactly why nothing else would notice.
+
+**A/B image updates were considered and rejected**, with the reasoning recorded rather than
+implied. They are what buys real atomicity, and they would require owning the partition
+layout and the bootloader that [ADR-0016](docs/decisions/0016-installation-media.md)
+deliberately left to Ubuntu. More importantly they would not deliver what they appear to:
+Homebase's state is a SQLite database, container images and uid allocations that are not on
+the image, so a partition switch that reverts the code while leaving a migrated database is a
+downgrade into an inconsistent state rather than a rollback. The state snapshot has to be
+built either way.
 
 ### Milestone 9 — Hardware alpha
 

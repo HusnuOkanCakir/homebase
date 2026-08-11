@@ -29,6 +29,7 @@ downside, and writing it down is how we avoid pretending otherwise.
 | [0015](0015-password-recovery.md) | **A recovery code the user holds, and a console reset behind it** | Accepted |
 | [0016](0016-installation-media.md) | **The official Ubuntu ISO, unmodified, with a seed beside it** | Accepted |
 | [0017](0017-local-https-and-discovery.md) | A certificate the server signs itself, at a name mDNS resolves | Accepted |
+| [0018](0018-updates-are-a-signed-apt-repository.md) | **Updates are a signed APT repository, not an image** | Accepted |
 
 **[ADR-0006](0006-privilege-split.md) is the one to read.** The others describe how Homebase
 is built; that one describes a boundary the project is not permitted to cross, and it is the

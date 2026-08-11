@@ -50,6 +50,8 @@ tags:
     description: Sessions, and getting back in when the password is gone
   - name: network
     description: How the server is connected, and whether it is
+  - name: update
+    description: What version this server runs, and where it updates from
   - name: events
     description: Structured events and the audit trail
 
@@ -1206,6 +1208,44 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /system/update:
+    get:
+      tags: [update]
+      summary: What version this server is running
+      description: |
+        Requires `update.read`.
+
+        Reports the four packages an installation is made of rather than a single version
+        string, because the interesting failure is that they disagree. They depend on each
+        other with `(= version)`, so apt cannot produce a mixed set deliberately — only an
+        interrupted update or a manual `dpkg` can, and a machine in that state usually still
+        works, which is exactly why nothing else would notice.
+
+        `interrupted` is separate from `consistent` and is found differently: a package
+        dpkg left `half-configured` or `unpacked`, or a journal it did not replay. A machine
+        can be either without being the other, and both need `dpkg --configure -a` before
+        anything else will install.
+
+        `channel` is read from apt's own source file rather than from a Homebase setting,
+        because apt's file is what actually decides where packages come from. It is empty on
+        a machine installed from media, which has no update source until one is configured.
+
+        See [ADR-0018](../docs/decisions/0018-updates-are-a-signed-apt-repository.md).
+      operationId: getUpdateStatus
+      responses:
+        "200":
+          description: What this machine is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /auth/recover:
     post:
       tags: [auth]
@@ -1628,6 +1668,62 @@ components:
           type: string
           description: What the router's list of connected devices matches against, which
             is a real thing people have to do.
+
+    UpdateStatus:
+      type: object
+      additionalProperties: false
+      required: [version, consistent, interrupted, components, channel, origin]
+      properties:
+        version:
+          type: string
+          description: |
+            The version of `homebase-core`, because that is the component somebody is
+            actually running. Empty if it is not installed, which on a working machine
+            cannot happen.
+        consistent:
+          type: boolean
+          description: |
+            Whether every installed component reports the same version. False means an
+            update stopped part way: every package can read as fully installed and still
+            disagree, which is the failure a single version string would hide.
+        interrupted:
+          type: boolean
+          description: |
+            Whether dpkg has work it did not finish — a package left `half-configured` or
+            `unpacked`, or a journal it never replayed. Needs `dpkg --configure -a` before
+            anything else can be installed.
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/Component"
+        channel:
+          type: string
+          description: |
+            The suite this machine subscribes to. Empty when no update source is configured,
+            which is where every machine installed from media starts.
+          enum: ["", development, alpha, beta, stable]
+        origin:
+          type: string
+          description: Where updates would come from. Reported so a machine pointed at the
+            wrong repository is visible rather than merely quiet.
+
+    Component:
+      type: object
+      additionalProperties: false
+      required: [package, version, state]
+      properties:
+        package:
+          type: string
+          enum: [homebase-hostd, homebase-core, homebase-apps, homebase-dashboard]
+        version:
+          type: string
+          description: Empty when the package is not installed.
+        state:
+          type: string
+          description: |
+            dpkg's own word, passed through rather than reduced to a boolean. The difference
+            between `not-installed` and `half-configured` is the difference between a
+            machine that needs an install and one that needs finishing.
 
     RecoveryStatus:
       type: object

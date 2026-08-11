@@ -66,6 +66,7 @@ func main() {
 	storage := hostd.NewStorageServices(*storageDir, *stateDir)
 	hostd.RegisterStorageOperations(registry, storage)
 	hostd.RegisterNetworkOperations(registry, hostd.NewNetworkServices())
+	hostd.RegisterUpdateOperations(registry, hostd.NewUpdateServices())
 
 	appServices := hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir).WithStorage(storage)
 	hostd.RegisterAppOperations(registry, appServices)

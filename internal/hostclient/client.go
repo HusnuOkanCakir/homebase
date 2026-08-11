@@ -316,3 +316,35 @@ func (c *Client) NetworkStatus(ctx context.Context) (*NetworkStatus, error) {
 	}
 	return &status, nil
 }
+
+// Component is one of the packages an installation is made of.
+type Component struct {
+	Package string `json:"package"`
+	Version string `json:"version"`
+	State   string `json:"state"`
+}
+
+// UpdateStatus is what this machine is running, and where it updates from.
+type UpdateStatus struct {
+	Version string `json:"version"`
+
+	// Consistent and Interrupted are the two ways a half-applied update shows
+	// up, and they are separate because they are found differently: components
+	// disagreeing about their version, and dpkg leaving work unfinished. A
+	// machine can be either without being the other.
+	Consistent  bool `json:"consistent"`
+	Interrupted bool `json:"interrupted"`
+
+	Components []Component `json:"components"`
+
+	Channel string `json:"channel"`
+	Origin  string `json:"origin"`
+}
+
+func (c *Client) UpdateStatus(ctx context.Context) (*UpdateStatus, error) {
+	var status UpdateStatus
+	if err := c.Call(ctx, "update.status", nil, false, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
