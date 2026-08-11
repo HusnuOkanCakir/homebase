@@ -7,11 +7,12 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–6 complete. Milestone 7 next.** A USB stick turns a
-Windows laptop into a working server, and a new server says what to do next. Making that
-stick still takes one command on a Linux machine — the graphical tool for doing it on
-Windows and macOS is Milestone 10, and it is
-what Stage 1 is still missing.
+**Current position: Milestones 0–7 complete. Milestone 8 next.** A USB stick turns a
+Windows laptop into a working server, a new server says what to do next, and it is then
+reachable by name over HTTPS from any device in the house. Making that stick still takes one
+command on a Linux machine — the graphical tool for doing it on Windows and macOS is
+Milestone 10, and it is what Stage 1 is still missing. The server also still needs a network
+cable; Wi-Fi arrives with the hardware it has to be tested on, in Milestone 9.
 
 ---
 
@@ -270,16 +271,62 @@ requires rather than an unchecked box here.
 Until then, making the stick needs one command on a Linux machine. That is a real gap and it
 is why Stage 1 is not done.
 
-### Milestone 7 — Networking and private access
+### Milestone 7 — Networking and private access ✅
 
-- [ ] Ethernet DHCP, local hostname, mDNS discovery, local HTTPS
-- [ ] Network diagnostics and an honest offline state
-- [ ] Wi-Fi setup; optional private remote access (Tailscale)
+- [x] Ethernet DHCP, local hostname, mDNS discovery, local HTTPS on the ordinary ports
+- [x] Network diagnostics and an honest offline state
+- [→] Wi-Fi setup — **moved to Milestone 9**, where there is real wireless hardware
+- [→] Optional private remote access — **deferred past Stage 1**
 
 Public internet exposure stays out of scope.
 
 **Done when:** the server is reachable by name from another device and stays manageable
-while the internet is down.
+while the internet is down. ✅
+
+Proven by `make vm-test-network`, which is the first test in this repository that involves
+two machines. That is the whole point of it. Every other suite reaches Homebase through a
+port forwarded to the host's loopback — the one origin browsers treat as trustworthy and the
+one address that always works, neither of which is what a user has. mDNS is multicast and
+cannot cross QEMU's NAT at all, so a shared network segment is not a convenience here; it is
+the only arrangement in which the claim can be tested. The second machine resolves
+`homebase-net.local`, loads the dashboard over HTTPS, checks the certificate covers that
+name, and confirms plain HTTP redirects to it. Then the server's route to the internet is
+taken away, and it has to report that it is offline while still saying it is reachable.
+
+[ADR-0017](docs/decisions/0017-local-https-and-discovery.md): **the server signs its own
+certificate and the user trusts it once.** A home server has no public name, so Let's Encrypt
+cannot issue for it without a domain, a DNS API token stored on the appliance, and
+publication of every household's server name in Certificate Transparency logs. The cost of
+signing its own is a browser warning, and that cost is not hidden: the machine prints its own
+fingerprint on its own screen, so the warning is something to check rather than something to
+dismiss. The certificate lasts ten years, because a yearly renewal is how "check the
+fingerprint" degrades into "click through the warning".
+
+`core` binds 80 and 443 with `CAP_NET_BIND_SERVICE` — one narrow capability rather than root
+or a privileged proxy in front — so the address is `https://attic.local` with no port number,
+which is the difference between something a person can be told over the phone and something
+they have to be sent in a message.
+
+**This milestone existed because of a bug that a green test suite could not see.** The
+session cookie was already marked `Secure`, and browsers refuse a `Secure` cookie from a
+non-secure origin — except on `localhost`, which every browser test in this repository uses.
+So a real installation reached at `http://192.168.1.50:8080` discarded the session and
+answered `401` immediately after a correct password, while every test passed. The product did
+not work in the one respect it exists for, and nothing failed. Recorded in
+[testing.md](docs/development/testing.md).
+
+**Wi-Fi moved to Milestone 9** rather than being written here. QEMU has no wireless device,
+and a Wi-Fi setup flow that has never touched a real adapter is a guess about the one
+operation whose failure mode is *the server is now unreachable and the way to fix it was the
+network*. Milestone 9 is where the laptops and their various adapters are. Until then a
+Homebase server needs a network cable, and that is a real gap: a thin laptop without an
+Ethernet port cannot be one yet.
+
+**Private remote access is deferred past Stage 1.** It is not in the Stage 1 definition of
+done, it cannot be tested without an account on somebody else's service, and depending on a
+third-party coordination network needs a decision record of its own rather than a checkbox
+here — the first principle in the README is that nobody can switch Homebase off or start
+charging for it.
 
 ### Milestone 8 — Updates and recovery
 
@@ -298,6 +345,9 @@ application data.
 - [ ] Intel and AMD laptops, with and without TPM, various Wi-Fi adapters
 - [ ] UEFI and Secure Boot, lid-close behaviour, sleep prevention, thermal reporting
 - [ ] Power-loss recovery, Wi-Fi reconnection, USB disk handling
+- [ ] **Wi-Fi setup from the dashboard** — moved here from Milestone 7, because the failure
+      mode of getting it wrong is a server that can no longer be reached to fix it, and the
+      VM lab has no wireless hardware to get it wrong on
 
 **Done when:** three different laptops complete install → first boot → app install → reboot
 → backup → restore, with no manual Linux commands at any point.

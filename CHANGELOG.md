@@ -172,6 +172,39 @@ Milestone 0 — contracts and project machinery. No product code.
 - CI now checks `api/openapi.yaml` against the routes `core` actually serves, in both
   directions. A specification that has drifted is worse than none: it reads
   authoritatively and is wrong
+- **A server is reachable by name, over HTTPS, on the ordinary ports**
+  ([ADR-0017](docs/decisions/0017-local-https-and-discovery.md)). `https://attic.local`,
+  with no port number in it, from any device in the house. `core` generates its own
+  ECDSA P-256 certificate at first start, valid for ten years, and binds 80 and 443 with
+  `CAP_NET_BIND_SERVICE` — one narrow capability, not root and not a privileged proxy.
+  Port 80 answers nothing but a `307` to the same name on 443, so the dashboard has exactly
+  one origin and one set of cookies
+- The machine prints its certificate's fingerprint **on its own screen**, beside the address
+  to browse to, and logs it so it can be read out over the phone. The browser warns once per
+  device, which is the honest cost of a server that has no public name to get a certificate
+  for; the fingerprint is what makes that warning something to check rather than something to
+  dismiss
+- Names come from mDNS, with `avahi-daemon` a dependency of `homebase-core`. `mdns_works` is
+  reported only when the responder is actually running, checked rather than assumed — a name
+  the network cannot resolve sends somebody to type an address that will never load
+- `network.status` and `GET /network` — addresses, router, resolvers, and whether the
+  internet answers, read live from the kernel on every request. Reachability is tested by
+  opening a TCP connection to two well-known resolvers **by address**, because ICMP is
+  blocked on plenty of networks and resolving a name first would make a broken resolver look
+  like a broken connection
+- **A Network screen that says which of three faults it is.** *The server has no address*,
+  *the server is fine and the internet is not*, and *nothing here is wrong* are
+  indistinguishable from a browser that will not load, and somebody without that distinction
+  restarts their router for an hour over a problem with their phone's Wi-Fi. `reachable` and
+  `online` are separate fields for that reason
+- `make vm-test-network` — the first test here that involves two machines, on one network
+  segment joined by a QEMU multicast socket rather than a bridge, since bridges need root and
+  [ADR-0010](docs/decisions/0010-vm-lab-qemu-cloud-image.md) says the lab does not have it.
+  The second machine resolves the name, loads the dashboard over HTTPS, checks the
+  certificate covers that name and that plain HTTP redirects to it. Then the server's route
+  out is taken away and it has to report itself offline while still saying it is reachable
+- `make check` runs the Go tests. It stopped at formatting and vet, which is how a commit
+  with a failing test got through: the gate did not cover the thing that had changed
 
 ### Changed
 
@@ -229,6 +262,35 @@ Milestone 0 — contracts and project machinery. No product code.
   and requires workflow approval for **all** external contributors rather than only
   first-time ones. All four were previously documented as manual steps that GitHub has
   no API for, which was wrong
+- **Signing in works on a real installation.** The session cookie was marked `Secure`, and
+  browsers refuse a `Secure` cookie from a non-secure origin — except on `localhost`, which
+  is the only origin every browser test in this repository ever used. So a server reached at
+  `http://192.168.1.50:8080` silently discarded the session and answered `401` straight after
+  a correct password, while the suite stayed green. The attribute now follows whether the
+  request actually arrived over TLS, and since this milestone it always does
+- **An application that is crash-looping is no longer reported as running.** Docker reports a
+  restarting container as `Running: true`, and Homebase repeated it. File Browser had been
+  installed and called healthy since Milestone 4 while it panicked in a loop, and the storage
+  test asserted that exact word — so the suite agreed with it. Restarting is now reported as
+  failed, and the test asserts the application is still up a minute later with no restarts
+- **Jellyfin starts on a machine with no graphics card.** Device passthrough demanded every
+  device in the manifest, so `/dev/dri` — absent on any headless machine, including every VM
+  this is tested in — failed the container with `error gathering device information`. Missing
+  optional devices are skipped
+- **Applications can write their own data.** Containers run with `CapDrop: ALL`, which
+  removes `CAP_DAC_OVERRIDE`, so a container running as a non-root user could not write to
+  the directory Homebase had made for it. Each application now gets a stable uid and gid of
+  its own, allocated by `hostd` and recorded on disk, and owns the directories it writes to —
+  and one application still cannot read another's files
+- **Installing an application that needs a disk says so before downloading it.** The storage
+  requirement was checked after the image was pulled, so somebody without a disk attached
+  waited for several hundred megabytes to arrive before being told it could not be installed
+- `homebase-hostd` declares its dependency on `sqlite3`. It was missing, and invisible,
+  because a VM test had been made to pass by installing the package itself — which is the
+  same failure as the two above: the test was run against a machine that was not the user's
+- Disks smaller than 1 GiB are not offered as storage. They are boot partitions, EFI system
+  partitions and card readers with nothing in them, and offering them invites somebody to
+  give an application a disk that cannot hold anything
 
 ### Removed
 

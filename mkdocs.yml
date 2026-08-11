@@ -95,6 +95,9 @@ nav:
       - 0012 hostd owns the catalogue: decisions/0012-hostd-owns-the-catalogue.md
       - 0013 Storage identity and mounting: decisions/0013-storage-identity-and-mounting.md
       - 0014 Backups readable without Homebase: decisions/0014-backups-are-readable-without-homebase.md
+      - 0015 Password recovery: decisions/0015-password-recovery.md
+      - 0016 Installation media: decisions/0016-installation-media.md
+      - 0017 Local HTTPS and discovery: decisions/0017-local-https-and-discovery.md
       - Template: decisions/template.md
   - Security:
       - Threat model: security/threat-model.md
@@ -117,6 +120,7 @@ nav:
       - Applications: user-guide/applications.md
       - Storage: user-guide/storage.md
       - Backup and restore: user-guide/backup.md
+      - Finding your server: user-guide/network.md
       - If you forget your password: user-guide/passwords.md
 
 extra:

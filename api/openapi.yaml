@@ -5,8 +5,10 @@ info:
   version: 1.0.0-draft
   summary: The only supported interface to a Homebase server.
   description: |
-    The system, job, event and application endpoints below are implemented. Storage,
-    networking, backup and update are still contract-only and are marked as such.
+    Every endpoint below is implemented and served. CI checks this specification against
+    the routes `core` actually serves, in both directions, so a path documented here and
+    missing from the server fails the build. Updates and recovery arrive in Milestone 8 and
+    are not described yet.
 
     The dashboard, `homebasectl` and — from Stage 2 — the local AI operator are all clients
     of this API. Nothing bypasses it, and nothing that uses it holds privilege of its own:

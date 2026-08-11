@@ -2,7 +2,7 @@
 
 Turn an old laptop into a home server you can actually manage.
 
-!!! warning "Pre-alpha — Milestones 0–6 complete"
+!!! warning "Pre-alpha — Milestones 0–7 complete"
 
     There is no released build yet, but there is an installer. A USB stick written by
     `homebasectl installer create` turns a laptop — including one with Windows on it — into
@@ -10,9 +10,15 @@ Turn an old laptop into a home server you can actually manage.
     Making the stick still takes one command on a Linux computer; the graphical tool for
     doing that on Windows or macOS is Milestone 10.
 
-    From a browser you can then set up an administrator, read live system information,
-    restart the machine, install and remove applications from a small catalogue, attach a
-    disk and give it to an application, and give the server a name.
+    That server is then reachable by name — `https://attic.local` — from any device on the
+    same network, over an encrypted connection, using a certificate it signed itself and
+    whose fingerprint it prints on its own screen. It needs a network cable: Wi-Fi arrives
+    with the hardware it has to be tested on, in Milestone 9.
+
+    From a browser you can set up an administrator, read live system information, restart
+    the machine, install and remove applications from a small catalogue, attach a disk and
+    give it to an application, give the server a name, and see whether a problem is the
+    server, the network or the broadband.
 
     Backups work, and restore onto a different machine — but they are not automatic, so
     nothing here holds the only copy of anything until you have made one.
@@ -21,7 +27,7 @@ Turn an old laptop into a home server you can actually manage.
     that code travels with the backup, so it still opens a machine rebuilt from the disk.
 
     Much of what follows still describes intent rather than behaviour — everything from
-    Milestone 7 onward. Where the documentation and the implementation eventually disagree,
+    Milestone 8 onward. Where the documentation and the implementation eventually disagree,
     the documentation is the target and the gap is a bug.
 
 ## The idea
