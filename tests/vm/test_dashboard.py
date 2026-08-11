@@ -112,8 +112,19 @@ def install(vm: VM, built: dict[str, Path]) -> None:
              "/var/lib/homebase", "/srv/homebase", "/srv/homebase/apps",
              "/var/log/homebase"])
 
-    # sqlite3, because a backup exports the database with VACUUM INTO rather
-    # than copying it.
+    # sqlite3, because hostd exports the database with VACUUM INTO rather than
+    # copying it.
+    #
+    # Installed by hand *only* because this test copies binaries into place
+    # rather than installing the packages — the homebase-hostd package declares
+    # the dependency, and test_packages.py is what checks that it does.
+    #
+    # This line is also how the missing dependency went unnoticed: it was added
+    # here to make a Milestone 5 test pass, which made the symptom go away on
+    # the one machine anybody looked at while backup stayed broken on every
+    # machine installed from packages. Making a test pass and fixing the product
+    # are different things, and the difference is invisible from inside the
+    # test.
     result = apt(vm, "install -y -qq sqlite3")
     if result.returncode != 0:
         raise TestFailure("installing sqlite3 failed\n" + result.stdout[-400:])

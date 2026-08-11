@@ -113,6 +113,28 @@ Required where applicable to the change:
 included. If something is worth failing CI over, it is worth failing before the push — a
 check you have to remember to run separately catches things afterwards.
 
+### A test that passes is not a product that works
+
+Two of the worst bugs this project has had were found by using it, not by
+running the suite, and both had the same shape: **a test was made to pass by
+changing the test's machine rather than the product.**
+
+`hostd` shells out to `sqlite3` when it backs up. Nothing declared that
+dependency, so backup failed on every machine except one installed from the ISO
+— and the VM test installed `sqlite3` itself, which made the symptom disappear
+on the only machine anybody looked at. The line was added to make a Milestone 5
+test go green. It did.
+
+The session cookie was marked `Secure`, which browsers discard over plain HTTP
+and accept from localhost. Every browser test reaches the server through
+loopback port-forwarding, so all thirty-three passed while the dashboard was
+unusable from any real network.
+
+Neither is a gap in coverage — both paths were exercised. They are gaps in
+*fidelity*: the tests ran against a machine subtly unlike the one a user has.
+When a test needs something installed to pass, that is a question about the
+product, not a step in the test.
+
 ### Tests that depend on chance
 
 `vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.
@@ -219,6 +241,8 @@ list is the argument for why these tests are worth their twelve minutes.
 | `vm-test-storage` | …and it then restarted every two seconds, 673 times, with no start limit. Because the socket belongs to systemd, clients connected and hung rather than failing |
 | `vm-test-backup` | The database export was never exercised, because `core` was not running so there was no database to export — the most delicate part of a backup, silently untested |
 | `vm-test-dashboard` | Rate limiting counted successful sign-ins, so a household signing in over an evening was rationed exactly like somebody guessing. Unit tests sign in once; only a journey that signs in thirty-three times notices |
+| `make vm-run`, by hand | Every backup failed on every machine not installed from the ISO: `hostd` shells out to `sqlite3` and no package depended on it. The VM tests installed it themselves, so the gap was invisible from inside them |
+| `make vm-run`, by hand | Installing an application that needs a disk downloaded the whole image first — a gigabyte, several minutes at a frozen 10% — and then refused with something true before the first byte |
 | `vm-test-installer` | The console account could not run `sudo`. Its password is locked by design, so the recovery path it exists for — `sudo homebasectl recovery-code` — would have failed on every real installation |
 | `vm-test-installer` | An installed server listened on `127.0.0.1`, so the dashboard was reachable only from the server's own keyboard. Every machine-side check passed while the one thing the product is for did not work. It was invisible because two *other* places each set the address for their own good reasons |
 | `vm-test-dashboard` | Renaming the server wrote to `/etc/hostname` and got "read-only file system". `hostd` runs under `ProtectSystem=strict`, and replacing a file in `/etc` atomically needs the *directory* writable — so the fix was to stop writing it at all and ask systemd-hostnamed, which already owns it |
