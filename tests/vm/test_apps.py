@@ -69,6 +69,7 @@ APP = "hello-homebase"
 APP_NAME = "Hello Homebase"
 CONTAINER = "homebase-hello-homebase"
 DATA_DIR = f"/srv/homebase/apps/{APP}"
+APP_ROOT = "/srv/homebase/apps"
 
 
 class TestFailure(Exception):
@@ -326,11 +327,33 @@ def verify_container_hardening(vm: VM) -> None:
         check(host_path.startswith(DATA_DIR + "/"),
               f"mount {host_path} is inside its own data directory")
 
-    owner = ssh(vm, ["sudo", "stat", "-c", "%a %U %G", DATA_DIR]).stdout.strip()
-    check(owner == "750 homebase homebase",
-          f"its data directory is {owner}",
-          "Owned by the service account so core can back it up, and unreadable "
-          "by anybody else on the machine.")
+    # The application's own data belongs to the application's own identifier.
+    #
+    # It used to belong to the shared service account, which is what stopped
+    # every application that writes to disk from running: the container drops
+    # every capability, so root inside it has no CAP_DAC_OVERRIDE and cannot
+    # write a directory somebody else owns.
+    # Every directory the container actually writes to belongs to the
+    # application's own identifier.
+    for bind in json.loads(binds) or []:
+        host_path = bind.split(":")[0]
+        mode, uid, gid = ssh(
+            vm, ["sudo", "stat", "-c", "%a %u %g", host_path]).stdout.strip().split()
+        check(mode == "750", f"{host_path} is {mode}",
+              "Unreadable by anybody else on the machine.")
+        check(int(uid) >= 61000 and uid == gid,
+              f"and belongs to the application's own identifier ({uid}:{gid})",
+              "Applications must not share an identifier: one that is "
+              "compromised would be able to read the others' files.")
+
+    # The directories above stay with the service account. They are shared —
+    # /srv/homebase/apps holds every application — and core has to traverse them
+    # to make a backup.
+    for shared in (APP_ROOT, DATA_DIR):
+        held = ssh(vm, ["sudo", "stat", "-c", "%U %G", shared]).stdout.strip()
+        check(held == "homebase homebase",
+              f"{shared} is still {held}, so core can traverse it",
+              "core is unprivileged and reads through here when backing up.")
 
 
 def use_app(vm: VM) -> str:
@@ -348,10 +371,21 @@ def use_app(vm: VM) -> str:
           f"got: {result.stdout[:200]!r} {result.stderr[:200]!r}")
 
     # A file where the application's own data lives, standing in for somebody's
-    # media library. Written as the service account, which is what owns it.
+    # media library.
+    #
+    # Written as the application's own identifier, because that is what owns the
+    # directory now — the service account deliberately cannot write here any
+    # more, which is the isolation this exists for.
     marker = "a file the user would be upset to lose"
-    ssh(vm, ["sudo", "-u", "homebase", "sh", "-c",
-             f"echo '{marker}' > {DATA_DIR}/config/mine.txt"])
+    # Written as root and then handed to the application, because nothing on the
+    # host can reach this directory as the application itself: the directory
+    # above it is 0750 and owned by the service account. That does not affect the
+    # container, whose bind mount is resolved as root when it is set up — which
+    # is exactly why the container can write here and a host process cannot.
+    uid = ssh(vm, ["sudo", "stat", "-c", "%u", f"{DATA_DIR}/config"]).stdout.strip()
+    ssh(vm, ["sudo", "sh", "-c",
+             f"echo '{marker}' > {DATA_DIR}/config/mine.txt && "
+             f"chown {uid}:{uid} {DATA_DIR}/config/mine.txt"])
     ok("a file in its data directory")
 
     return marker

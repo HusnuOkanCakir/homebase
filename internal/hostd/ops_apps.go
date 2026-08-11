@@ -1073,7 +1073,17 @@ func (s *AppServices) requireInstalled(ctx context.Context, manifest Manifest) e
 // Directories that already exist are left alone: an existing one may have been
 // set up deliberately, and quietly rewriting ownership on a path somebody else
 // manages is not this function's business.
-func (s *AppServices) makeOwnedDir(path string, as owner) error {
+// makeOwnedDir creates a directory and every parent below the data root.
+//
+// Intermediates belong to the service account, not to the application: they are
+// shared — /srv/homebase/apps holds every application's directory — and giving
+// the root to whichever application happened to be installed first would put one
+// application's files inside a directory another one owns, and stop core
+// traversing it to make a backup.
+//
+// The leaf an application actually writes to is handed over separately, by the
+// caller, once it exists.
+func (s *AppServices) makeOwnedDir(path string, _ owner) error {
 	relative, err := filepath.Rel(s.dataRoot, path)
 	if err != nil || strings.HasPrefix(relative, "..") {
 		return fmt.Errorf("%s is not under %s", path, s.dataRoot)
@@ -1104,7 +1114,7 @@ func (s *AppServices) makeOwnedDir(path string, as owner) error {
 		if os.Geteuid() != 0 {
 			continue
 		}
-		if err := os.Chown(current, as.uid, as.gid); err != nil {
+		if err := chownToService(current); err != nil {
 			return fmt.Errorf("setting ownership on %s: %w", current, err)
 		}
 	}
