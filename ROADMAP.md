@@ -349,6 +349,9 @@ charging for it.
       and the previous version is put back, with the database snapshot restored
 - [x] **The interruption matrix.** Power is cut with QMP `system_reset`, during downloading
       and again *with dpkg running*. The machine boots both times with its data intact
+- [x] An Updates screen and the API behind it, so none of this needs a terminal — including
+      that all four routes refuse an unauthenticated caller, which is worth exercising on a
+      surface that can install root-level code
 - [ ] Signed release artifacts in CI, SBOMs, build attestations
 - [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset

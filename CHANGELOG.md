@@ -256,7 +256,16 @@ Milestone 0 — contracts and project machinery. No product code.
 - Rollback is proven by forcing it. A release that installs cleanly and then does not
   work — core's binary replaced inside an otherwise real package — fails the health check,
   and the previous version and the database snapshot are put back
-- `make vm-test-update` (308s): a real archive over HTTP, a real machine, and the checks
+- **An Updates screen**, and the API behind it: `GET /system/update`, `/system/update/progress`,
+  `POST /system/update/check`, `/system/update/channel` and `/system/update/apply`. The screen
+  is shaped by the server going away part way through: an update restarts the services that
+  serve the page, so a failed request during one is the expected middle of a *successful*
+  update. It polls, treats that failure as normal, and reads the outcome back from the server
+  rather than remembering what it started
+- The stages are translated rather than passed through. "applying" is accurate and tells a
+  person nothing; what they want to know is whether it is safe to walk away, and the answer
+  differs between downloading and installing
+- `make vm-test-update` (303s): a real archive over HTTP, a real machine, and the checks
   the design exists for. **An archive tampered with and re-signed by somebody else's key is
   refused**, and the version inserted into it is never offered. **A package Homebase does not
   ship is not installable from Homebase's origin** — `Signed-By` binds a key to a source, not
