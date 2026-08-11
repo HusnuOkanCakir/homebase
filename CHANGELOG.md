@@ -205,6 +205,16 @@ Milestone 0 — contracts and project machinery. No product code.
   out is taken away and it has to report itself offline while still saying it is reachable
 - `make check` runs the Go tests. It stopped at formatting and vet, which is how a commit
   with a failing test got through: the gate did not cover the thing that had changed
+- **The browser journey runs over HTTPS**, at the port a household uses, with the
+  "proceed once" a person clicks granted explicitly. The loopback plain-HTTP origin that
+  concealed the `Secure` cookie bug is no longer available to conceal the next one
+- `update.status` and `GET /system/update` — what version this machine is running, whether
+  its four packages agree, and whether dpkg left a transaction unfinished. Reporting comes
+  before changing: the interruption matrix asserts against this, and a broken update is
+  diagnosed with it ([ADR-0018](docs/decisions/0018-updates-are-a-signed-apt-repository.md))
+- The package suite stages a half-applied upgrade — two packages moved, two left behind —
+  and asserts Homebase reports it. Every package still reads as fully installed and nothing
+  has failed, which is why a single version string would call it healthy
 
 ### Changed
 

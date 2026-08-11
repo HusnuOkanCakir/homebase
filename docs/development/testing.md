@@ -135,6 +135,26 @@ Neither is a gap in coverage — both paths were exercised. They are gaps in
 When a test needs something installed to pass, that is a question about the
 product, not a step in the test.
 
+The `Secure` cookie one is now closed at the source rather than asserted around.
+Every browser test reaches the server over HTTPS at its real port with
+`ignoreHTTPSErrors`, which is the "proceed once" a person clicks — so the origin
+under test is the one a household uses, and the loopback exemption that hid the
+bug is no longer available to hide the next one.
+
+### Re-run the suites the change could reach, not the one it was about
+
+Milestone 7 moved core from `127.0.0.1:8080` to 80 and 443. The network suite
+was written for it and passed. Three other suites talked to the old port, and
+were left broken for a day because the change did not look like it touched them
+— the package suite reached `8080` from inside the VM, and the browser journey
+pointed Playwright at a port that now answers a redirect.
+
+`make check` cannot catch this: the VM suites are too slow to run on every
+commit, which is exactly why they are the ones that quietly rot. The rule is
+about the blast radius rather than the diff. **A change to how the product is
+reached — a port, a scheme, a path, a unit file — reaches every suite that
+reaches the product**, and the cost of finding out is a few minutes each.
+
 ### Tests that depend on chance
 
 `vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.

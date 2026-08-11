@@ -95,12 +95,15 @@ COOKIE_JAR = ".homebase-test-cookies"
 
 def api(vm: VM, path: str, method: str = "GET", body: str | None = None) -> tuple[int, str]:
     """Call core's API from inside the VM, keeping the session cookie."""
-    cmd = ["curl", "--silent", "--show-error",
+    # HTTPS on the ordinary port, the way a browser reaches it. --insecure is
+    # the "proceed once" over the server's own certificate; plain HTTP answers
+    # a redirect rather than the request.
+    cmd = ["curl", "--silent", "--show-error", "--insecure",
            "-c", COOKIE_JAR, "-b", COOKIE_JAR,
            "-o", "/dev/stdout", "-w", "\\n%{http_code}", "-X", method]
     if body is not None:
         cmd += ["-H", "Content-Type: application/json", "-d", body]
-    cmd.append(f"http://127.0.0.1:8080/api/v1{path}")
+    cmd.append(f"https://127.0.0.1/api/v1{path}")
 
     result = ssh(vm, cmd, check=False)
     output = result.stdout.strip()

@@ -186,12 +186,12 @@ def install(vm: VM, built: dict[str, Path]) -> None:
 def verify_reachable(vm: VM) -> None:
     step("The dashboard is reachable from outside the VM")
 
-    url = f"http://127.0.0.1:{vm.api_port}"
+    url = f"https://127.0.0.1:{vm.dashboard_port}"
     deadline = time.time() + 60
     last = ""
     while time.time() < deadline:
         result = subprocess.run(
-            ["curl", "--silent", "--show-error", "--max-time", "5", url],
+            ["curl", "--silent", "--show-error", "--insecure", "--max-time", "5", url],
             capture_output=True, text=True,
         )
         if result.returncode == 0 and "<title>Homebase</title>" in result.stdout:
@@ -216,7 +216,7 @@ def run_browser_tests(vm: VM) -> None:
 
     env = {
         **os.environ,
-        "HOMEBASE_URL": f"http://127.0.0.1:{vm.api_port}",
+        "HOMEBASE_URL": f"https://127.0.0.1:{vm.dashboard_port}",
         "HOMEBASE_HOSTNAME": VM_NAME,
     }
 
@@ -267,7 +267,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
     # The claim worth testing: this code, typed into the browser, opens the
     # server. Anything less proves only that a string was printed.
     recovered = subprocess.run(
-        ["curl", "--silent", "--show-error", "--max-time", "30",
+        ["curl", "--silent", "--show-error", "--insecure", "--max-time", "30",
          "-o", "/dev/null", "-w", "%{http_code}",
          "-X", "POST", "-H", "Content-Type: application/json",
          "-d", json.dumps({
@@ -275,7 +275,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
              "recovery_code": code,
              "new_password": "a-password-set-from-the-console-code",
          }),
-         f"http://127.0.0.1:{vm.api_port}/api/v1/auth/recover"],
+         f"https://127.0.0.1:{vm.dashboard_port}/api/v1/auth/recover"],
         capture_output=True, text=True,
     )
     check(recovered.stdout.strip() == "200",
@@ -284,7 +284,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
 
     # Spent. A code that keeps working is a permanent key printed on a screen.
     again = subprocess.run(
-        ["curl", "--silent", "--max-time", "30",
+        ["curl", "--silent", "--insecure", "--max-time", "30",
          "-o", "/dev/null", "-w", "%{http_code}",
          "-X", "POST", "-H", "Content-Type: application/json",
          "-d", json.dumps({
@@ -292,7 +292,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
              "recovery_code": code,
              "new_password": "another-password-entirely-here",
          }),
-         f"http://127.0.0.1:{vm.api_port}/api/v1/auth/recover"],
+         f"https://127.0.0.1:{vm.dashboard_port}/api/v1/auth/recover"],
         capture_output=True, text=True,
     )
     check(again.stdout.strip() == "401", "and stops working once it is used",

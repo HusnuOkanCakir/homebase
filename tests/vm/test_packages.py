@@ -81,12 +81,15 @@ def build(version: str) -> list[Path]:
 
 
 def api(vm: VM, path: str, method: str = "GET", body: str | None = None) -> tuple[int, str]:
-    cmd = ["curl", "--silent", "--show-error",
+    # HTTPS, on the ordinary port, exactly as a browser reaches it. --insecure
+    # stands in for the "proceed once" a person clicks over the server's own
+    # certificate. Plain HTTP would answer a 307 rather than the request.
+    cmd = ["curl", "--silent", "--show-error", "--insecure",
            "-c", "/tmp/cookies", "-b", "/tmp/cookies",
            "-o", "/dev/stdout", "-w", "\\n%{http_code}", "-X", method]
     if body is not None:
         cmd += ["-H", "Content-Type: application/json", "-d", body]
-    cmd.append(f"http://127.0.0.1:8080/api/v1{path}")
+    cmd.append(f"https://127.0.0.1/api/v1{path}")
 
     result = ssh(vm, cmd, check=False)
     output = result.stdout.strip()
@@ -206,26 +209,51 @@ def verify_reachable_from_another_device(vm: VM) -> None:
     a server the household can use and one that answers only its own keyboard.
     It was the second kind once, and nothing noticed.
     """
-    url = f"http://127.0.0.1:{vm.api_port}/api/v1/health"
+    # HTTPS, because that is where the dashboard now lives. --insecure is the
+    # "proceed once" a person clicks: the certificate is the server's own, and
+    # this machine has not been told to trust it.
+    secure = f"https://127.0.0.1:{vm.dashboard_port}/api/v1/health"
+    code, last = poll_http(secure, "200", extra=["--insecure"])
+    if code != "200":
+        raise TestFailure(
+            "the dashboard is not reachable from outside the machine\n"
+            f"    {secure} said {last or 'nothing'}.\n"
+            "    core binds 127.0.0.1 unless the unit sets HOMEBASE_LISTEN, and a\n"
+            "    server nobody can open is the one thing this product cannot be.")
+    ok("the dashboard answers over HTTPS from another machine, not just its own")
+
+    # And plain HTTP has to send somebody to it rather than answering nothing.
+    # Anyone who types the name without https:// arrives here first.
+    plain = f"http://127.0.0.1:{vm.api_port}/api/v1/health"
+    code, last = poll_http(plain, "307")
+    if code != "307":
+        raise TestFailure(
+            "plain HTTP did not redirect to HTTPS\n"
+            f"    {plain} said {last or 'nothing'}.\n"
+            "    Somebody who omits https:// must not reach nothing.")
+    ok("and plain HTTP on port 80 redirects there")
+
+
+def poll_http(url: str, want: str, extra: list[str] | None = None) -> tuple[str, str]:
+    """Wait for a URL to answer with a particular status.
+
+    Returns the last status seen and whatever curl said, so the caller can
+    explain the failure in its own terms.
+    """
     deadline = time.time() + 60
     last = ""
     while time.time() < deadline:
         result = subprocess.run(
             ["curl", "--silent", "--show-error", "--max-time", "5",
-             "-o", "/dev/null", "-w", "%{http_code}", url],
+             *(extra or []), "-o", "/dev/null", "-w", "%{http_code}", url],
             capture_output=True, text=True,
         )
-        if result.stdout.strip() == "200":
-            ok("the dashboard answers from another machine, not just its own")
-            return
+        code = result.stdout.strip()
+        if code == want:
+            return code, ""
         last = (result.stdout + result.stderr).strip()[:160]
         time.sleep(3)
-
-    raise TestFailure(
-        "the dashboard is not reachable from outside the machine\n"
-        f"    {url} said {last or 'nothing'}.\n"
-        "    core binds 127.0.0.1 unless the unit sets HOMEBASE_LISTEN, and a\n"
-        "    server nobody can open is the one thing this product cannot be.")
+    return "", last
 
 
 def verify_socket_survives_a_restart(vm: VM) -> None:
@@ -243,8 +271,8 @@ def verify_socket_survives_a_restart(vm: VM) -> None:
     cannot reach the part of itself that manages the server, for ever.
     """
     # Activate it first: the directory is only at risk once the service has run.
-    ssh(vm, ["curl", "--silent", "--max-time", "10", "-o", "/dev/null",
-             "http://127.0.0.1:8080/api/v1/health"], check=False)
+    ssh(vm, ["curl", "--silent", "--insecure", "--max-time", "10", "-o", "/dev/null",
+             "https://127.0.0.1/api/v1/health"], check=False)
     ssh(vm, ["sudo", "systemctl", "restart", "homebase-hostd.service"], check=False)
 
     perms = ssh(vm, ["stat", "-c", "%a %U %G", "/run/homebase/hostd.sock"],
@@ -308,6 +336,101 @@ def verify_upgrade(vm: VM, packages: list[Path]) -> None:
     check(version == "0.0.1~dev", f"homebase-core is now {version}")
 
     verify_data_survived(vm, "the upgrade")
+
+
+def update_status(vm: VM) -> dict:
+    """Ask hostd what this machine thinks it is running."""
+    out = ssh(vm, ["sudo", "curl", "--silent", "--unix-socket",
+                   "/run/homebase/hostd.sock", "-X", "POST",
+                   "-H", "Content-Type: application/json", "-d", "{}",
+                   "http://localhost/v1/op/update.status"], check=False).stdout
+    try:
+        body = json.loads(out)
+    except json.JSONDecodeError as exc:
+        raise TestFailure(f"could not read update.status: {exc}\n{out[:400]}") from exc
+    return body.get("result", body)
+
+
+def verify_version_reporting(vm: VM) -> None:
+    """What the machine says it is running, against real dpkg.
+
+    The unit tests behind this parse fixtures. Fixtures agree with whatever
+    wrote them, so they cannot catch a format string dpkg does not support or a
+    state word it spells differently — which is the whole class of bug that has
+    cost this project three milestones of silence.
+    """
+    step("What version this machine says it is running")
+
+    status = update_status(vm)
+    check(status.get("version") == "0.0.1~dev",
+          f"it reports version {status.get('version')!r}",
+          f"got: {status}")
+    check(status.get("consistent") is True,
+          "and all four packages agree",
+          f"components: {status.get('components')}")
+    check(status.get("interrupted") is False,
+          "and dpkg has nothing outstanding")
+    check(len(status.get("components") or []) == 4,
+          f"all four components are reported ({len(status.get('components') or [])})")
+
+    # No update source is configured on a machine installed from packages, and
+    # saying otherwise would promise updates that cannot arrive.
+    check(status.get("channel") == "",
+          f"and it does not claim a channel it has not got ({status.get('channel')!r})")
+
+
+def verify_a_half_applied_upgrade_is_visible(vm: VM, old: list[Path], new: list[Path]) -> None:
+    """The state an interrupted update leaves, and whether Homebase notices.
+
+    Every package still reads as fully installed. Nothing is half-configured,
+    no service has failed, and the dashboard keeps working — which is precisely
+    why a status check reporting a single version string would call this
+    healthy. The only evidence is that the four packages disagree.
+
+    Produced here by putting two of them back, because killing dpkg mid-unpack
+    is a different failure and gets its own test with the interruption matrix.
+    """
+    step("A half-applied update, and whether the machine admits it")
+
+    going_back = [p for p in old if "apps" in p.name or "dashboard" in p.name]
+    for package in going_back:
+        upload(vm, package, f"/tmp/{package.name}")
+    names = " ".join(f"/tmp/{p.name}" for p in going_back)
+
+    # dpkg rather than apt, and deliberately: apt would refuse to leave the
+    # machine with unsatisfied dependencies, which is the state being staged.
+    ssh(vm, ["sudo", "sh", "-c", f"dpkg -i --force-depends {names}"], check=False)
+
+    status = update_status(vm)
+    check(status.get("consistent") is False,
+          "two packages at 0.0.0~dev and two at 0.0.1~dev is reported as inconsistent",
+          f"components: {status.get('components')}")
+
+    versions = {c["package"]: c["version"] for c in status.get("components") or []}
+    check(versions.get("homebase-core") == "0.0.1~dev"
+          and versions.get("homebase-dashboard") == "0.0.0~dev",
+          f"and the report names which ones disagree ({versions})")
+
+    # Put it back, and confirm the machine stops complaining. A check that can
+    # only ever say "broken" is not a check.
+    #
+    # dpkg again rather than apt: apt refuses to act on a system whose
+    # dependencies are already unsatisfied, which is the state this test just
+    # created. Every dependency these two need is on the machine, so dpkg has
+    # nothing to resolve.
+    step("Finishing the interrupted upgrade")
+    catching_up = [p for p in new if "apps" in p.name or "dashboard" in p.name]
+    for package in catching_up:
+        upload(vm, package, f"/tmp/{package.name}")
+    names = " ".join(f"/tmp/{p.name}" for p in catching_up)
+    result = ssh(vm, ["sudo", "sh", "-c", f"dpkg -i {names}"], check=False)
+    check(result.returncode == 0, "the remaining packages install",
+          (result.stdout + result.stderr)[-400:])
+
+    status = update_status(vm)
+    check(status.get("consistent") is True,
+          "completing the upgrade clears it",
+          f"components: {status.get('components')}")
 
 
 def verify_reinstall_is_idempotent(vm: VM, packages: list[Path]) -> None:
@@ -398,6 +521,8 @@ def main() -> int:
 
         second = build("0.0.1~dev")
         verify_upgrade(vm, second)
+        verify_version_reporting(vm)
+        verify_a_half_applied_upgrade_is_visible(vm, first, second)
         verify_reinstall_is_idempotent(vm, second)
         verify_reboot(vm)
         verify_removal_keeps_data(vm)
