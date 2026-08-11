@@ -749,13 +749,31 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string) containe
 	for _, device := range manifest.Permissions.Devices {
 		// Device names are a fixed enumeration in the schema, mapped here to
 		// paths. A manifest cannot name a device path directly.
-		if path, ok := deviceePaths[device]; ok {
-			config.HostConfig.Devices = append(config.HostConfig.Devices, deviceMapping{
-				PathOnHost:        path,
-				PathInContainer:   path,
-				CgroupPermissions: "rwm",
-			})
+		path, ok := deviceePaths[device]
+		if !ok {
+			continue
 		}
+
+		// A device that is not on this machine is left out rather than passed
+		// through. Docker refuses to create a container whose device is missing
+		// — "error gathering device information while adding custom device
+		// /dev/dri: no such file or directory" — so declaring one made Jellyfin
+		// impossible to start on any machine without a graphics card, which is
+		// every virtual machine and a good share of old laptops.
+		//
+		// These are accelerators, not requirements: without /dev/dri Jellyfin
+		// transcodes on the processor, and without /dev/dvb it cannot record
+		// television but still plays everything else. Refusing to run at all
+		// is the wrong answer to hardware somebody does not have.
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+
+		config.HostConfig.Devices = append(config.HostConfig.Devices, deviceMapping{
+			PathOnHost:        path,
+			PathInContainer:   path,
+			CgroupPermissions: "rwm",
+		})
 	}
 
 	return config

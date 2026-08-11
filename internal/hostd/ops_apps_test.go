@@ -618,3 +618,60 @@ func writeCatalogueFile(t *testing.T, catalogue *Catalogue, name string, manifes
 		t.Fatal(err)
 	}
 }
+
+// Hardware somebody does not have must not stop an application running.
+//
+// Jellyfin declares the "dri" device for hardware video acceleration. Docker
+// refuses to create a container whose device is missing, so on any machine
+// without a graphics card — every virtual machine, and plenty of old laptops —
+// Jellyfin was created and then would not start:
+//
+//	error gathering device information while adding custom device "/dev/dri":
+//	no such file or directory
+//
+// The dashboard reported that as "Stopped unexpectedly", which is true and
+// useless: it never started, and no amount of pressing start would change that.
+func TestADeviceThatIsNotOnThisMachineIsLeftOut(t *testing.T) {
+	s := appServices(t)
+
+	manifest := Manifest{ManifestVersion: 1, ID: "player", Name: "Player"}
+	manifest.Container.Image = "example/player"
+	manifest.Container.Version = "1.0.0"
+	manifest.Network.InternalPort = 8096
+	manifest.Permissions.Devices = []string{"dri", "dvb"}
+
+	config := s.buildContainer(manifest, nil)
+
+	for _, device := range config.HostConfig.Devices {
+		if _, err := os.Stat(device.PathOnHost); err != nil {
+			t.Errorf("passed through %s, which is not on this machine: the "+
+				"container will not start", device.PathOnHost)
+		}
+	}
+}
+
+// …and hardware that is present is still passed through, or asking for it would
+// be decoration.
+func TestADeviceThatExistsIsPassedThrough(t *testing.T) {
+	s := appServices(t)
+
+	// /dev/null is on every machine, so it stands in for a device that is.
+	original := deviceePaths["dri"]
+	deviceePaths["dri"] = "/dev/null"
+	t.Cleanup(func() { deviceePaths["dri"] = original })
+
+	manifest := Manifest{ManifestVersion: 1, ID: "player", Name: "Player"}
+	manifest.Container.Image = "example/player"
+	manifest.Container.Version = "1.0.0"
+	manifest.Network.InternalPort = 8096
+	manifest.Permissions.Devices = []string{"dri"}
+
+	config := s.buildContainer(manifest, nil)
+
+	if len(config.HostConfig.Devices) != 1 {
+		t.Fatalf("got %d devices, want the one that exists", len(config.HostConfig.Devices))
+	}
+	if got := config.HostConfig.Devices[0].PathOnHost; got != "/dev/null" {
+		t.Errorf("passed through %q", got)
+	}
+}
