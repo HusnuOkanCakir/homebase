@@ -6,7 +6,7 @@ Homebase installs a complete server operating system onto a spare machine, then 
 the way behind a local web dashboard. You install applications, attach storage, and
 configure backups without ever opening a terminal or learning Linux.
 
-> **Status: pre-alpha. Milestones 0–5 complete, 6 under way.**
+> **Status: pre-alpha. Milestones 0–6 complete.**
 > There is no installable release yet, and nothing here should be pointed at data you care
 > about. What works, all from a browser: setting up an administrator, reading live system
 > information, restarting the machine, installing and removing applications from a small
@@ -17,12 +17,18 @@ configure backups without ever opening a terminal or learning Linux.
 > There is now an installer: `homebasectl installer create` writes a USB stick that turns a
 > Windows laptop into a working server, with no Linux commands typed on it. A newly claimed
 > server says what is worth doing next, and can be given a name of its own.
-> What does not exist yet: the graphical tool for making that stick on Windows or macOS,
-> and backups on a schedule. See the [roadmap](ROADMAP.md).
+> What does not exist yet: the graphical tool for making that stick — so making one still
+> takes a single command on a Linux machine — and backups on a schedule.
+> See the [roadmap](ROADMAP.md).
 
 ## Try it
 
-There is no installer yet. There are two ways to see Homebase working, and they answer
+There is an installer, but making the stick still needs one command on a Linux machine —
+the graphical tool for doing that on Windows or macOS is
+[Milestone 10 in the roadmap](ROADMAP.md). See
+[Installing Homebase](docs/user-guide/installing.md) for the real thing.
+
+Short of finding a spare laptop, there are two ways to see Homebase working, and they answer
 different questions.
 
 ### On a throwaway virtual machine — the closest thing to the real product

@@ -232,9 +232,10 @@ Milestone 0 — contracts and project machinery. No product code.
 
 ### Removed
 
-- Documentation site deployment, until Milestone 6. `mkdocs build --strict` still runs on
-  every pull request; publishing waits for an audience that will not clone the repository.
-  A permanently failing workflow is how people learn to ignore failing workflows
+- Documentation site deployment, until Milestone 6 — **restored in Milestone 6**, now that
+  somebody who has installed a server from a USB stick cannot be told to browse to
+  `docs/user-guide/backup.md` on GitHub. `mkdocs build --strict` ran on every pull request
+  throughout, because validation and publication are separate concerns
 - The `gomod` and `npm` Dependabot ecosystems, until the first `go.mod` and `package.json`
   exist. Dependabot does not ignore an ecosystem whose manifest is missing — it fails
 
