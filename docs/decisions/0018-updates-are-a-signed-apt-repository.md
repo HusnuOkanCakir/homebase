@@ -107,6 +107,15 @@ and writing one would be decoration that reads like a guarantee. What bounds the
 is that they are fixed commands in package-installed files, reachable only
 through `hostd`'s typed operations.
 
+**Applying cannot be synchronous**, for the same structural reason. The update
+replaces `homebase-hostd` and restarts it, so the process holding the request
+open is the process being replaced. `update.apply` starts the unit detached and
+returns; the unit writes its stage to a file as it goes, and `update.progress`
+reads it. That indirection buys something beyond necessity: a dashboard whose
+connection died during the restart can reconnect and find out how it went, and a
+machine that lost power mid-update comes back with a stage recorded and nothing
+running — which is a distinguishable state rather than silence.
+
 `hostd` does write apt's source and pin files directly, which cost it two
 narrowly-scoped entries in `ReadWritePaths` — `/etc/apt/sources.list.d` and
 `/etc/apt/preferences.d`, not `/etc/apt`. It never touches apt's own

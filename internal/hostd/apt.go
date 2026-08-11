@@ -28,8 +28,9 @@ const (
 	aptPrefsFile  = "/etc/apt/preferences.d/homebase"
 	aptKeyring    = "/usr/share/keyrings/homebase-archive-keyring.gpg"
 
-	// The unit that does the part hostd cannot, and where it leaves its answer.
+	// The units that do the part hostd cannot, and where they leave their answers.
 	updateCheckUnit = "homebase-update-check.service"
+	updateApplyUnit = "homebase-update-apply.service"
 	updateResultDir = "/var/lib/homebase"
 )
 
@@ -67,6 +68,28 @@ func runUpdateUnit(ctx context.Context, unit string) (string, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, binary, "start", "--wait", unit)
+	cmd.Env = aptEnv()
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// startUpdateUnit launches a unit and does not wait for it.
+//
+// Applying an update cannot be synchronous, and the reason is structural rather
+// than a matter of taste: the update replaces `homebase-hostd` and restarts it,
+// so the process waiting for the answer is the process being restarted. There
+// is no arrangement in which hostd holds a request open across its own upgrade.
+//
+// So the unit is started detached and its progress is read from the file it
+// writes as it goes. A caller polls; a caller that was disconnected by the
+// restart can reconnect and find out what happened.
+func startUpdateUnit(ctx context.Context, unit string) (string, error) {
+	binary, err := exec.LookPath("systemctl")
+	if err != nil {
+		return "", fmt.Errorf("systemctl is not on this machine")
+	}
+
+	cmd := exec.CommandContext(ctx, binary, "start", "--no-block", unit)
 	cmd.Env = aptEnv()
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -179,4 +202,16 @@ func writeRootFile(path, content string, mode os.FileMode) error {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// unitIsActive asks systemd whether a unit is still running.
+func unitIsActive(ctx context.Context, unit string) bool {
+	binary, err := exec.LookPath("systemctl")
+	if err != nil {
+		return false
+	}
+	cmd := exec.CommandContext(ctx, binary, "is-active", unit)
+	cmd.Env = aptEnv()
+	out, _ := cmd.Output()
+	return strings.TrimSpace(string(out)) == "active"
 }

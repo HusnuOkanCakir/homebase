@@ -341,8 +341,15 @@ charging for it.
       caught rather than shipped
 - [x] A signed archive, and a machine that updates from it — `update.configure` and
       `update.check`, proven by `make vm-test-update` (146s)
-- [ ] Signed release artifacts in CI, SBOMs, build attestations, downgrade protection
-- [ ] Pre-update snapshot, health check after update, automatic and manual rollback
+- [x] `update.apply` — download and verify everything first, snapshot what apt does not own,
+      apply, health check, and put the previous version back if it fails. Downgrades are
+      refused unless somebody is rolling back
+- [ ] Signed release artifacts in CI, SBOMs, build attestations
+- [ ] **The interruption matrix** — kill the update at each stage and assert the machine
+      still boots with its data intact. The exit condition, and not yet written
+- [ ] A test that makes the health check fail on purpose. Rollback is implemented and the
+      snapshot is taken, but nothing has yet forced it to run — so it is code, not a
+      proven property, and this list should not pretend otherwise
 - [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
       (credential reset shipped in Milestone 5)

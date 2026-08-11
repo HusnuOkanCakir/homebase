@@ -229,7 +229,26 @@ Milestone 0 — contracts and project machinery. No product code.
   the work that reaches the network happens in `homebase-update-check.service`, a fixed
   unit the package installs and `hostd` starts through systemd. Nothing from a request
   becomes part of a unit name or a command line
-- `make vm-test-update` (146s): a real archive over HTTP, a real machine, and the two checks
+- **`update.apply`** — everything is downloaded and verified before anything is applied, so
+  a failure while fetching changes nothing at all. Then the database and `/etc/homebase` are
+  snapshotted (`VACUUM INTO`, not a copy of a live database), the packages are installed, and
+  the machine is asked three questions: are all four at the version we meant, did the
+  services come back, and does the dashboard actually answer. A failure puts the previous
+  version back and restores the snapshot. `/srv/homebase` is deliberately not snapshotted —
+  no package touches it, and copying hundreds of gigabytes would fill the disk it is meant
+  to protect
+- **Applying an update is asynchronous, because it has to be.** The update replaces
+  `homebase-hostd` and restarts it, so the process holding the request open is the process
+  being replaced. `update.apply` starts the unit detached; `update.progress` reads the stage
+  the unit records as it goes — which also lets a dashboard disconnected by the restart
+  reconnect and find out how it went
+- An update older than what is installed is refused. An attacker able to serve an
+  old-but-validly-signed index can otherwise push a machine back to a version with a known
+  hole, with every signature involved genuine
+- `publish` keeps the version it replaces in the channel's index. Rollback is
+  `apt-get install homebase-core=<previous>`, and apt can only install a version its index
+  lists — an archive indexing one version per suite is one you cannot roll back from
+- `make vm-test-update` (160s): a real archive over HTTP, a real machine, and the checks
   the design exists for. **An archive tampered with and re-signed by somebody else's key is
   refused**, and the version inserted into it is never offered. **A package Homebase does not
   ship is not installable from Homebase's origin** — `Signed-By` binds a key to a source, not

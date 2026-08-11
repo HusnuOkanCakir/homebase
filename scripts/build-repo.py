@@ -194,6 +194,16 @@ def write_suite(repo: Path, channel: str, stanzas: list[dict[str, str]], key: st
     write_release(repo, channel, key)
 
 
+def newer(a: str, b: str) -> bool:
+    """Whether a is a higher version than b, as dpkg orders them.
+
+    dpkg does the comparison rather than Python. Debian ordering has epochs and
+    tildes that sort before the empty string, and a string compare gets it
+    wrong in ways that would quietly index the wrong version to roll back to.
+    """
+    return subprocess.run(["dpkg", "--compare-versions", a, "gt", b]).returncode == 0
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -288,6 +298,26 @@ def publish(args: argparse.Namespace) -> int:
     if len(wanted) != len(debs):
         raise RepoError(f"the pool describes {len(wanted)} packages at {args.version}, "
                         f"expected {len(debs)}")
+
+    # The version being replaced stays in the index.
+    #
+    # Rollback is `apt-get install homebase-core=<previous>`, and apt can only
+    # install a version its index lists. An archive that indexes one version per
+    # suite is an archive you cannot roll back from without the network and a
+    # different channel — which is exactly the situation rollback exists for.
+    # Two versions, not a history: keeping every release indexed would make the
+    # index grow without bound for the sake of a downgrade nobody performs.
+    previous = [s for s in read_suite(repo, args.channel)
+                if s.get("Version") != args.version]
+    keep: dict[str, dict[str, str]] = {}
+    for stanza in previous:
+        current = keep.get(stanza["Package"])
+        if current is None or newer(stanza["Version"], current["Version"]):
+            keep[stanza["Package"]] = stanza
+    for stanza in keep.values():
+        if (repo / stanza["Filename"]).exists():
+            wanted.append(stanza)
+            ok(f"{stanza['Package']} {stanza['Version']} stays indexed, to roll back to")
 
     write_suite(repo, args.channel, wanted, args.key)
     export_keyring(args.key, repo / "homebase-archive-keyring.gpg")

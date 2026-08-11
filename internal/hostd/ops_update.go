@@ -73,6 +73,31 @@ func RegisterUpdateOperations(r *Registry, services *UpdateServices) {
 	})
 
 	r.MustRegister(Operation{
+		Name: "update.apply",
+		Summary: "Install the newer version this machine's channel offers, and " +
+			"put the machine back if it does not come up healthy.",
+		// The highest risk in the system. It replaces every component while
+		// somebody's photographs are on the disk, and it restarts the service
+		// performing it.
+		Risk:        RiskHigh,
+		Permissions: []string{"update.manage"},
+		Confirm:     ConfirmExplicit,
+		Timeout:     30 * time.Second,
+		Rollback:    "automatic — a failed health check puts the previous version back",
+		Handler:     Typed(services.apply),
+	})
+
+	r.MustRegister(Operation{
+		Name:        "update.progress",
+		Summary:     "Report how far an update has got, and how it ended.",
+		Risk:        RiskRead,
+		Permissions: []string{"update.read"},
+		Confirm:     ConfirmNone,
+		Timeout:     10 * time.Second,
+		Handler:     Typed(services.progress),
+	})
+
+	r.MustRegister(Operation{
 		Name:    "update.check",
 		Summary: "Ask whether a newer version of Homebase has been published.",
 		// A read, but one that reaches the network and refreshes apt's index.
@@ -263,4 +288,98 @@ func validOrigin(origin string) error {
 		return fmt.Errorf("an update source cannot contain a line break")
 	}
 	return nil
+}
+
+type applyResult struct {
+	// Started is whether systemd took the job on. It is not whether the update
+	// worked: by the time it has, this process will have been restarted.
+	Started bool   `json:"started"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+// apply asks systemd to run the update, and returns without waiting.
+//
+// It cannot wait. The update replaces homebase-hostd and restarts it, so the
+// process holding the request open is the process being replaced. Callers watch
+// `update.progress` instead — which also means a dashboard whose connection
+// died during the restart can reconnect and find out how it went.
+func (s *UpdateServices) apply(ctx context.Context, _ struct{}) (any, error) {
+	status := ReadUpdateStatus(ctx, s.aptSource, s.dpkgUpdates)
+
+	if status.Channel == "" {
+		return nil, &Error{
+			Code:        "update.no_channel",
+			Message:     "This server does not know where to get updates from.",
+			Detail:      "no update source is configured",
+			Recoverable: true,
+			Recovery:    "Choose an update channel first.",
+			Status:      409,
+		}
+	}
+
+	// Refused rather than attempted. Starting a new transaction on a machine
+	// with an unfinished one is how a recoverable state becomes an unrecoverable
+	// one, and dpkg would refuse anyway — with a message written for somebody
+	// who knows what dpkg is.
+	if status.Interrupted {
+		return nil, &Error{
+			Code:        "update.previous_unfinished",
+			Message:     "An earlier update on this server did not finish.",
+			Detail:      "dpkg has a transaction outstanding",
+			Recoverable: true,
+			Recovery: "Finish it first by running `sudo dpkg --configure -a` on " +
+				"the server, then try again.",
+			Status: 409,
+		}
+	}
+
+	out, err := startUpdateUnit(ctx, updateApplyUnit)
+	if err != nil {
+		return nil, &Error{
+			Code:        "update.could_not_start",
+			Message:     "The update could not be started.",
+			Detail:      strings.TrimSpace(out) + " (" + err.Error() + ")",
+			Recoverable: true,
+			Recovery:    "Try again. If it keeps failing, check the system logs.",
+			Status:      500,
+		}
+	}
+
+	return applyResult{Started: true}, nil
+}
+
+type progressResult struct {
+	// Stage is where the update got to: refreshing, downloading, snapshot,
+	// applying, health, rolling-back, rolled-back, done. Empty when no update
+	// has ever been started on this machine.
+	Stage string `json:"stage"`
+
+	// Result is "ok" or "failed", and is empty while the update is still
+	// running. Emptiness is meaningful: it is how a caller tells "in progress"
+	// from "finished", without this process having to remember anything across
+	// the restart that the update performs on it.
+	Result string `json:"result,omitempty"`
+
+	From   string `json:"from,omitempty"`
+	To     string `json:"to,omitempty"`
+	Detail string `json:"detail,omitempty"`
+
+	// Running is whether systemd still has the unit active. Checked as well as
+	// the file, because a machine that lost power mid-update comes back with a
+	// stage written and nothing running — which is a finished update in the
+	// worst sense and must not read as one in progress for ever.
+	Running bool `json:"running"`
+}
+
+func (s *UpdateServices) progress(ctx context.Context, _ struct{}) (any, error) {
+	values := readResultFile(filepath.Join(s.resultDir, "apply"))
+
+	return progressResult{
+		Stage:   values["stage"],
+		Result:  values["result"],
+		From:    values["from"],
+		To:      values["to"],
+		Detail:  values["detail"],
+		Running: unitIsActive(ctx, updateApplyUnit),
+	}, nil
 }

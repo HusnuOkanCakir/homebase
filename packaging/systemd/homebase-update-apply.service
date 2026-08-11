@@ -1,0 +1,48 @@
+[Unit]
+Description=Homebase — apply an update, and put the machine back if it fails
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0018-updates-are-a-signed-apt-repository.md
+
+# Nothing to do without an update source, and failing here is better than
+# apt failing with a message written for somebody who knows what apt is.
+ConditionPathExists=/etc/apt/sources.list.d/homebase.sources
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+
+# A fixed command with a literal argument.
+#
+# This unit is what hostd starts instead of running apt itself, because
+# homebase-hostd.service sets RestrictAddressFamilies=AF_UNIX AF_NETLINK and
+# therefore cannot open a network socket. Keeping that restriction is worth
+# more than the indirection: it means the root service that manages this
+# machine cannot talk to the internet at all.
+#
+# The action is not parameterised and this is not a template unit. Nothing a
+# caller sends ever becomes part of a unit name or a command line — the only
+# thing hostd chooses is *which* of these units to start.
+ExecStart=/usr/libexec/homebase/update-run apply
+
+# This unit upgrades homebase-hostd and homebase-core, so it restarts the
+# service that asked for it. KillMode=process and the absence of any dependency
+# on those units is what stops systemd tearing this down half way through: the
+# thing performing the update must outlive the thing being updated.
+KillMode=process
+
+# Deliberately unsandboxed, and it is worth being plain about why rather than
+# copying hardening from the other units. This talks to the network and, in the
+# apply case, writes packages across the whole filesystem. A sandbox that has to
+# permit both is not a sandbox; writing one here would be decoration that reads
+# like a guarantee.
+#
+# What bounds it instead is that it is a fixed command in a package-installed
+# unit, reachable only through hostd's typed operations.
+User=root
+
+# Half an hour. Downloading and unpacking four packages on an old laptop with a
+# slow connection is minutes, not seconds, and a timeout that fires mid-dpkg
+# would manufacture the half-applied state this whole unit exists to avoid.
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

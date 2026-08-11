@@ -315,7 +315,7 @@ def build_hostd(version: str, binaries: Path) -> Path:
                  root / "usr/libexec/homebase/update-run", 0o755)
 
     for unit in ("homebase-hostd.service", "homebase-hostd.socket",
-                 "homebase-update-check.service"):
+                 "homebase-update-check.service", "homebase-update-apply.service"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,

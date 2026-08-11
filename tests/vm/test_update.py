@@ -105,7 +105,11 @@ def must(vm: VM, name: str, params: dict | None = None, confirmed: bool = False,
     status, body = op(vm, name, params, confirmed, timeout)
     if status != 200:
         raise TestFailure(f"{name} returned {status}\n    {json.dumps(body, indent=4)}")
-    return body.get("result", body)
+    # hostd's envelope is the result object itself. An earlier version of this
+    # helper unwrapped a "result" key when one was present, which worked for
+    # every operation until one returned a payload with a field of that name —
+    # and then returned the string "ok" where a dict was expected.
+    return body
 
 
 # --- the repository -----------------------------------------------------------
@@ -392,6 +396,76 @@ def verify_a_tampered_archive_is_refused(vm: VM, archive: Archive) -> None:
           "and it works again once the archive is honest")
 
 
+
+def create_data(vm: VM) -> None:
+    """Something on the disk that has to survive being updated over."""
+    step("Putting something on the server first")
+    ssh(vm, ["sudo", "sh", "-c",
+             "mkdir -p /srv/homebase && echo 'a photograph' > /srv/homebase/important.txt "
+             "&& chown -R homebase:homebase /srv/homebase"])
+    ok("a file in /srv/homebase")
+
+
+def verify_applying_the_update(vm: VM) -> None:
+    """The milestone's centre: actually install it, and stay working.
+
+    Applying cannot be a synchronous call, and that is structural rather than a
+    matter of taste. The update replaces homebase-hostd and restarts it, so the
+    process holding the request open is the process being replaced. hostd starts
+    the unit detached and the caller polls — which also means a dashboard whose
+    connection died during the restart can reconnect and find out how it went.
+    """
+    step("Applying the update")
+
+    started = must(vm, "update.apply", confirmed=True)
+    check(started.get("started") is True, "the update was accepted and started",
+          json.dumps(started))
+
+    deadline = time.time() + 600
+    progress: dict = {}
+    while time.time() < deadline:
+        time.sleep(5)
+        try:
+            progress = must(vm, "update.progress")
+        except TestFailure:
+            # Expected, and worth not papering over: hostd is being restarted
+            # underneath this call. The whole point of writing progress to a
+            # file is that the answer outlives the process that reports it.
+            continue
+        if progress.get("result"):
+            break
+    else:
+        raise TestFailure(f"the update never finished: {json.dumps(progress)}")
+
+    check(progress.get("result") == "ok",
+          f"it finished, and reports {progress.get('result')}",
+          json.dumps(progress, indent=4))
+    check(progress.get("stage") == "done",
+          f"having reached the last stage ({progress.get('stage')})")
+    check(progress.get("from") == OLD and progress.get("to") == NEW,
+          f"and says what it moved between ({progress.get('from')} → {progress.get('to')})")
+
+    status = must(vm, "update.status")
+    check(status.get("version") == NEW,
+          f"the machine now runs {status.get('version')}")
+    check(status.get("consistent") is True,
+          "with all four packages agreeing",
+          json.dumps(status.get("components")))
+    check(status.get("interrupted") is False, "and nothing left half-applied")
+
+    # The health check inside the update already asked core to answer. Asking
+    # again from outside is not duplication: the first is what decides whether
+    # to roll back, and this is whether the decision was right.
+    code = ssh(vm, ["curl", "--silent", "--insecure", "--max-time", "15",
+                    "-o", "/dev/null", "-w", "%{http_code}",
+                    "https://127.0.0.1/api/v1/health"], check=False).stdout.strip()
+    check(code == "200", f"and the dashboard answers ({code})")
+
+    kept = ssh(vm, ["sudo", "cat", "/srv/homebase/important.txt"], check=False).stdout.strip()
+    check(kept == "a photograph",
+          f"and the file that was there before the update still is ({kept!r})")
+
+
 def verify_the_archive_cannot_replace_other_packages(vm: VM, archive: Archive) -> None:
     """`Signed-By` binds a key to a source, not to package names.
 
@@ -421,12 +495,12 @@ def verify_the_archive_cannot_replace_other_packages(vm: VM, archive: Archive) -
           "and would not install the version it offered",
           (simulated.stdout + simulated.stderr)[:400])
 
-    # The four packages Homebase does ship are still installable from it —
-    # a pin that refused everything would pass the check above and break the
-    # product.
+    # The four packages Homebase does ship are still offered by it. A pin that
+    # refused everything from this origin would pass the check above and break
+    # the product, and the two are indistinguishable without asking.
     result = must(vm, "update.check")
-    check(result.get("update_available") is True,
-          "while Homebase's own packages are still offered normally",
+    check(result.get("reachable") is True and result.get("available") == NEW,
+          f"while Homebase's own packages are still offered ({result.get('available')})",
           json.dumps(result))
 
 
@@ -511,6 +585,8 @@ def main() -> int:
         verify_a_channel_that_does_not_exist_is_refused(vm, archive)
         verify_finding_an_update(vm, archive)
         verify_a_tampered_archive_is_refused(vm, archive)
+        create_data(vm)
+        verify_applying_the_update(vm)
         verify_the_archive_cannot_replace_other_packages(vm, archive)
 
         elapsed = int(time.time() - started)
