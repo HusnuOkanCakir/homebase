@@ -168,9 +168,15 @@ jobs:
       - name: Install, reinstall and purge
         run: |
           set -euo pipefail
-          sudo dpkg -i dist/*.deb
+          # apt rather than dpkg, and this is not cosmetic: homebase-core
+          # depends on avahi-daemon, which a runner does not have. dpkg does not
+          # resolve dependencies — it unpacks, fails to configure, and leaves
+          # exactly the half-installed state this job exists to rule out. apt is
+          # also what a user runs.
+          sudo apt-get update -qq
+          sudo apt-get install -y ./dist/*.deb
           echo "--- reinstalling the same version ---"
-          sudo dpkg -i dist/*.deb
+          sudo apt-get install -y --reinstall ./dist/*.deb
           echo "--- the accounts and directories the boundary depends on ---"
           getent group homebase
           getent passwd homebase
