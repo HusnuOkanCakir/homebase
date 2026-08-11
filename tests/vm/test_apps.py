@@ -245,6 +245,43 @@ def verify_catalogue(vm: VM) -> None:
           "The runtime was asked and answered; installed must be false, not null.")
 
 
+def refuse_before_downloading(vm: VM) -> None:
+    """An application that needs a disk is refused before anything is fetched.
+
+    Jellyfin is about a gigabyte. Asking to install it without choosing a disk
+    used to download the whole image and *then* refuse with "Jellyfin needs
+    somewhere to keep its files" — a fact that was true before the first byte.
+    On a home connection that is ten minutes and a chunk of somebody's monthly
+    allowance, spent to be told no.
+
+    The assertion is that nothing was downloaded, rather than that it was quick:
+    a timing test on somebody else's broadband is a test that fails for reasons
+    unrelated to the change.
+    """
+    step("An application that needs a disk says so before downloading it")
+
+    before = ssh(vm, ["sudo", "docker", "images", "--format", "{{.Repository}}"],
+                 check=False).stdout
+
+    job = run_job(vm, "/apps/jellyfin/install", timeout=300)
+    check(job["state"] == "failed",
+          f"installing without a disk is refused (state={job['state']})")
+
+    failure = job.get("error") or {}
+    check(failure.get("code") == "app.storage_not_assigned",
+          f"and says why ({failure.get('code')})",
+          json.dumps(failure))
+    check(bool(failure.get("recovery")),
+          "and what to do about it",
+          "A refusal a user cannot act on is a dead end.")
+
+    after = ssh(vm, ["sudo", "docker", "images", "--format", "{{.Repository}}"],
+                check=False).stdout
+    check("jellyfin" not in after or "jellyfin" in before,
+          "and nothing was downloaded first",
+          f"images before: {before.split()}\n    images after:  {after.split()}")
+
+
 def install_app(vm: VM) -> None:
     step(f"Installing {APP_NAME}")
 
@@ -534,6 +571,7 @@ def main() -> int:
         install_homebase(vm, packages)
 
         verify_catalogue(vm)
+        refuse_before_downloading(vm)
         install_app(vm)
         verify_container_hardening(vm)
         marker = use_app(vm)

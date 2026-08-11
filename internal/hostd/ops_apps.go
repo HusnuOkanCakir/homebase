@@ -386,6 +386,19 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 		return nil, err
 	}
 
+	// Before the download, not after it.
+	//
+	// This check already existed for app.start, for the same reason, and the
+	// install path did not call it: Jellyfin is a gigabyte, so asking to install
+	// it without choosing a disk first spent several minutes downloading and
+	// then refused with "Jellyfin needs somewhere to keep its files" — a message
+	// that was true before the first byte and would have cost nothing to say
+	// then. On a home connection that is ten minutes of somebody's evening and
+	// their whole month's data allowance, spent to be told no.
+	if err := s.requireStorage(manifest); err != nil {
+		return nil, err
+	}
+
 	name := containerName(manifest.ID)
 
 	// Already installed is not a failure. Installing twice should converge on
