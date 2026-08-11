@@ -2,48 +2,39 @@ name: Docs
 
 # Publishes the documentation site to GitHub Pages.
 #
-# DISABLED until Milestone 6. Re-enable by uncommenting the `push` trigger below.
+# On since Milestone 6, which is when the audience arrived. Until then the docs
+# were readable in the repository and that was enough — GitHub renders mermaid
+# natively, so the architecture diagrams worked as they were. What a published
+# site adds is full-text search, a navigation sidebar and a clean URL, and those
+# matter once there are people who will not clone the repository. A person who
+# has just installed a server appliance from a USB stick cannot be told to browse
+# to docs/user-guide/backup.md on GitHub.
 #
-# Why it is off:
+# Kept from when this was disabled, because the misdiagnosis is instructive:
 #
-# The docs are readable in the repository today. GitHub renders mermaid natively,
-# so the architecture diagrams work as they are, and 28 of 29 pages read fine
-# without a site. What a published site adds — full-text search, a navigation
-# sidebar, a clean URL — matters when there is an audience that will not clone the
-# repository. That audience arrives at Milestone 6, with the first installable
-# release: a person who has just installed a server appliance cannot be told to
-# browse to docs/user-guide/backup.md on GitHub.
+#   It was switched off during a GitHub incident -- "Pages - Deployment Lag",
+#   2026-08-06, since resolved -- in which deployments were created and then sat
+#   in `deployment_queued` until the action timed out. The failure looked like a
+#   repository misconfiguration and was investigated as one, through a fresh
+#   commit and a delete-and-recreate of the Pages site, before githubstatus.com
+#   listed the incident. The build had succeeded and the artifact had uploaded
+#   every time.
 #
-# It was switched off during a GitHub incident — "Pages - Deployment Lag",
-# 2026-08-06, since resolved — in which deployments were created and then sat in
-# `deployment_queued` until the action timed out. That incident is over, so the
-# technical obstacle is gone; the reason above is the one that still applies, and
-# it is the reason this stays off.
-#
-# Worth recording because the misdiagnosis is instructive: the failure looked like
-# a repository misconfiguration and was investigated as one, through a fresh commit
-# and a delete-and-recreate of the Pages site, before githubstatus.com listed the
-# incident. The build had succeeded and the artifact had uploaded every time. When
-# every input to a step is correct and it still fails, check whether the service is
-# up before rebuilding your own side of it.
+#   When every input to a step is correct and it still fails, check whether the
+#   service is up before rebuilding your own side of it.
 #
 # Note that `mkdocs build --strict` still runs on every pull request, in ci.yml's
 # `docs` job. Validation and publication are separate concerns: the strict build
-# is what catches an orphaned page or a broken nav reference, and it keeps earning
-# its keep whether or not anything is published.
+# is what catches an orphaned page or a broken nav reference, and it earns its
+# keep whether or not anything is published. This workflow only publishes what
+# that job has already proven builds.
 #
-# To re-enable at Milestone 6:
-#   1. Uncomment the `push` trigger
-#   2. Confirm Pages is enabled — scripts/setup-branch-protection.sh does this
-#   3. Run manually first via workflow_dispatch and confirm the site serves
-#
-# Manual runs are deliberately left available, so the deployment can be retried
+# Manual runs are deliberately left available, so a deployment can be retried
 # without editing this file.
 
 on:
-  # Re-enable at Milestone 6. See above.
-  # push:
-  #   branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:

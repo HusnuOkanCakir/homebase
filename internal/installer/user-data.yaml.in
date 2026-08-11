@@ -1,0 +1,209 @@
+#cloud-config
+#
+# Homebase installation media — the autoinstall seed.
+#
+# This is the file Ubuntu's installer reads off the second volume of the USB
+# stick. The ISO itself is never modified; see
+# docs/decisions/0016-installation-media.md for why, and for the one visible
+# consequence: Ubuntu stops once to ask "Continue with autoinstall?" before it
+# touches the disk, because `autoinstall` is not on its kernel command line.
+#
+# Placeholders written in capitals between at-signs are filled in by
+# `homebasectl installer seed`.
+# Everything else ships exactly as written, and is worth reading, because this
+# is the file that decides what happens to somebody's disk.
+
+autoinstall:
+  version: 1
+
+  # Fail rather than stop and ask. Every section is answered here, so a seed
+  # Ubuntu cannot fully understand should be a loud failure and not a machine
+  # sitting on a question nobody is watching for.
+  interactive-sections: []
+
+  locale: @LOCALE@
+  keyboard:
+    layout: @KEYBOARD@
+
+  identity:
+    hostname: @HOSTNAME@
+    realname: Homebase console
+    # Deliberately not "homebase". That is the system account the packages
+    # create, and a login user holding the name makes `adduser --system` adopt
+    # an interactive account instead of creating the system one — which leaves
+    # core running as a user with a shell and a home directory.
+    username: console
+    # A locked password: nobody signs in with one here. Homebase is managed
+    # from a browser, and the console is reached by standing in front of the
+    # machine. See the autologin unit below, and ADR-0015.
+    password: "!"
+
+  ssh:
+    install-server: @INSTALL_SSH@
+    allow-pw: false
+    authorized-keys: @AUTHORIZED_KEYS@
+
+  # The whole disk. No resizing, no dual boot, nothing preserved.
+  #
+  # The device is deliberately not named: a seed that says /dev/sda is right on
+  # the machine it was written for and wrong on the next one, and being wrong
+  # here destroys a disk rather than failing an install.
+  storage:
+    layout:
+      name: direct
+
+  # What a server needs, and nothing else. Every package is another thing to
+  # update and another thing that can have a vulnerability, on a machine whose
+  # owner will never look at it.
+  #
+  # docker.io is here because the application catalogue depends on it. Homebase
+  # itself installs with no network at all — its packages travel on the media —
+  # but applications are container images pulled from a registry, so a server
+  # that will ever run one needs the internet regardless of how it was
+  # installed. Requiring it here costs nothing that was not already required.
+  packages:
+    - ca-certificates
+    - sqlite3
+    - docker.io
+
+  # Security updates only, and no upgrade pass during installation: the machine
+  # may be on a slow connection or none at all, and an installer that appears to
+  # hang while fetching packages is one somebody switches off at the wall.
+  updates: security
+
+  late-commands:
+    # Homebase's own packages travel on the installation media rather than
+    # coming from the network, so a machine with no internet still ends up with
+    # a working server.
+    - |
+      set -eu
+      seed=$(blkid -L @SEED_LABEL@ 2>/dev/null || true)
+      if [ -z "$seed" ]; then
+        echo "homebase: no seed volume labelled @SEED_LABEL@" >&2
+        exit 1
+      fi
+      mkdir -p /mnt/homebase-seed /target/var/tmp/homebase
+      mount -o ro "$seed" /mnt/homebase-seed
+      cp /mnt/homebase-seed/packages/*.deb /target/var/tmp/homebase/
+      umount /mnt/homebase-seed
+    - curtin in-target --target=/target -- sh -c 'dpkg -i /var/tmp/homebase/*.deb || apt-get install -f -y'
+    - curtin in-target --target=/target -- rm -rf /var/tmp/homebase
+
+    # The console account logs in without a password, on the physical console
+    # only. This is what makes `sudo homebasectl recovery-code` reachable by
+    # somebody standing at the machine who has forgotten everything else.
+    #
+    # It grants nothing that being in front of the machine did not already
+    # grant — the threat model puts physical access out of scope, because
+    # anybody holding the laptop can read the disk regardless. The alternative
+    # is a password nobody chose, printed somewhere, which becomes the thing
+    # they lose. SSH password authentication stays off.
+    - mkdir -p /target/etc/systemd/system/getty@tty1.service.d
+    - |
+      cat > /target/etc/systemd/system/getty@tty1.service.d/autologin.conf <<'UNIT'
+      [Service]
+      ExecStart=
+      ExecStart=-/sbin/agetty --autologin console --noclear %I $TERM
+      UNIT
+
+    # And it can become root without a password, which the locked password above
+    # would otherwise make impossible.
+    #
+    # This is not a loosening — it is what makes the account usable at all. The
+    # console path in ADR-0015 is `sudo homebasectl recovery-code`, run by
+    # somebody standing at the machine who has forgotten everything, and an
+    # account that cannot run sudo is an account that cannot do the one thing it
+    # exists for. Being in front of the machine is the credential; the threat
+    # model already puts physical access out of scope, because whoever is
+    # holding the laptop can read the disk regardless.
+    #
+    # SSH password authentication stays off, so this is reachable by somebody at
+    # the keyboard or by somebody holding a key that was deliberately installed.
+    - |
+      cat > /target/etc/sudoers.d/homebase-console <<'SUDO'
+      console ALL=(ALL) NOPASSWD: ALL
+      SUDO
+    - chmod 0440 /target/etc/sudoers.d/homebase-console
+    - curtin in-target --target=/target -- visudo -cf /etc/sudoers.d/homebase-console
+
+    # What the machine's own screen says once it has come up.
+    #
+    # This is the only thing standing between somebody who has just installed
+    # Homebase and a machine they have no way of reaching. They are looking at a
+    # laptop in a cupboard showing a login prompt, and the address of the
+    # dashboard is not something they can guess.
+    #
+    # The address is worked out when the message is shown rather than written in
+    # now: the interface has no stable name across machines, DHCP hands out a
+    # different address on a different network, and a screen confidently showing
+    # the wrong one is worse than a screen showing none.
+    - |
+      cat > /target/etc/update-motd.d/99-homebase <<'MOTD'
+      #!/bin/sh
+      # Shown on the machine's own screen. See ADR-0016.
+      address=$(ip -4 -brief address show scope global 2>/dev/null \
+                | awk '{print $3}' | cut -d/ -f1 | head -n 1)
+
+      echo
+      echo "  Homebase is installed on this machine."
+      echo
+      if [ -n "$address" ]; then
+        echo "  Open a browser on your phone or computer, on the same"
+        echo "  network, and go to:"
+        echo
+        echo "      http://$address:8080"
+      else
+        echo "  This machine is not on a network yet. Plug in a network"
+        echo "  cable, and this screen will show the address to open."
+      fi
+      echo
+      echo "  You do not need to type anything here."
+      echo
+      MOTD
+    - chmod 0755 /target/etc/update-motd.d/99-homebase
+
+    # Ubuntu's own motd is a page of advertising and update counts, which buries
+    # the one line that matters on a screen somebody is squinting at.
+    - rm -f /target/etc/update-motd.d/10-help-text
+    - rm -f /target/etc/update-motd.d/50-motd-news
+    - rm -f /target/etc/update-motd.d/00-header
+
+    # A firewall that allows what the dashboard needs and nothing else. The
+    # server sits on a home network with a smart television and a doorbell
+    # camera on it, and the threat model assumes that network is hostile.
+    - curtin in-target --target=/target -- ufw default deny incoming
+    - curtin in-target --target=/target -- ufw default allow outgoing
+    - curtin in-target --target=/target -- ufw allow 8080/tcp comment "Homebase dashboard"
+    - curtin in-target --target=/target -- ufw allow 8443/tcp comment "Homebase dashboard (TLS)"
+    - curtin in-target --target=/target -- sh -c '@SSH_FIREWALL@'
+    - curtin in-target --target=/target -- ufw --force enable
+
+    # Closing the lid must not switch the server off. This is a laptop in a
+    # cupboard: the lid is closed for the whole of its working life.
+    - mkdir -p /target/etc/systemd/logind.conf.d
+    - |
+      cat > /target/etc/systemd/logind.conf.d/homebase.conf <<'LOGIND'
+      [Login]
+      HandleLidSwitch=ignore
+      HandleLidSwitchExternalPower=ignore
+      HandleLidSwitchDocked=ignore
+      IdleAction=ignore
+      LOGIND
+
+    # Nor may it suspend itself while nobody is looking at it.
+    - curtin in-target --target=/target -- systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+
+    - curtin in-target --target=/target -- systemctl enable homebase-hostd.socket
+    - curtin in-target --target=/target -- systemctl enable homebase-core.service
+
+    # Written last, and only if everything above succeeded. Anything checking
+    # whether this machine came from Homebase's installer looks for this file,
+    # rather than inferring it from a package being present.
+    - |
+      cat > /target/etc/homebase-installed <<'STAMP'
+      media_version=@VERSION@
+      ubuntu=@UBUNTU_RELEASE@
+      installed_by=homebase-installer
+      STAMP
+
+  shutdown: reboot

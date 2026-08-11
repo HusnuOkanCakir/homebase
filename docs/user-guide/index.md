@@ -12,6 +12,8 @@
 
 | Page | Covers |
 |---|---|
+| [Installing Homebase](installing.md) | Making the USB stick, erasing the old laptop, finding the server afterwards |
+| [First steps](first-steps.md) | Naming the server, and what is worth doing on a new one |
 | [Applications](applications.md) | Installing, running and removing applications |
 | [Storage](storage.md) | Adding a disk, giving it to an application, unplugging safely |
 | [Backup and restore](backup.md) | Making a backup, checking it, and getting your files back |
@@ -21,8 +23,6 @@
 
 | Page | Covers | Milestone |
 |---|---|---|
-| Installation | Creating the USB stick, erasing the target laptop, first boot | 6 |
-| First steps | Administrator setup, naming the server, finding it on your network | 6 |
 | Networking | Wi-Fi, discovery, optional private remote access | 7 |
 | Updates | Channels, applying updates, rolling back | 8 |
 | Troubleshooting | When something is wrong and you want it working again | 8 |

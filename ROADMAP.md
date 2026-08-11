@@ -7,7 +7,11 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–5 complete. Milestone 6 next.**
+**Current position: Milestones 0–6 complete. Milestone 7 next.** A USB stick turns a
+Windows laptop into a working server, and a new server says what to do next. Making that
+stick still takes one command on a Linux machine — the graphical tool for doing it on
+Windows and macOS is Milestone 10, and it is
+what Stage 1 is still missing.
 
 ---
 
@@ -33,11 +37,12 @@ Branch protection was verified by the test that matters: a direct push to `main`
 rejected, and a pull request cannot merge until all five required checks pass. A ruleset
 that exists but does not bite is worse than none, because it gets trusted.
 
-**One deliverable deliberately deferred:** publishing the documentation site. The
-site builds under `mkdocs build --strict` on every pull request, but deployment to GitHub
-Pages is off until Milestone 6 — see [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
-Until there is an installable release, the audience for the documentation is people
-reading it in this repository, where it already works.
+**One deliverable deliberately deferred:** publishing the documentation site. The site built
+under `mkdocs build --strict` on every pull request, but deployment to GitHub Pages stayed
+off until Milestone 6 — see [`.github/workflows/docs.yml`](.github/workflows/docs.yml).
+Until there was an installer, the audience for the documentation was people reading it in
+this repository, where it already worked. **Switched on in Milestone 6**, which is when
+somebody who has installed a server from a USB stick stops being a hypothetical reader.
 
 ### Milestone 1 — Disposable VM lab ✅
 
@@ -209,16 +214,61 @@ It also forced the auth endpoints to be rate limited. Sign-in, setup and recover
 verify an argon2id hash, which reserves 64 MiB by design, and all three are reachable
 without credentials — an unbounded one is memory exhaustion that needs no account.
 
-### Milestone 6 — Installer and first-use ← *next*
+### Milestone 6 — Installer and first-use ✅
 
-- [ ] `homebasectl installer create`, then a graphical controller (Tauri)
-- [ ] Ubuntu autoinstall: hardware detection, disk enumeration, Windows detection
-- [ ] Target confirmation, whole-disk install, firewall, laptop power behaviour
-- [ ] First-use flow: administrator, server name, storage, updates, backups, first app
-      (the recovery code arrived early, in Milestone 5)
+- [x] `homebasectl installer create`, and `installer devices` to say what may be written to
+- [x] Ubuntu autoinstall: whole-disk install onto a Windows-occupied disk
+- [x] Firewall, laptop power behaviour, and a screen that says where to browse to
+- [x] First-use flow: a getting-started list that says what is worth doing and why, and
+      naming the server (the administrator and the recovery code arrived early, in
+      Milestone 5)
+- [→] A graphical controller — **split out to Milestone 10**
 
 **Done when:** starting from a Windows-occupied disk, the installer produces a working
-server that reaches the dashboard and installs an application — with no Linux commands.
+server that reaches the dashboard and installs an application — with no Linux commands. ✅
+
+Proven by `make vm-test-installer`, which boots the media `homebasectl installer create`
+writes — one USB drive, Ubuntu's image byte for byte with a Homebase partition appended
+after it — onto a disk carrying a real GPT with Windows' partition types and an NTFS
+signature. It answers Ubuntu's confirmation prompt by pressing keys, waits for the machine
+to come back up as the system it installed, then creates an administrator and installs an
+application through the API.
+
+[ADR-0016](docs/decisions/0016-installation-media.md): **Canonical's ISO is never
+repacked.** The autoinstall configuration and Homebase's own packages travel beside it on a
+partition of their own, so the boot path stays the one Ubuntu publishes and tests, and the
+image can still be checked against its publisher. The cost is visible and written down:
+Ubuntu stops once to ask whether to continue, and that prompt does not say which disk it is
+about to erase.
+
+The test found two bugs that nothing else could have. The console account could not run
+`sudo`, so the recovery path from Milestone 5 would have failed on every real installation.
+And an installed server listened on `127.0.0.1` — every machine-side check passing while the
+one thing the product is for did not work, invisible because two other places each set the
+address for their own good reasons.
+
+First use is a checklist rather than a wizard. A wizard has to be finished, so it either
+blocks somebody who has not bought a USB disk yet or teaches them that skipping is normal.
+The list says what is worth doing and why, reads its state from what the server actually
+reports rather than remembering what was clicked, and stops mentioning each thing once it is
+true. Naming the server is the one step that happens on the list itself — and also under
+**This server**, permanently, because a machine that can only be renamed during its first
+week is one nobody can rename.
+
+**The graphical controller is deliberately not here.** It writes to a raw block device on
+somebody's *own* computer — the one with all their work on it — and its whole purpose is
+Windows and macOS, neither of which can be tested from the machines this project is
+developed and tested on.
+
+The refusals are the product: `refusal()` is what stops a person erasing the disk their
+photographs are on, and on Linux it is `lsblk` semantics with a test behind it. The Windows
+and macOS equivalents share no logic with it and would have to be written from
+documentation. Shipping that unverified is the one thing a tool like this must not do, so it
+became Milestone 10 with the platform testing it
+requires rather than an unchecked box here.
+
+Until then, making the stick needs one command on a Linux machine. That is a real gap and it
+is why Stage 1 is not done.
 
 ### Milestone 7 — Networking and private access
 
@@ -252,12 +302,37 @@ application data.
 **Done when:** three different laptops complete install → first boot → app install → reboot
 → backup → restore, with no manual Linux commands at any point.
 
+### Milestone 10 — The graphical stick-maker
+
+The last thing standing between Homebase and its actual audience: a small application that
+writes the installation media, run on the computer somebody already owns.
+
+- [ ] A way to test on Windows and macOS — a VM lab for both, the way Milestone 1 built one
+      for Linux. This comes first, because everything else here is untestable without it
+- [ ] Device enumeration and the refusals, per platform: `\\.\PhysicalDrive` on Windows,
+      `diskutil` and `/dev/rdisk` on macOS
+- [ ] A graphical wrapper around the same media logic `homebasectl installer create` uses —
+      one implementation, not three
+- [ ] Signed and notarised builds, since an unsigned tool that asks for administrator rights
+      to erase a disk is indistinguishable from malware, and correctly so
+
+**Done when:** somebody who has never opened a terminal makes a working Homebase stick on
+their own Windows or macOS computer, and the tool refuses to write to the disk that computer
+runs from — proven on both, not reasoned about.
+
+Numbered last because it cannot start until there is somewhere to run it. Ordered by
+necessity rather than by importance: it is the piece Stage 1 cannot be called done without.
+
 ### Stage 1 definition of done
 
 A non-technical person can: create the installer USB, install without a terminal, reach the
 dashboard, install and use an app, attach external storage, configure and verify a backup,
 update and restart safely, recover from a simulated failure, export understandable
 diagnostics — and never grant the dashboard root access to do any of it.
+
+**The first of those is the one still outstanding.** Everything after "install without a
+terminal" works today; making the stick still takes one command on a Linux machine. That is
+Milestone 10, and until it lands this list is a target rather than a description.
 
 ---
 

@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,9 +34,27 @@ import (
 
 var version = "dev"
 
+// envOr reads a setting from the environment, falling back to a default.
+func envOr(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
+}
+
 func main() {
 	var (
-		addr        = flag.String("listen", "127.0.0.1:8080", "address to listen on")
+		// Local by default, because that is the safe answer for a binary
+		// somebody has just built and run. The appliance is not that case: the
+		// packaged unit sets HOMEBASE_LISTEN, because a Homebase nobody can
+		// reach from another room is not a Homebase.
+		//
+		// Read from the environment rather than written into the unit's
+		// ExecStart so that overriding it is a one-line drop-in. A drop-in that
+		// has to restate the whole command line silently drops any flag added
+		// to it later — which is how the address ended up wrong in two places
+		// at once, each for its own good reason.
+		addr        = flag.String("listen", envOr("HOMEBASE_LISTEN", "127.0.0.1:8080"), "address to listen on")
 		dbPath      = flag.String("db", "/var/lib/homebase/homebase.db", "SQLite database")
 		socket      = flag.String("hostd-socket", hostclient.DefaultSocket, "hostd socket")
 		staticDir   = flag.String("dashboard", "/usr/share/homebase/dashboard", "built dashboard assets")

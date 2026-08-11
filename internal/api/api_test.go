@@ -403,3 +403,55 @@ func TestInternalErrorsDoNotLeakDetail(t *testing.T) {
 		}
 	}
 }
+
+// --- Renaming the server ------------------------------------------------------
+
+// The name is how the machine is found, and it is what a restart demands as its
+// confirmation — so a rename changes the answer to a question the user will be
+// asked later. What is checked here is that the endpoint is guarded the same way
+// everything else that changes the machine is.
+func TestRenamingRequiresPermissionAndASession(t *testing.T) {
+	h := newHarness(t)
+	token := h.signIn(t)
+
+	rec := h.do(http.MethodPost, "/api/v1/system/name", `{"name":"living-room"}`, nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("renaming without a session returned %d, want 401", rec.Code)
+	}
+
+	// With a session it reaches hostd — which is absent in these tests, so the
+	// interesting assertion is that it got that far rather than being refused
+	// earlier.
+	rec = h.do(http.MethodPost, "/api/v1/system/name", `{"name":"living-room"}`,
+		map[string]string{"Cookie": SessionCookie + "=" + token})
+	if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+		t.Errorf("an administrator was refused: %d %s", rec.Code, rec.Body)
+	}
+	if rec.Code == http.StatusNotFound {
+		t.Error("the endpoint is not registered")
+	}
+}
+
+// Read permission must not be enough to rename the machine, the same way it is
+// not enough to erase a disk. Read and write are separate throughout, which is
+// what makes a Stage 2 operator that can explain but not change expressible.
+func TestRenamingNeedsMoreThanReadPermission(t *testing.T) {
+	h := newHarness(t)
+	h.signIn(t)
+
+	reader, err := h.auth.CreateUser(t.Context(), "reader", goodPassword,
+		[]string{auth.PermSystemRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := h.auth.CreateSession(t.Context(), reader.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := h.do(http.MethodPost, "/api/v1/system/name", `{"name":"living-room"}`,
+		map[string]string{"Authorization": "Bearer " + token})
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("a read-only account renamed the server: %d %s", rec.Code, rec.Body)
+	}
+}

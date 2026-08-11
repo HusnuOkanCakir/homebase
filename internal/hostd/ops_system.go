@@ -42,6 +42,20 @@ func RegisterSystemOperations(r *Registry) {
 	})
 
 	r.MustRegister(Operation{
+		Name:    "system.rename",
+		Summary: "Change what this server calls itself.",
+		// Low, because nothing is destroyed and it can be done again. The cost
+		// of getting it wrong is a server somebody has to look up the address
+		// of, not data they cannot get back — so it does not ask twice.
+		Risk:        RiskLow,
+		Permissions: []string{"system.manage"},
+		Confirm:     ConfirmNone,
+		Timeout:     10 * time.Second,
+		Rollback:    "system.rename, with the previous name",
+		Handler:     Typed(systemRename),
+	})
+
+	r.MustRegister(Operation{
 		Name:    "system.reboot",
 		Summary: "Restart the machine.",
 		// High rather than medium: a reboot on a machine holding somebody's
@@ -456,4 +470,208 @@ func charsToString[T int8 | uint8](chars [65]T) string {
 		b = append(b, byte(c))
 	}
 	return string(b)
+}
+
+// --- system.rename -----------------------------------------------------------
+
+// RenameParams carries the new name for the machine.
+type RenameParams struct {
+	Name string `json:"name"`
+}
+
+type RenameResult struct {
+	Previous string `json:"previous"`
+	Name     string `json:"name"`
+	Message  string `json:"message"`
+}
+
+// systemRename changes what the machine calls itself.
+//
+// Nothing is destroyed, which is why this is a low-risk operation: the worst
+// outcome is a server somebody has to look up the address of again. It is not
+// nothing, though — the name is how the machine is found once mDNS lands, and
+// it is what `system.reboot` demands as its confirmation, so a rename changes
+// the answer to a question the user will be asked later.
+//
+// The name itself is set by asking systemd rather than by writing
+// /etc/hostname. hostd runs under ProtectSystem=strict, so /etc is read-only to
+// it, and replacing a file there atomically needs the *directory* writable —
+// which would mean handing this service write access to all of /etc to change
+// one line. systemd-hostnamed already does this job, is already privileged, and
+// updates the running kernel name and the file together.
+//
+// Found by the browser journey, which renamed a real machine and got
+// "read-only file system" from a code path every unit test was happy with.
+func systemRename(ctx context.Context, params RenameParams) (any, error) {
+	name := strings.TrimSpace(params.Name)
+
+	if err := checkHostname(name); err != nil {
+		return nil, err
+	}
+
+	previous, err := os.Hostname()
+	if err != nil {
+		return nil, internalError("hostname: " + err.Error())
+	}
+
+	if name == previous {
+		return RenameResult{
+			Previous: previous,
+			Name:     name,
+			Message:  "This server is already called " + name + ".",
+		}, nil
+	}
+
+	if err := setHostname(ctx, name); err != nil {
+		return nil, err
+	}
+
+	if err := updateHostsFile(previous, name); err != nil {
+		// Not fatal. The machine is renamed and working; what is lost is its
+		// ability to resolve its own name, which shows up as a slow `sudo`
+		// rather than as anything anybody would connect to a rename.
+		return RenameResult{
+			Previous: previous,
+			Name:     name,
+			Message: "This server is now called " + name +
+				", but its own address book could not be updated.",
+		}, nil
+	}
+
+	return RenameResult{
+		Previous: previous,
+		Name:     name,
+		Message:  "This server is now called " + name + ".",
+	}, nil
+}
+
+// setHostname asks systemd to rename the machine.
+func setHostname(ctx context.Context, name string) error {
+	binary, err := exec.LookPath("hostnamectl")
+	if err != nil {
+		return &Error{
+			Code:        "system.rename_unavailable",
+			Message:     "This server cannot be renamed.",
+			Detail:      "hostnamectl is not installed",
+			Recoverable: false,
+			Status:      503,
+		}
+	}
+
+	// A fixed argument vector, and `--` so a name beginning with a hyphen is
+	// never read as an option. checkHostname has already refused those, and
+	// this costs nothing.
+	out, err := exec.CommandContext(ctx, binary, "set-hostname", "--", name).CombinedOutput()
+	if err != nil {
+		return internalError("setting the hostname: " + err.Error() + ": " +
+			strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// checkHostname refuses names a machine cannot have.
+//
+// The rules are RFC 1123's, and they are enforced here rather than only in the
+// dashboard because hostd re-checks everything core sends it — a name with a
+// space in it reaches /etc/hostname and stops the machine resolving itself.
+func checkHostname(name string) error {
+	refuse := func(detail, recovery string) error {
+		return &Error{
+			Code:        "system.invalid_name",
+			Message:     "That cannot be a server's name.",
+			Detail:      detail,
+			Recoverable: true,
+			Recovery:    recovery,
+			Status:      422,
+		}
+	}
+
+	switch {
+	case name == "":
+		return refuse("the name is empty", "Give the server a name.")
+	case len(name) > 63:
+		return refuse("names may be at most 63 characters",
+			"Choose something shorter.")
+	case strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-"):
+		return refuse("names may not start or end with a hyphen",
+			"Remove the hyphen from the start or end.")
+	}
+
+	for _, r := range name {
+		isLetter := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		isDigit := r >= '0' && r <= '9'
+		if !isLetter && !isDigit && r != '-' {
+			return refuse(
+				"names may contain only letters, digits and hyphens",
+				"Use letters, digits and hyphens — no spaces, dots or accents.")
+		}
+	}
+
+	return nil
+}
+
+// updateHostsFile keeps the machine able to resolve its own name.
+//
+// Written in place rather than replaced atomically, because replacing a file in
+// /etc means creating a sibling and renaming over it, and that needs /etc
+// writable — a much wider grant than this one line is worth. The unit allows
+// exactly this file. The window where a reader could see a partial hosts file
+// is a single write of a few hundred bytes, and the caller already treats a
+// failure here as survivable.
+func updateHostsFile(previous, name string) error {
+	raw, err := os.ReadFile("/etc/hosts")
+	if err != nil {
+		return err
+	}
+
+	rewritten, err := rewriteHosts(string(raw), previous, name)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile("/etc/hosts", []byte(rewritten), 0o644)
+}
+
+// rewriteHosts replaces the machine's own name in a hosts file.
+//
+// Kept separate from reading and writing so it can be tested without a machine
+// to rename. Only the loopback line naming this host is touched: everything
+// else in that file was put there by somebody for a reason, and a rename that
+// removed the printer's address would be a mystery to whoever noticed.
+func rewriteHosts(contents, previous, name string) (string, error) {
+	lines := strings.Split(contents, "\n")
+	replaced := false
+
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "127.0.1.1" {
+			continue
+		}
+		for j := 1; j < len(fields); j++ {
+			if fields[j] == previous {
+				fields[j] = name
+				replaced = true
+			}
+		}
+		lines[i] = strings.Join(fields, "\t")
+	}
+
+	if !replaced {
+		// Appended rather than reported as an error: a machine with no entry
+		// for itself is unusual but not broken, and renaming it is not the
+		// moment to refuse.
+		trailing := len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == ""
+		entry := "127.0.1.1\t" + name
+		if trailing {
+			lines[len(lines)-1] = entry
+			lines = append(lines, "")
+		} else {
+			lines = append(lines, entry, "")
+		}
+	}
+
+	return strings.Join(lines, "\n"), nil
 }

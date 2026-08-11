@@ -78,6 +78,19 @@ ReadWritePaths=-/etc/homebase -/var/lib/homebase -/srv/homebase -/run/homebase -
 # symlink, so that happens outside this sandbox.
 ReadWritePaths=/etc/systemd/system
 
+# Renaming the server updates the file that lets it resolve its own name.
+#
+# One file, not /etc. The name itself is set by asking systemd-hostnamed, which
+# is already privileged and already owns /etc/hostname — so hostd never needs
+# write access to the directory, which is what replacing a file there atomically
+# would have cost.
+#
+# Written in place for the same reason: creating a temporary sibling and
+# renaming over the original needs the directory writable. A torn write here
+# costs the machine the ability to resolve its own name until the next rename,
+# which is a slow `sudo` rather than anything lost.
+ReadWritePaths=-/etc/hosts
+
 # AF_UNIX for the socket; AF_NETLINK for reading network state later. No
 # AF_INET: hostd never talks to the network, and should not be able to.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
@@ -92,7 +105,20 @@ SystemCallFilter=~@obsolete @cpu-emulation
 SystemCallArchitectures=native
 ProtectKernelLogs=yes
 ProtectClock=yes
-ProtectHostname=yes
+# ProtectHostname is deliberately absent, and this is the only hardening line in
+# this file that was removed rather than never added.
+#
+# It puts the service in a private UTS namespace, so `os.Hostname()` returns
+# whatever the name was when hostd started and never changes. hostd is what
+# reports the machine's name to the dashboard, and it is what `system.reboot`
+# compares its confirmation against — so with it set, renaming a server left the
+# dashboard showing the old name for ever and asking for the old name before a
+# restart. The machine had genuinely been renamed; hostd was the only thing that
+# could not see it.
+#
+# What it protected against was hostd calling sethostname() itself. hostd renames
+# the machine as a declared operation anyway, through systemd-hostnamed, so the
+# protection was against a capability this service is meant to have.
 ProtectControlGroups=yes
 ProtectKernelModules=yes
 RemoveIPC=yes

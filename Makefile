@@ -241,6 +241,10 @@ vm-run: ## Run Homebase on a throwaway VM and leave it running, to click around 
 vm-run-destroy: ## Destroy the machine `make vm-run` created
 	@python3 scripts/vm-demo.py --destroy
 
+.PHONY: vm-test-installer
+vm-test-installer: ## Install onto a Windows-occupied disk from the real ISO; ~15 min
+	@python3 tests/installer/test_install.py
+
 .PHONY: vm-test-backup
 vm-test-backup: ## Back up one machine, destroy it, restore onto a different one
 	@python3 tests/vm/test_backup.py

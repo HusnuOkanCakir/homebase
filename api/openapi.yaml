@@ -136,6 +136,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /system/name:
+    post:
+      tags: [system]
+      summary: Change what this server calls itself
+      description: |
+        Requires `system.manage`.
+
+        Not a job, and the only mutating endpoint that is not. The convention exists because
+        a client that has to know which operations are fast breaks the first time a "fast"
+        one is not — but renaming is three file writes and a syscall, cannot be interrupted
+        usefully, and the first thing a client does afterwards is read the name back.
+
+        Nothing is destroyed. The cost of getting it wrong is a server somebody has to look
+        up the address of again, which is why it does not ask twice. It does change the
+        answer `POST /system/reboot` demands as its confirmation.
+      operationId: renameSystem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 63
+                  pattern: "^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"
+                  description: |
+                    Letters, digits and hyphens. Not a full domain name: this is what the
+                    machine calls itself, and it ends up in `/etc/hostname`.
+                  example: living-room
+      responses:
+        "200":
+          description: The server's name, before and after
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [previous, name, message]
+                properties:
+                  previous:
+                    type: string
+                  name:
+                    type: string
+                  message:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: That cannot be a machine's name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
   /jobs:
     get:
       tags: [jobs]

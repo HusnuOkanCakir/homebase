@@ -175,7 +175,38 @@ def verify_installed(vm: VM) -> None:
           "and without sudo it says to use sudo",
           (unprivileged.stdout + unprivileged.stderr).strip()[:300])
 
+    verify_reachable_from_another_device(vm)
     verify_socket_survives_a_restart(vm)
+
+
+def verify_reachable_from_another_device(vm: VM) -> None:
+    """The dashboard must answer from off the machine, not only on it.
+
+    Everything else in this file talks to the API by running curl *inside* the
+    VM, which reaches 127.0.0.1 and therefore cannot tell the difference between
+    a server the household can use and one that answers only its own keyboard.
+    It was the second kind once, and nothing noticed.
+    """
+    url = f"http://127.0.0.1:{vm.api_port}/api/v1/health"
+    deadline = time.time() + 60
+    last = ""
+    while time.time() < deadline:
+        result = subprocess.run(
+            ["curl", "--silent", "--show-error", "--max-time", "5",
+             "-o", "/dev/null", "-w", "%{http_code}", url],
+            capture_output=True, text=True,
+        )
+        if result.stdout.strip() == "200":
+            ok("the dashboard answers from another machine, not just its own")
+            return
+        last = (result.stdout + result.stderr).strip()[:160]
+        time.sleep(3)
+
+    raise TestFailure(
+        "the dashboard is not reachable from outside the machine\n"
+        f"    {url} said {last or 'nothing'}.\n"
+        "    core binds 127.0.0.1 unless the unit sets HOMEBASE_LISTEN, and a\n"
+        "    server nobody can open is the one thing this product cannot be.")
 
 
 def verify_socket_survives_a_restart(vm: VM) -> None:

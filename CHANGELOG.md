@@ -127,6 +127,30 @@ Milestone 0 — contracts and project machinery. No product code.
 - `make vm-test-backup`: two machines. One is set up, backed up onto a USB disk and
   destroyed; a second is created from scratch and the backup restored onto it. It reads a
   backed-up file with `cat`, without Homebase doing the reading
+- **An installer** ([ADR-0016](docs/decisions/0016-installation-media.md)).
+  `homebasectl installer create` writes a USB stick: Canonical's Ubuntu Server image byte for
+  byte, with the autoinstall configuration and Homebase's own packages on a partition
+  appended after it. The image is never repacked, so the boot path stays the one Ubuntu
+  publishes and the media can still be checked against its publisher
+- The packages travel on the stick rather than coming from the network, so a house with no
+  working internet still ends up with a server. Applications still need the internet, because
+  a container image comes from a registry however the machine was installed
+- `homebasectl installer devices` lists what may be written to and, more usefully, refuses
+  what may not: anything holding a mounted filesystem, anything not removable, anything too
+  small. Writing to a drive asks for its name to be typed first
+- The installed machine behaves like a server rather than a laptop: a firewall that allows
+  the dashboard and nothing else, a closed lid that does not switch it off, and no suspending
+  itself while nobody is looking
+- Its own screen says where to browse to, worked out when the message is shown rather than
+  written in at install time — a screen confidently showing the wrong address is worse than
+  one showing none
+- A **getting-started list** on a newly claimed server: what is worth doing, and why. It
+  reads its state from what the server actually reports rather than remembering what was
+  clicked, so a disk that gets removed brings its step back
+- **Servers can be given a name.** `system.rename` asks systemd-hostnamed rather than
+  writing `/etc/hostname` itself, so the privileged service never needs write access to
+  `/etc`. Renaming is offered on the getting-started list while the machine still has the
+  name the installer gave it, and under **This server** for ever
 - **Password recovery** ([ADR-0015](docs/decisions/0015-password-recovery.md)). A recovery
   code shown once at first-run setup: 125 bits, five groups of five, from an alphabet with
   no `I`, `L`, `O` or `U` because it is copied off paper by hand. Stored as an argon2id
@@ -208,9 +232,10 @@ Milestone 0 — contracts and project machinery. No product code.
 
 ### Removed
 
-- Documentation site deployment, until Milestone 6. `mkdocs build --strict` still runs on
-  every pull request; publishing waits for an audience that will not clone the repository.
-  A permanently failing workflow is how people learn to ignore failing workflows
+- Documentation site deployment, until Milestone 6 — **restored in Milestone 6**, now that
+  somebody who has installed a server from a USB stick cannot be told to browse to
+  `docs/user-guide/backup.md` on GitHub. `mkdocs build --strict` ran on every pull request
+  throughout, because validation and publication are separate concerns
 - The `gomod` and `npm` Dependabot ecosystems, until the first `go.mod` and `package.json`
   exist. Dependabot does not ignore an ecosystem whose manifest is missing — it fails
 

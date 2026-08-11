@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, NetworkError, type Job, type SystemInfo } from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
+import { RenameServer } from "../components/RenameServer";
 import { bytes, duration, percentage } from "../format";
 
 interface Props {
@@ -11,10 +12,15 @@ interface Props {
 
 export function Overview({ system, onRebootStarted }: Props) {
   const [confirming, setConfirming] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   return (
     <>
-      <SystemCard system={system} />
+      <SystemCard
+        system={system}
+        renaming={renaming}
+        onRename={() => setRenaming(true)}
+      />
       <DangerCard
         hostname={system.hostname}
         open={confirming}
@@ -29,7 +35,13 @@ export function Overview({ system, onRebootStarted }: Props) {
   );
 }
 
-function SystemCard({ system }: { system: SystemInfo }) {
+interface SystemCardProps {
+  system: SystemInfo;
+  renaming: boolean;
+  onRename: () => void;
+}
+
+function SystemCard({ system, renaming, onRename }: SystemCardProps) {
   const usedBytes = system.memory.total_bytes - system.memory.available_bytes;
   const usedPercent = percentage(usedBytes, system.memory.total_bytes);
 
@@ -104,6 +116,26 @@ function SystemCard({ system }: { system: SystemInfo }) {
           ) : null}
         </dl>
       </details>
+
+      {/*
+        Renaming lives here as well as in the getting-started list, because a
+        machine that can only be renamed during its first week is one nobody can
+        rename. The list stops offering it once the server has a name of its
+        own; this does not.
+      */}
+      {/*
+        Left open after a successful rename, rather than closed. Closing it
+        unmounts the component that is holding the confirmation — so the form
+        vanished, nothing said the rename had worked, and the only evidence was
+        the heading changing a few seconds later when the next poll arrived.
+      */}
+      {renaming ? (
+        <RenameServer id="server-name" current={system.hostname} />
+      ) : (
+        <button className="quiet" onClick={onRename}>
+          Rename this server
+        </button>
+      )}
     </section>
   );
 }

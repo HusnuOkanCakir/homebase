@@ -574,6 +574,26 @@ def verify(packages: list[Path]) -> None:
                 die(f"{package.name} ships {directory}; it must be created by postinst")
     ok("data directories are created by postinst, not shipped")
 
+    # The dashboard has to be reachable from another device. core's own default
+    # is 127.0.0.1, which is right for a binary somebody has just built and
+    # wrong for an appliance whose entire purpose is being opened from a phone
+    # in another room.
+    #
+    # Checked here because a package that installs a server nobody can reach is
+    # broken in a way that looks perfectly healthy from the machine itself:
+    # every service running, every permission correct, and the one thing the
+    # product is for silently not working. It was that way once, hidden because
+    # two other places each set the address for their own reasons.
+    unit = (REPO_ROOT / "packaging/systemd/homebase-core.service").read_text()
+    if "HOMEBASE_LISTEN=" not in unit:
+        die("homebase-core.service does not set HOMEBASE_LISTEN.\n"
+            "    Without it core listens on 127.0.0.1 and the dashboard cannot be\n"
+            "    opened from anywhere but the server's own keyboard.")
+    if "0.0.0.0" not in unit and "::" not in unit:
+        die("homebase-core.service binds a local address only.\n"
+            "    The firewall is what limits who can connect, not the bind address.")
+    ok("the dashboard listens where a phone can reach it")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])

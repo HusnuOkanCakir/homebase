@@ -2,12 +2,17 @@
 
 Turn an old laptop into a home server you can actually manage.
 
-!!! warning "Pre-alpha — Milestones 0–5 complete"
+!!! warning "Pre-alpha — Milestones 0–6 complete"
 
-    There is no installable release yet — no installer. `hostd`, `core` and the dashboard
-    work and install from Debian packages: you can set up an administrator, read live system
-    information, restart the machine, install and remove applications from a small catalogue,
-    and attach a disk and give it to an application — all from a browser.
+    There is no released build yet, but there is an installer. A USB stick written by
+    `homebasectl installer create` turns a laptop — including one with Windows on it — into
+    a working Homebase server, with no Linux commands typed on the machine being installed.
+    Making the stick still takes one command on a Linux computer; the graphical tool for
+    doing that on Windows or macOS is Milestone 10.
+
+    From a browser you can then set up an administrator, read live system information,
+    restart the machine, install and remove applications from a small catalogue, attach a
+    disk and give it to an application, and give the server a name.
 
     Backups work, and restore onto a different machine — but they are not automatic, so
     nothing here holds the only copy of anything until you have made one.
@@ -16,7 +21,7 @@ Turn an old laptop into a home server you can actually manage.
     that code travels with the backup, so it still opens a machine rebuilt from the disk.
 
     Much of what follows still describes intent rather than behaviour — everything from
-    Milestone 6 onward. Where the documentation and the implementation eventually disagree,
+    Milestone 7 onward. Where the documentation and the implementation eventually disagree,
     the documentation is the target and the gap is a bug.
 
 ## The idea
