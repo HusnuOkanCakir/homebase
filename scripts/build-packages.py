@@ -365,11 +365,21 @@ def build_core(version: str, binaries: Path) -> Path:
     # instead of "command not found". See ADR-0015.
     install_file(binaries / "homebasectl", root / "usr/bin/homebasectl", 0o755)
 
-    install_file(
-        REPO_ROOT / "packaging/systemd/homebase-core.service",
-        root / "lib/systemd/system/homebase-core.service",
-        0o644,
-    )
+    # The scheduled backup: a timer, the oneshot it starts, and the script that
+    # asks hostd to do the work. In core's package rather than hostd's because
+    # the script runs as the `homebase` user, which core's maintainer script is
+    # what creates.
+    install_file(REPO_ROOT / "packaging/backup-run",
+                 root / "usr/libexec/homebase/backup-run", 0o755)
+
+    for unit in ("homebase-core.service",
+                 "homebase-backup.service",
+                 "homebase-backup.timer"):
+        install_file(
+            REPO_ROOT / "packaging/systemd" / unit,
+            root / "lib/systemd/system" / unit,
+            0o644,
+        )
 
     control(
         root,

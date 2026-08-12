@@ -439,6 +439,69 @@ def verify_reinstall_is_idempotent(vm: VM, packages: list[Path]) -> None:
     verify_data_survived(vm, "the reinstall")
 
 
+
+def hostd_op(vm: VM, name: str, params: dict | None = None) -> tuple[int, dict]:
+    out = ssh(vm, ["sudo", "curl", "--silent", "--max-time", "60",
+                   "--unix-socket", "/run/homebase/hostd.sock",
+                   "-w", "\\n%{http_code}", "-X", "POST",
+                   "-H", "Content-Type: application/json",
+                   "-d", json.dumps(params or {}),
+                   f"http://localhost/v1/op/{name}"], check=False).stdout.strip()
+    if not out:
+        raise TestFailure(f"{name} returned nothing")
+    parts = out.rsplit("\n", 1)
+    status = int(parts[1]) if len(parts) == 2 else int(out)
+    body = parts[0] if len(parts) == 2 else ""
+    return status, (json.loads(body) if body else {})
+
+
+def verify_scheduled_backups(vm: VM) -> None:
+    """Backups that happen without anybody pressing anything.
+
+    Deferred here from Milestone 5, and the gap it closes is the one the
+    documentation has been apologising for: a backup you have to remember is a
+    backup that exists until the week you are busy, which is reliably the week
+    the disk fails.
+    """
+    step("Backups on a schedule")
+
+    for unit in ("homebase-backup.timer", "homebase-backup.service"):
+        present = ssh(vm, ["test", "-f", f"/lib/systemd/system/{unit}"], check=False)
+        check(present.returncode == 0, f"{unit} is installed")
+
+    # Persistent is the setting that makes this work on the machine Homebase
+    # actually runs on. A laptop in a cupboard is asleep at three in the
+    # morning more often than not, and without this the run is skipped
+    # silently, every night, until somebody needs it.
+    timer = ssh(vm, ["cat", "/lib/systemd/system/homebase-backup.timer"]).stdout
+    check("Persistent=true" in timer,
+          "and catches up a run the machine was switched off for")
+
+    status, body = hostd_op(vm, "backup.get_schedule")
+    check(status == 200, f"backup.get_schedule answers ({status})", json.dumps(body))
+    check(body.get("every") == "off",
+          f"nothing is scheduled on a new server ({body.get('every')})")
+    check(body.get("enabled") is False, "and the timer is not running")
+
+    # A schedule pointing at a disk that is not there must be refused now,
+    # rather than failing at three in the morning weeks later, to somebody who
+    # was told backups were working.
+    status, body = hostd_op(vm, "backup.set_schedule",
+                            {"every": "daily", "location": "loc_nothing_here"})
+    check(status >= 400,
+          f"a schedule pointing at a disk that does not exist is refused ({status})",
+          json.dumps(body))
+
+    status, body = hostd_op(vm, "backup.set_schedule", {"every": "sometimes"})
+    check(status == 400, f"and so is a schedule Homebase cannot keep to ({status})",
+          json.dumps(body))
+
+    status, body = hostd_op(vm, "backup.get_schedule")
+    check(body.get("every") == "off",
+          "and after both refusals nothing has been scheduled",
+          json.dumps(body))
+
+
 def verify_reboot(vm: VM) -> None:
     step("Everything comes back after a reboot")
 
@@ -524,6 +587,7 @@ def main() -> int:
         verify_version_reporting(vm)
         verify_a_half_applied_upgrade_is_visible(vm, first, second)
         verify_reinstall_is_idempotent(vm, second)
+        verify_scheduled_backups(vm)
         verify_reboot(vm)
         verify_removal_keeps_data(vm)
 

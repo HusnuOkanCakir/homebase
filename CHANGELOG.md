@@ -265,6 +265,22 @@ Milestone 0 — contracts and project machinery. No product code.
 - The stages are translated rather than passed through. "applying" is accurate and tells a
   person nothing; what they want to know is whether it is safe to walk away, and the answer
   differs between downloading and installing
+- **Backups can run on a schedule** — daily or weekly, carried here from Milestone 5. A
+  systemd timer rather than a ticker inside `core`: `core` is restarted by every update and
+  stopped whenever somebody is working on the machine, and a scheduler that only runs while
+  the thing it is part of is running is one that stops without saying so
+- `Persistent=true`, which is the setting that makes this work on the hardware Homebase is
+  for. A laptop in a cupboard is asleep or unplugged at three in the morning more often than
+  not; without it the backup is skipped silently, every night, until the day somebody needs it
+- The schedule is a word — `daily`, `weekly`, `off` — mapped to a calendar expression by a
+  fixed table. Nothing from a request is ever written into a unit file, because a unit file
+  is a way to run things
+- **The destination is checked when the schedule is set**, not at three in the morning. A
+  schedule pointing at a disk that cannot hold a backup is a promise that fails in the dark,
+  weeks later, to somebody who was told it was working
+- `backup.get_schedule` reports whether systemd will *actually* run it, read from systemd
+  rather than from the file — a schedule recorded on disk and never enabled is exactly the
+  failure worth making visible — along with when it next fires and how the last one went
 - **Bills of materials**, in CycloneDX, written by `make packages` and published beside the
   artifact they describe. Read from the linked binary with `go version -m` rather than from
   `go.mod`: one lists what was asked for, the other what arrived, and an SBOM that overstates

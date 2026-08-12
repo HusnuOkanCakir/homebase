@@ -357,9 +357,17 @@ charging for it.
       acquires third-party code
 - [ ] A release workflow: signed artifacts from CI, build attestations, promotion gated on
       a manual approval
-- [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5
+- [x] **Backup scheduling** — a systemd timer, not a ticker inside core. `Persistent=true`
+      is the setting that makes it work on the machine Homebase runs on: a laptop in a
+      cupboard is asleep at three in the morning more often than not, and without it the
+      run is skipped silently, every night, until somebody needs it
+- [ ] The schedule in the dashboard, and the update timer that uses the same machinery
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
-- [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5
+- [x] **Backup scheduling** — a systemd timer, not a ticker inside core. `Persistent=true`
+      is the setting that makes it work on the machine Homebase runs on: a laptop in a
+      cupboard is asleep at three in the morning more often than not, and without it the
+      run is skipped silently, every night, until somebody needs it
+- [ ] The schedule in the dashboard, and the update timer that uses the same machinery
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
       (credential reset shipped in Milestone 5)
 

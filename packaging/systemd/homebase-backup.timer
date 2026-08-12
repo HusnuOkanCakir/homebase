@@ -1,0 +1,25 @@
+[Unit]
+Description=Homebase — run the backup on a schedule
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/user-guide/backup.md
+
+[Timer]
+Unit=homebase-backup.service
+
+# The default, replaced by a drop-in that hostd writes when somebody chooses a
+# schedule. A timer with no OnCalendar at all fails to load, so there has to be
+# one here even though it is normally overridden.
+OnCalendar=*-*-* 03:00:00
+
+# The setting that makes this work on the machine Homebase actually runs on.
+# A laptop in a cupboard is asleep or unplugged at three in the morning more
+# often than not, and without this the backup is simply skipped — silently,
+# every night, until somebody needs it. With it, the run happens when the
+# machine next comes back.
+Persistent=true
+
+# Spread out, because 03:00:00 exactly is when every other timer on the machine
+# also wants the disk.
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
