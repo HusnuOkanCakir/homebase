@@ -218,6 +218,22 @@ button:focus-visible {
   color: var(--text);
 }
 
+/* A link that has to look like a button.
+ *
+ * Only for downloads. A browser downloads a file by following a link, and doing
+ * it with a button means fetching the file into memory and handing it back —
+ * which for a diagnostic file on a server that is already unwell is the wrong
+ * shape entirely. So it stays an anchor and borrows the styling. */
+a.button {
+  display: inline-block;
+  padding: 0.6rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-weight: 500;
+  text-decoration: none;
+  color: var(--text);
+}
+
 /* --- Facts ---------------------------------------------------------------- */
 
 .facts {

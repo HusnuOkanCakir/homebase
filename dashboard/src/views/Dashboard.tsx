@@ -9,6 +9,7 @@ import { Backup } from "./Backup";
 import { Security } from "./Security";
 import { Network } from "./Network";
 import { Updates } from "./Updates";
+import { Repair } from "./Repair";
 import { FirstSteps } from "./FirstSteps";
 import { Restarting } from "./Restarting";
 
@@ -30,7 +31,8 @@ type Tab =
   | "backup"
   | "network"
   | "updates"
-  | "security";
+  | "security"
+  | "repair";
 
 interface Props {
   user: User;
@@ -135,6 +137,16 @@ export function Dashboard({ user, onSignOut }: Props) {
         >
           Security
         </button>
+        {/* Last, and named for what somebody is thinking rather than for what
+            it does. Nobody looks for "recovery"; they look for the tab that
+            sounds like "this is not working". */}
+        <button
+          className={tab === "repair" ? "tab tab-current" : "tab"}
+          aria-current={tab === "repair" ? "page" : undefined}
+          onClick={() => setTab("repair")}
+        >
+          Something&rsquo;s wrong
+        </button>
       </nav>
 
       <main className="app-main">
@@ -171,6 +183,8 @@ export function Dashboard({ user, onSignOut }: Props) {
           <Network />
         ) : tab === "updates" ? (
           <Updates canManage={user.permissions.includes("update.manage")} />
+        ) : tab === "repair" ? (
+          <Repair serverName={system?.hostname ?? ""} />
         ) : (
           <Security username={user.username} />
         )}

@@ -1,0 +1,32 @@
+[Unit]
+Description=Homebase — finish a package transaction that was interrupted
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/user-guide/recovery.md
+
+# No ConditionPathExists, unlike the update units.
+#
+# Those need an update source to have anything to do. This does not: a machine
+# that lost power part way through installing packages has them unpacked on
+# disk, and finishing with them needs no archive and no network. The machine most
+# likely to be in this state is one somebody is trying to fix with the internet
+# not working, so requiring a configured update channel here would withhold the
+# repair from exactly the case it exists for.
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+
+# A fixed command with a literal argument. The action is the unit, not a
+# parameter — hostd chooses which unit to start and nothing else.
+ExecStart=/usr/libexec/homebase/update-run repair
+
+# Unsandboxed, deliberately, and for the same reason as the update units:
+# finishing a dpkg transaction runs maintainer scripts that write across the
+# filesystem. A sandbox permitting that is not a sandbox, and writing one here
+# would be decoration that reads like a guarantee. What bounds this instead is
+# that it is a fixed command in a package-installed unit, reachable only through
+# hostd's typed operations.
+User=root
+
+# Long enough for dpkg to configure four packages on an old laptop. Shorter than
+# the update units because nothing here downloads anything.
+TimeoutStartSec=600

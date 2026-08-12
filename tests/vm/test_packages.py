@@ -440,13 +440,20 @@ def verify_reinstall_is_idempotent(vm: VM, packages: list[Path]) -> None:
 
 
 
-def hostd_op(vm: VM, name: str, params: dict | None = None) -> tuple[int, dict]:
-    out = ssh(vm, ["sudo", "curl", "--silent", "--max-time", "60",
-                   "--unix-socket", "/run/homebase/hostd.sock",
-                   "-w", "\\n%{http_code}", "-X", "POST",
-                   "-H", "Content-Type: application/json",
-                   "-d", json.dumps(params or {}),
-                   f"http://localhost/v1/op/{name}"], check=False).stdout.strip()
+def hostd_op(vm: VM, name: str, params: dict | None = None,
+             confirmed: bool = False, timeout: int = 60) -> tuple[int, dict]:
+    cmd = ["sudo", "curl", "--silent", "--max-time", str(timeout),
+           "--unix-socket", "/run/homebase/hostd.sock",
+           "-w", "\\n%{http_code}", "-X", "POST",
+           "-H", "Content-Type: application/json"]
+    if confirmed:
+        # hostd checks the confirmation again itself. Sending this header is
+        # core saying "the user was asked", which is the only thing core can
+        # assert that hostd cannot check for itself.
+        cmd += ["-H", "X-Homebase-Confirmed: true"]
+    cmd += ["-d", json.dumps(params or {}), f"http://localhost/v1/op/{name}"]
+
+    out = ssh(vm, cmd, check=False, timeout=timeout + 30).stdout.strip()
     if not out:
         raise TestFailure(f"{name} returned nothing")
     parts = out.rsplit("\n", 1)
@@ -540,6 +547,87 @@ def verify_scheduled_backups(vm: VM) -> None:
           "including on a server that is only switched on at weekends")
 
 
+def verify_factory_reset(vm: VM) -> None:
+    """Starting again without losing the photographs.
+
+    The most destructive operation in Homebase, and the one whose failure is
+    worst in both directions: it can leave an account behind on a machine
+    somebody is giving away, or it can delete the files it promised to keep.
+    Both are checked here, by content.
+
+    It runs late, after everything else has used this machine, and before the
+    reboot — so the reset is also proven to survive one.
+    """
+    step("Starting again")
+
+    # Something in each of the three places, so "removed" and "kept" can be told
+    # apart by looking rather than by trusting the report.
+    ssh(vm, ["sudo", "-u", "homebase", "sh", "-c",
+             "echo 'a photograph' > /srv/homebase/important.txt"])
+    ssh(vm, ["sudo", "sh", "-c",
+             "echo 'name: the-original-server' > /etc/homebase/homebase.yaml"])
+
+    status, body = api(vm, "/setup")
+    check(json.loads(body)["needs_setup"] is False,
+          "there is an administrator to remove", body)
+
+    hostname = ssh(vm, ["hostname"]).stdout.strip()
+
+    # A word like "yes" must not work. This removes every account on the
+    # machine, and a confirmation somebody can type out of habit is not one.
+    for wrong in ("yes", "reset", "", "homebase"):
+        status, body = hostd_op(vm, "system.factory_reset", {"confirm": wrong},
+                                confirmed=True)
+        check(status >= 400,
+              f"{wrong!r} is not accepted as confirmation ({status})", json.dumps(body))
+
+    status, body = api(vm, "/setup")
+    check(json.loads(body)["needs_setup"] is False,
+          "and after those refusals the account is still there", body)
+
+    status, body = hostd_op(vm, "system.factory_reset", {"confirm": hostname},
+                            confirmed=True)
+    check(status == 200, f"the server's own name resets it ({status})", json.dumps(body))
+
+    # The claim, checked against the disk.
+    kept = ssh(vm, ["sudo", "cat", "/srv/homebase/important.txt"], check=False).stdout.strip()
+    check(kept == "a photograph",
+          f"your files are still there ({kept!r})",
+          "keep_data defaults to true. If this is empty, a reset deleted somebody's "
+          "photographs while promising not to.")
+
+    gone = ssh(vm, ["sudo", "test", "-f", "/etc/homebase/homebase.yaml"], check=False)
+    check(gone.returncode != 0, "and the settings are gone")
+
+    # It has to say what it kept, in words somebody can check against the disk.
+    # A reset that quietly keeps something is as bad as one that quietly removes
+    # it — this machine may be about to be given away.
+    kept_says = " ".join(body.get("kept", []))
+    check("srv/homebase" in kept_says,
+          "and it says your files were kept", json.dumps(body, indent=4))
+    check("updates" in kept_says,
+          "and that where updates come from was kept on purpose",
+          json.dumps(body, indent=4))
+
+    wait_for_api(vm)
+    status, body = api(vm, "/setup")
+    check(json.loads(body)["needs_setup"] is True,
+          "the server asks to be set up again, like a new one", body)
+
+    # And the old password must not work any more, which is the half that
+    # matters when somebody is giving the machine away.
+    status, _ = api(vm, "/auth/login", "POST",
+                    json.dumps({"username": "okan", "password": PASSWORD}))
+    check(status != 200,
+          f"the account that was on it cannot sign in ({status})",
+          "A reset that leaves an account behind is worse than one that fails.")
+
+    # Set it up again, so the checks after this have a machine to run against.
+    status, body = api(vm, "/setup", "POST",
+                       json.dumps({"username": "okan", "password": PASSWORD}))
+    check(status == 201, f"and it can be set up from scratch again ({status})", body)
+
+
 def verify_reboot(vm: VM) -> None:
     step("Everything comes back after a reboot")
 
@@ -626,6 +714,7 @@ def main() -> int:
         verify_a_half_applied_upgrade_is_visible(vm, first, second)
         verify_reinstall_is_idempotent(vm, second)
         verify_scheduled_backups(vm)
+        verify_factory_reset(vm)
         verify_reboot(vm)
         verify_removal_keeps_data(vm)
 

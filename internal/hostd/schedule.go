@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -245,19 +244,7 @@ func writeScheduleFile(content string) error {
 	if err := writeRootFile(backupScheduleFile, content, 0o640); err != nil {
 		return err
 	}
-	group, err := user.LookupGroup(serviceAccount)
-	if err != nil {
-		return fmt.Errorf("looking up the %s group: %w", serviceAccount, err)
-	}
-	gid, err := strconv.Atoi(group.Gid)
-	if err != nil {
-		return err
-	}
-	if err := os.Chown(backupScheduleFile, 0, gid); err != nil {
-		return fmt.Errorf("giving %s to the %s group: %w",
-			backupScheduleFile, serviceAccount, err)
-	}
-	return nil
+	return giveToServiceGroup(backupScheduleFile)
 }
 
 func runSystemctl(ctx context.Context, args ...string) error {

@@ -66,7 +66,13 @@ func main() {
 	storage := hostd.NewStorageServices(*storageDir, *stateDir)
 	hostd.RegisterStorageOperations(registry, storage)
 	hostd.RegisterNetworkOperations(registry, hostd.NewNetworkServices())
-	hostd.RegisterUpdateOperations(registry, hostd.NewUpdateServices())
+	updates := hostd.NewUpdateServices()
+	hostd.RegisterUpdateOperations(registry, updates)
+
+	// Recovery shares the update services because the first thing repair asks is
+	// whether a package transaction was left unfinished — the state update.status
+	// already knows how to recognise. One answer to that question, not two.
+	hostd.RegisterRecoveryOperations(registry, updates)
 
 	appServices := hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir).WithStorage(storage)
 	hostd.RegisterAppOperations(registry, appServices)

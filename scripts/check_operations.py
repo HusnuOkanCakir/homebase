@@ -36,6 +36,19 @@ from pathlib import Path
 # reading the system ever starts demanding confirmation, something is confused.
 EXPECTED = {
     "system.reboot": ("high", "explicit"),
+
+    # Critical rather than high, and this is the operation the grade exists for.
+    # It removes every account on the machine — so the person running it can lock
+    # themselves out of their own server — and it can be told to delete
+    # everything in /srv/homebase as well. Nothing else in Homebase destroys more
+    # in one call.
+    "system.factory_reset": ("critical", "explicit"),
+
+    # Repair must never quietly become destructive. Every step it takes makes
+    # something true that should already have been; none of them remove
+    # anything, and that is what makes it safe to offer to somebody who does not
+    # know what is wrong.
+    "system.repair": ("medium", "none"),
     "app.remove_data": ("critical", "explicit"),
     "app.uninstall": ("medium", "required"),
     "app.stop": ("medium", "required"),

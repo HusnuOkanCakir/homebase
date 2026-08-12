@@ -14,9 +14,10 @@
 # hostd through systemd and never composed from anything a caller sent.
 #
 # There is no argument taken from a request. The action is the first argument
-# and must be one of two literal words, because this script runs as root with no
-# sandbox at all: it installs system packages, which is not something that can
-# be done from inside one.
+# and must be one of three literal words, each written into a unit file the
+# package installs, because this script runs as root with no sandbox at all: it
+# installs system packages, which is not something that can be done from inside
+# one.
 #
 # Results are written as key=value lines rather than JSON. Emitting correct JSON
 # from shell means escaping, and escaping done by hand in the one place a
@@ -298,6 +299,37 @@ apply)
     stage=done
     outcome=ok
     record
+    exit 0
+    ;;
+repair)
+    # Finish a package transaction that was interrupted.
+    #
+    # This is what `update.status` reporting `interrupted` means, and it is the
+    # command that error message has been naming since the first commit of the
+    # update work. It lives here rather than in hostd for the same reason
+    # everything else in this file does: hostd's unit sets ProtectSystem=strict,
+    # and completing a dpkg transaction writes across the whole filesystem.
+    #
+    # Nothing here reaches the network. `dpkg --configure -a` finishes what is
+    # already unpacked, which is the whole point — a machine that lost power
+    # mid-update has the packages on disk and needs no archive to finish with
+    # them. That matters because the machine most likely to be in this state is
+    # one somebody is trying to fix without a working internet connection.
+    if ! output=$(dpkg --configure -a 2>&1); then
+        echo "$output" >&2
+        echo "could not finish the interrupted update" >&2
+        exit 1
+    fi
+    [ -n "$output" ] && echo "$output"
+
+    # And then anything left unconfigured because a dependency was missing.
+    # Allowed to fail: it may need the network, and a machine that is offline
+    # has still been improved by the line above.
+    if ! apt-get --fix-broken install -y >/dev/null 2>&1; then
+        echo "some packages are still waiting on dependencies" >&2
+    fi
+
+    echo "the interrupted update has been finished"
     exit 0
     ;;
 *)

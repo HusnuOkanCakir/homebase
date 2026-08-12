@@ -647,15 +647,39 @@ def verify_power_loss_mid_update(vm: VM, archive: Archive, version: str, stage: 
     if status.get("interrupted") or not status.get("consistent"):
         ok("it admits the update did not finish")
 
-        # And the way out is the one the error message names.
-        ssh(vm, ["sudo", "dpkg", "--configure", "-a"], check=False, timeout=300)
-        ssh(vm, ["sudo", "systemctl", "restart", "homebase-core.service"], check=False)
-        time.sleep(5)
+        # And the way out is a button, not a command.
+        #
+        # `dpkg --configure -a` is what the error message has always named, and
+        # naming a terminal command to somebody who bought an appliance is a
+        # remedy they do not have. `system.repair` runs it, and this is the only
+        # place in the suite where a genuinely half-upgraded machine exists to
+        # try it on — so it is tried here rather than against a machine that was
+        # never broken.
+        repaired = must(vm, "system.repair", timeout=600)
+        info(repaired.get("message", ""))
+        check(repaired.get("changed", 0) >= 1,
+              f"repair found something to fix ({repaired.get('changed')})",
+              json.dumps(repaired, indent=4))
 
+        finished = [s for s in repaired.get("steps", [])
+                    if "unfinished" in s.get("what", "") and s.get("done")]
+        check(bool(finished),
+              "and what it fixed was the unfinished update",
+              json.dumps(repaired.get("steps"), indent=4))
+
+        time.sleep(5)
         status = must(vm, "update.status")
         check(status.get("interrupted") is False and status.get("consistent") is True,
-              "and `dpkg --configure -a` finishes it",
+              "and afterwards the machine is whole again",
               json.dumps(status, indent=4))
+
+        # Twice, because somebody who does not know what is wrong will press it
+        # twice. The second run must be a quiet no-op rather than a second
+        # attempt at a transaction that has already been completed.
+        again = must(vm, "system.repair", timeout=600)
+        check(again.get("changed") == 0 and again.get("healthy") is True,
+              f"and pressing repair again does nothing ({again.get('changed')} changed)",
+              json.dumps(again, indent=4))
     else:
         ok("it came back complete, and says so")
 
@@ -736,6 +760,71 @@ def verify_the_api_exposes_all_of_this(vm: VM) -> None:
         status, _ = core_api(vm, path, method,
                          '{"channel": "development"}' if "channel" in path else None)
         check(status == 401, f"{method} {path} needs a session ({status})")
+
+
+def verify_a_diagnostic_file_is_safe_to_send(vm: VM) -> None:
+    """The claim the diagnostic file makes about itself, checked against it.
+
+    Everything else about a support bundle is a matter of taste. This is not: it
+    is written to be sent to a stranger, it says at the top what it does not
+    contain, and if that sentence is wrong the tool that was meant to get
+    somebody help has handed out their password database instead.
+
+    So the file is read, on the machine, and searched for the things it promises
+    are not in it — using values planted earlier in this test, which is the only
+    way to tell "not present" from "not looked for properly".
+    """
+    step("A diagnostic file, and whether it is safe to send")
+
+    # Something secret, in each of the places the bundle promises not to read
+    # from. Recognisable strings rather than real secrets: a grep for "password"
+    # would match the word in the file's own header and prove nothing.
+    ssh(vm, ["sudo", "sh", "-c",
+             "printf 'SECRETINDATABASE\\n' > /var/lib/homebase/planted.txt"])
+    ssh(vm, ["sudo", "sh", "-c",
+             "printf 'SECRETINCONFIG\\n' >> /etc/homebase/homebase.yaml"])
+    ssh(vm, ["sudo", "sh", "-c",
+             "printf 'SECRETINUSERDATA\\n' > /srv/homebase/private.txt"])
+
+    result = must(vm, "system.diagnostics", timeout=200)
+    path = result.get("path", "")
+    check(path.startswith("/var/lib/homebase/diagnostics/"),
+          f"the file is written where hostd owns ({path})")
+    check(result.get("bytes", 0) > 500, f"and has something in it ({result.get('bytes')} bytes)")
+    check(len(result.get("excludes", [])) > 0,
+          "and says what it does not contain", json.dumps(result, indent=4))
+
+    contents = ssh(vm, ["sudo", "cat", path]).stdout
+
+    for planted, where in (("SECRETINDATABASE", "/var/lib/homebase"),
+                           ("SECRETINCONFIG", "/etc/homebase"),
+                           ("SECRETINUSERDATA", "/srv/homebase")):
+        check(planted not in contents,
+              f"nothing from {where} is in it",
+              "The bundle says it does not contain this. It does.")
+
+    # And it has to be useful, or nobody will make one. These are the things
+    # somebody debugging asks for first.
+    for expected, what in (("homebase-hostd", "which versions are installed"),
+                           ("=== journal.txt", "the journal"),
+                           ("=== space.txt", "free space"),
+                           ("=== dpkg.txt", "whether a package transaction is unfinished")):
+        check(expected in contents, f"and it contains {what}")
+
+    # Through the API, which is the only way a person gets it off the machine.
+    status, body = core_api(vm, "/auth/login", "POST",
+                            json.dumps({"username": "okan", "password": PASSWORD}))
+    check(status == 200, f"signed in ({status})", body[:200])
+
+    status, body = core_api(vm, "/system/diagnostics/download")
+    check(status == 200, f"the browser can download it ({status})")
+    check("Homebase diagnostics" in body,
+          "and gets the file rather than a description of it", body[:200])
+
+    ssh(vm, ["rm", "-f", "/tmp/update-cookies"], check=False)
+    status, _ = core_api(vm, "/system/diagnostics/download")
+    check(status == 401,
+          f"a caller with no account cannot download it ({status})")
 
 
 def verify_the_archive_cannot_replace_other_packages(vm: VM, archive: Archive) -> None:
@@ -867,6 +956,10 @@ def main() -> int:
         # by construction; the second is the one the milestone promises.
         verify_power_loss_mid_update(vm, archive, RECOVERED, "downloading")
         verify_power_loss_mid_update(vm, archive, LATEST, "applying")
+
+        # Last, on a machine that has genuinely been through two power cuts —
+        # which is the machine a diagnostic file is for.
+        verify_a_diagnostic_file_is_safe_to_send(vm)
 
         elapsed = int(time.time() - started)
         print()

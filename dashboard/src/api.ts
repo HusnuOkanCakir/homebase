@@ -426,6 +426,42 @@ export interface ApplicationStorage {
 // --- Backup -------------------------------------------------------------------
 
 /**
+ * A diagnostic file, and what is in it.
+ *
+ * `excludes` is shown to the user rather than kept in the documentation,
+ * because the question "is this safe to send to somebody?" is asked at the
+ * moment of sending.
+ */
+export interface Diagnostics {
+  path: string;
+  bytes?: number;
+  created_at: string;
+  includes: string[];
+  excludes: string[];
+  message: string;
+}
+
+export interface RepairStep {
+  what: string;
+  done?: string;
+  problem?: string;
+}
+
+export interface RepairResult {
+  steps: RepairStep[];
+  /** Zero means whatever is wrong is not something repair knows how to fix. */
+  changed: number;
+  healthy: boolean;
+  message: string;
+}
+
+export interface FactoryResetResult {
+  removed?: string[];
+  kept?: string[];
+  message: string;
+}
+
+/**
  * When backups happen without anybody pressing anything.
  *
  * `enabled` comes from systemd rather than from what was last asked for, and
@@ -707,6 +743,36 @@ export const api = {
 
   createBackup: (location: string, includeData: boolean) =>
     post<Job>("/backups", { location, include_data: includeData }),
+
+  // --- When something is wrong ------------------------------------------------
+
+  /**
+   * Collect a diagnostic file. Long, because it reads a day of the journal —
+   * and on a machine that is having trouble, that is when the journal is
+   * longest.
+   */
+  collectDiagnostics: () =>
+    post<Diagnostics>("/system/diagnostics", undefined, 180_000),
+
+  /** Where the browser downloads the file from. Always the newest one. */
+  diagnosticsDownloadURL: () => `${BASE}/system/diagnostics/download`,
+
+  /**
+   * Try to fix what is wrong. Long, because finishing an interrupted package
+   * transaction is dpkg running maintainer scripts.
+   */
+  repair: () => post<RepairResult>("/system/repair", undefined, 720_000),
+
+  /**
+   * Remove every account and every setting. `confirm` must be the server's own
+   * name — the one string specific to this machine.
+   */
+  factoryReset: (confirm: string, keepData: boolean) =>
+    post<FactoryResetResult>(
+      "/system/factory-reset",
+      { confirm, keep_data: keepData },
+      360_000,
+    ),
 
   backupSchedule: () => get<BackupSchedule>("/backups/schedule"),
 

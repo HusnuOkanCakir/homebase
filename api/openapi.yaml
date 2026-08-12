@@ -1292,6 +1292,166 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /system/diagnostics:
+    post:
+      tags: [system]
+      summary: Collect what somebody would need to work out why this server is unwell
+      description: |
+        Requires `system.manage`.
+
+        Writes a plain-text file on the server and reports what is in it. Download it with
+        `/system/diagnostics/download`.
+
+        **`excludes` is part of the answer, not documentation.** It is the list somebody
+        checks before sending the file to a stranger, so it travels with the result: the
+        failure mode of a support bundle is not being unhelpful, it is quietly containing the
+        password database.
+
+        What is collected is a fixed list — versions, service states, failed units, a day of
+        the journal, disks, free space, memory, addresses, apt's view of the update source,
+        and whether dpkg left a transaction unfinished. Nothing in it comes from the request:
+        a bundle that could be told what to run would be the generic execution path
+        [ADR-0006](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0006-privilege-separation.md)
+        exists to prevent, wearing a support tool's clothes.
+
+        A command that is missing or fails does not fail the bundle. Half a bundle from a
+        badly broken machine is what somebody needs.
+      operationId: collectDiagnostics
+      responses:
+        "200":
+          description: The diagnostic file, and what it does and does not contain
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Diagnostics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /system/diagnostics/download:
+    get:
+      tags: [system]
+      summary: Download the most recent diagnostic file
+      description: |
+        Requires `system.manage`.
+
+        The newest file, rather than one named by the caller. A filename in a request is a
+        path to be validated, and the validation is the part that gets subtly wrong; there is
+        nothing to get wrong if there is no filename.
+      operationId: downloadDiagnostics
+      responses:
+        "200":
+          description: The file
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No diagnostic file has been made yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /system/repair:
+    post:
+      tags: [system]
+      summary: Put back the things a broken or interrupted install leaves wrong
+      description: |
+        Requires `system.manage`.
+
+        A fixed list of checks, each of which makes something true if it is not: finish a
+        package transaction dpkg left unfinished, recreate Homebase's directories and give
+        them back to the service account, start and enable the services.
+
+        **It is not a diagnosis.** There is no branching on what a previous step found,
+        because a repair tool that reasons about the state of a broken machine is a program
+        written against inputs nobody has seen. Every step reports what it did, and doing
+        nothing is a result — `changed: 0` means whatever is wrong is not something this knows
+        how to fix, which is more use than a list of ticks.
+
+        Nothing here deletes anything, which is what makes it safe to offer to somebody who
+        does not know what is wrong.
+      operationId: repairSystem
+      responses:
+        "200":
+          description: What was checked and what was changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepairResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /system/factory-reset:
+    post:
+      tags: [system]
+      summary: Return this server to how it was before anybody set it up
+      description: |
+        Requires `system.manage`. **The most destructive operation in Homebase.**
+
+        It removes every account and every setting, so the person running it can lock
+        themselves out of their own server. `confirm` must be the server's hostname — the one
+        string specific to this machine, which is what stops a reset meant for one server
+        landing on another.
+
+        `keep_data` defaults to **true**, and its absence means true rather than false. A
+        caller that forgets the field keeps the photographs.
+
+        The update channel is deliberately kept. A machine that forgets where its security
+        updates come from is worse than one that remembers, and it is not personal data.
+
+        Afterwards the server asks to be set up again, like a new one.
+      operationId: factoryReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+                  description: This server's hostname, typed exactly.
+                keep_data:
+                  type: boolean
+                  default: true
+                  description: |
+                    Leave everything in `/srv/homebase` — your files and your applications'
+                    data — alone. Absent means true.
+      responses:
+        "200":
+          description: What was removed and what was left
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FactoryResetResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "428":
+          description: The server's name was not typed correctly
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
   /system/update:
     get:
       tags: [update]
@@ -2498,6 +2658,82 @@ components:
             reason everywhere else in Homebase: a `true` a client can send by default is not a
             confirmation, and one that names its target cannot be replayed against a different
             disk.
+
+    Diagnostics:
+      type: object
+      additionalProperties: false
+      required: [path, created_at, includes, excludes, message]
+      properties:
+        path:
+          type: string
+          description: Where the file is on the server. Download it rather than reading it.
+        bytes:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        includes:
+          type: array
+          items:
+            type: string
+          description: What is in it, in words.
+        excludes:
+          type: array
+          items:
+            type: string
+          description: |
+            What is deliberately not in it. The list somebody checks before sending the file
+            to a stranger.
+        message:
+          type: string
+
+    RepairResult:
+      type: object
+      additionalProperties: false
+      required: [steps, changed, healthy, message]
+      properties:
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [what]
+            properties:
+              what:
+                type: string
+                description: The check, in words somebody can read.
+              done:
+                type: string
+                description: What was actually done. Absent when nothing needed doing.
+              problem:
+                type: string
+                description: Why the step could not be completed.
+        changed:
+          type: integer
+          description: |
+            How many steps had something to do. Zero means whatever is wrong is not one of
+            the things repair knows how to fix, which is worth saying plainly.
+        healthy:
+          type: boolean
+          description: Whether every step completed without a problem.
+        message:
+          type: string
+
+    FactoryResetResult:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        removed:
+          type: array
+          items:
+            type: string
+        kept:
+          type: array
+          items:
+            type: string
+        message:
+          type: string
 
     BackupSchedule:
       type: object

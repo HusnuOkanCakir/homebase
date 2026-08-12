@@ -123,6 +123,7 @@ nav:
       - Backup and restore: user-guide/backup.md
       - Finding your server: user-guide/network.md
       - If you forget your password: user-guide/passwords.md
+      - When something is wrong: user-guide/recovery.md
 
 extra:
   social:

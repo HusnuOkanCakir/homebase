@@ -1374,3 +1374,29 @@ func chownToService(path string) error {
 	}
 	return os.Chown(path, uid, gid)
 }
+
+// giveToServiceGroup keeps a path owned by root and lets the service group read
+// it.
+//
+// The pattern for everything hostd writes as root and core reads as `homebase`:
+// the backup schedule, the diagnostics directory. Ownership stays with root
+// because these describe the machine rather than belong to it, and the group is
+// what lets the unprivileged half see them at all.
+//
+// It is worth its own function because getting it wrong is silent. A root:root
+// 0640 file is perfectly readable by everything that writes it and by every test
+// that runs as root, and invisible to the one account that actually needs it.
+func giveToServiceGroup(path string) error {
+	group, err := user.LookupGroup(serviceAccount)
+	if err != nil {
+		return fmt.Errorf("looking up the %s group: %w", serviceAccount, err)
+	}
+	gid, err := strconv.Atoi(group.Gid)
+	if err != nil {
+		return err
+	}
+	if err := os.Chown(path, 0, gid); err != nil {
+		return fmt.Errorf("giving %s to the %s group: %w", path, serviceAccount, err)
+	}
+	return nil
+}

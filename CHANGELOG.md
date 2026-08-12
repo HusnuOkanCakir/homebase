@@ -298,12 +298,84 @@ Milestone 0 — contracts and project machinery. No product code.
 - SBOMs are deterministic: the same inputs produce the same bytes, because ADR-0018 promotes
   artifacts by comparing checksums and a document that changed on every build would be one
   more thing that could not be compared
-- `make vm-test-update` (303s): a real archive over HTTP, a real machine, and the checks
+- `make vm-test-update` (310s): a real archive over HTTP, a real machine, and the checks
   the design exists for. **An archive tampered with and re-signed by somebody else's key is
   refused**, and the version inserted into it is never offered. **A package Homebase does not
   ship is not installable from Homebase's origin** — `Signed-By` binds a key to a source, not
   to package names, so without the origin pin one compromised key would replace anything on
   the machine
+- **The backup schedule in the dashboard**, with the last run's outcome beside it. A schedule
+  is a promise made once and kept nightly, and the way it fails is silently — so anything
+  that shows the promise has to show whether it is being kept. `enabled` comes from systemd
+  rather than from what was asked for, and a schedule pointing at a disk that is not
+  connected says so by name
+- **A release workflow.** `release.yml` turns a tag into a signed archive; `promote.yml`
+  moves a tested artifact between channels. The build job holds no secrets and no
+  environment, which is what makes its Sigstore provenance attestations worth having — the
+  strongest claim about where an artifact came from has no long-lived secret behind it. Its
+  dependency caches are switched off, and only there: a poisoned cache costs CI a wrong test
+  result and would cost a release a signed artifact installed as root
+- The publish job's **environment is the channel**, so the manual approval belongs to
+  `stable` rather than to a workflow file somebody could edit in a pull request
+- `build-repo.py verify` reads a finished archive back the way apt will — `gpgv` against the
+  exported keyring, `Release` against the index, the index against every file in the pool —
+  and shares no code with the writer, so an archive that is self-consistent and wrong fails
+  here rather than shipping
+- `scripts/release.py` decides what a tag releases, and **no tag reaches stable**: `v0.2.0`
+  is refused with a message saying to tag a beta and promote it. It also converts the semver
+  prerelease to `0.2.0~alpha.1`, because `-` is not special to dpkg and every machine would
+  otherwise treat the alpha as newer than the release it precedes
+- `tests/unit/test_repo.py`, in `ci/contracts` on every pull request: builds a real signed
+  archive from four empty `.deb` files and a throwaway key, then breaks it five ways — a
+  rebuilt package, an edited index, the wrong signing key, a missing package, an expired
+  index — and checks each break is refused. No Go, no Node, no VM
+- **Recovery, from the browser.** A diagnostic file, a repair, and a factory reset, under
+  *Something's wrong* — named for what somebody is thinking rather than for what it does
+- The diagnostic file **says what it does not contain**, on the screen, at the moment
+  somebody is deciding whether to send it to a stranger. The VM test plants recognisable
+  strings in the database directory, the configuration and the user's files, and greps the
+  finished bundle for them: a support tool that quietly contains the password database is a
+  disclosure with a download button
+- What it collects is a fixed list of commands with fixed arguments, and the download takes
+  **no filename from the caller** — core serves the newest file in one directory, so a
+  traversal has nothing to traverse
+- **Repair is a fixed list, not a diagnosis**: finish an interrupted package transaction,
+  put back directories and their ownership, start and enable the services. Nothing is
+  deleted, which is what makes it safe to offer to somebody who does not know what is wrong,
+  and **changing nothing is reported as a result** rather than as success — being sent away
+  believing a broken server was repaired is worse than being told nothing was found
+- It is proven on the machine that has just lost power mid-`dpkg`, which is the only
+  genuinely half-upgraded machine in the suite, and pressed twice, because somebody who does
+  not know what is wrong will press it twice
+- **A factory reset keeps your files by default**, and `keep_data` absent means keep — a
+  plain boolean would have made forgetting the field mean "delete everything". It takes the
+  server's own name typed by hand, removes the certificate so the machine gets a new
+  identity, and deliberately keeps the update channel, because a machine that forgets where
+  its security fixes come from is worse than one that remembers
+
+### Fixed
+
+Three bugs of the same shape, each shipped in the commit before the test that caught it, and
+each invisible to anything that did not use the feature the way a machine will. `hostd`
+writes as `root`; the unprivileged half reads as `homebase`; everything that writes and every
+test that runs is root.
+
+- **Every scheduled backup would have reported success having copied nothing.**
+  `/etc/homebase/backup-schedule.conf` was written `root:root 0640`, and `backup-run` — which
+  runs as `homebase` — treated an unreadable schedule as "nothing configured" and exited `0`.
+  The file is `root:homebase` now, and an unreadable one is a loud failure: the unit's
+  `ConditionPathExists` already covers "never set up", so by the time the script runs, not
+  being able to read it means the permissions are wrong
+- **`next_run` was always empty.** `NextElapseUSecRealtime` is named after microseconds and
+  current systemd prints `Thu 2026-08-13 03:00:00 CEST`; the parse failed and returned the
+  empty string, which looks exactly like "no next run", so nothing looked wrong. Both forms
+  are read now
+- **Turning backups off discarded the disk**, while the comment above it said the choice was
+  kept on purpose. "Off" is sent without a destination — a caller turning something off has
+  no reason to repeat where it pointed — and taking the request at face value threw it away
+- **The diagnostic file could not be downloaded.** Its directory was `root:root 0750`, so the
+  file inside being readable made no difference: core could not list the directory, and the
+  download answered `404` with the file sitting there
 
 ### Changed
 

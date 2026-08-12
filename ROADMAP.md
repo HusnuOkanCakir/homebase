@@ -7,12 +7,23 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–7 complete. Milestone 8 next.** A USB stick turns a
-Windows laptop into a working server, a new server says what to do next, and it is then
-reachable by name over HTTPS from any device in the house. Making that stick still takes one
-command on a Linux machine — the graphical tool for doing it on Windows and macOS is
-Milestone 10, and it is what Stage 1 is still missing. The server also still needs a network
-cable; Wi-Fi arrives with the hardware it has to be tested on, in Milestone 9.
+**Current position: Milestones 0–8 complete. Milestone 9 next.** A USB stick turns a Windows
+laptop into a working server, a new server says what to do next, and it is then reachable by
+name over HTTPS from any device in the house. It backs itself up every night, looks for
+updates on its own, applies one and puts the previous version back if it does not work, and
+survives having its power cut mid-`dpkg` — and when something does go wrong it can produce a
+file safe to send to somebody, repair itself, or start again without losing anybody's
+photographs.
+
+What is missing is hardware. Everything above is proven in VMs, on Intel with KVM, with
+emulated disks and a wired network. Milestone 9 is the first time any of it meets a real
+laptop — which is where Wi-Fi, lid-close behaviour, thermal throttling and USB disks that
+misbehave all arrive at once. Making the installer stick also still takes one command on a
+Linux machine; the graphical tool for Windows and macOS is Milestone 10, and it is what
+Stage 1 is still missing.
+
+Nothing has been released. The release machinery exists and has never been run for real, and
+there is no host for the update archive yet.
 
 ---
 
@@ -328,7 +339,7 @@ third-party coordination network needs a decision record of its own rather than 
 here — the first principle in the README is that nobody can switch Homebase off or start
 charging for it.
 
-### Milestone 8 — Updates and recovery — in progress
+### Milestone 8 — Updates and recovery ✅
 
 - [x] [ADR-0018](docs/decisions/0018-updates-are-a-signed-apt-repository.md) — the update
       mechanism decided: a signed APT repository, with Homebase's own state snapshotted
@@ -355,8 +366,11 @@ charging for it.
 - [x] **SBOMs**, in CycloneDX, read from the linked binary rather than from `go.mod` — and
       `homebase-hostd`'s must be empty, so the build fails if the privileged service ever
       acquires third-party code
-- [ ] A release workflow: signed artifacts from CI, build attestations, promotion gated on
-      a manual approval
+- [x] **A release workflow** — `release.yml` turns a tag into a signed archive and
+      `promote.yml` moves a tested artifact between channels behind a manual approval. The
+      build job holds no secrets, which is what makes its provenance attestations worth
+      having; the publish job's *environment is the channel*, so the gate belongs to
+      `stable` rather than to a workflow file somebody could edit in a pull request
 - [x] **Backup scheduling** — a systemd timer, not a ticker inside core. `Persistent=true`
       is the setting that makes it work on the machine Homebase runs on: a laptop in a
       cupboard is asleep at three in the morning more often than not, and without it the
@@ -364,24 +378,14 @@ charging for it.
 - [x] **The update check runs on its own**, once a day, catching up if the machine was off.
       Not hourly: nothing it does installs anything, and checking more often would only tell
       the archive how many servers exist and when each is switched on
-- [ ] The backup schedule in the dashboard — the operations work, but setting one still
-      means calling the API
-- [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
-- [x] **Backup scheduling** — a systemd timer, not a ticker inside core. `Persistent=true`
-      is the setting that makes it work on the machine Homebase runs on: a laptop in a
-      cupboard is asleep at three in the morning more often than not, and without it the
-      run is skipped silently, every night, until somebody needs it
-- [x] **The update check runs on its own**, once a day, catching up if the machine was off.
-      Not hourly: nothing it does installs anything, and checking more often would only tell
-      the archive how many servers exist and when each is switched on
-- [ ] The backup schedule in the dashboard — the operations work, but setting one still
-      means calling the API
-- [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
-      (credential reset shipped in Milestone 5)
+- [x] The backup schedule in the dashboard, with the last run's outcome beside it
+- [x] **Recovery** — a diagnostic bundle, repair, and factory reset (credential reset
+      shipped in Milestone 5). Reinstalling to fix a broken install is what repair does;
+      there is no separate button for it, because "reinstall the packages" is not a sentence
+      this product's user should have to read
 
 **Done when:** interrupting an update at any stage leaves a bootable machine with intact
-application data. **The exit condition is met** — the rest of this milestone is the release
-machinery and the recovery tools, not the update path.
+application data. ✅
 
 Proven by cutting power with QMP `system_reset` rather than by killing a process, because a
 killed process flushes its writes and a power cut does not. Triggered on a running `dpkg`
@@ -391,8 +395,32 @@ left the machine untouched — a real result, but not the one being claimed.
 
 With dpkg genuinely mid-write, the machine boots, the file in `/srv/homebase` is intact, and
 `update.status` reports `interrupted`. That last part is the loop closing: the field was
-built in this milestone's first commit for exactly this state, and `dpkg --configure -a` —
-the command the error message names — finishes the job.
+built in this milestone's first commit for exactly this state.
+
+**And the remedy is now a button.** `dpkg --configure -a` is what the error message has
+named since that first commit, and naming a terminal command to somebody who bought an
+appliance is a remedy they do not have. `system.repair` runs it, and the interruption test
+is where it is proven — on the only genuinely half-upgraded machine in the suite, rather
+than on one that was never broken. It is run twice, because somebody who does not know
+what is wrong will press it twice, and the second run has to be a quiet no-op.
+
+**Three bugs were found by writing tests that use the thing rather than describe it**, all
+of them the same shape: `hostd` writes as `root`, the unprivileged half reads as `homebase`,
+and nothing notices because everything that writes and every test that runs is root.
+
+- The backup schedule was written `root:root 0640`, and `backup-run` treated an unreadable
+  schedule as "nothing configured" and exited 0. Every scheduled backup would have succeeded,
+  nightly, having copied nothing, with the dashboard reporting that the last one worked.
+- `next_run` was always empty: `NextElapseUSecRealtime` is named after microseconds and
+  current systemd prints `Thu 2026-08-13 03:00:00 CEST`. The parse failed and returned the
+  empty string, which looks exactly like "no next run".
+- The diagnostics directory was `root:root 0750`, so the file inside being readable made no
+  difference — core could not list the directory, and the download answered 404 with the
+  file sitting there.
+
+Each was caught by a test that starts the service the way systemd will, or downloads the
+file the way a browser will. None would have been caught by a test that asserted against
+what was written.
 
 **`hostd` does not run apt, and that was not planned.** Its unit sets
 `RestrictAddressFamilies=AF_UNIX AF_NETLINK` — the root service that manages the machine
@@ -416,6 +444,21 @@ Homebase's state is a SQLite database, container images and uid allocations that
 the image, so a partition switch that reverts the code while leaving a migrated database is a
 downgrade into an inconsistent state rather than a rollback. The state snapshot has to be
 built either way.
+
+**The release workflow is built and has never been run for real**, which is stated here
+rather than left to be discovered. There is no host for the archive yet — a release produces
+a signed, verified repository as a build artifact, and serving it is a decision Milestone 9
+has to make. What does run is everything that needs neither a key nor a host, on every pull
+request: `tests/unit/test_repo.py` builds a real signed archive from four empty `.deb` files
+and a throwaway key, then breaks it five ways and checks each break is refused. The only
+untested part of a real release is the key material and the environment protection rules,
+neither of which lives in the repository.
+
+**The diagnostic bundle's claim about itself is checked against itself.** It tells the user
+it contains no password, no recovery code and none of their files — and the VM test plants
+recognisable strings in each of those places and then greps the finished bundle for them.
+A support tool that quietly contains the password database is not an unhelpful support tool;
+it is a disclosure with a download button.
 
 ### Milestone 9 — Hardware alpha
 
