@@ -501,6 +501,32 @@ def verify_scheduled_backups(vm: VM) -> None:
           "and after both refusals nothing has been scheduled",
           json.dumps(body))
 
+    # And through the browser-facing API, which is the only way a user reaches
+    # it. The operations existing in hostd is not the same as the feature
+    # existing, and that gap is what kept this off the dashboard for a milestone.
+    status, body = api(vm, "/auth/login", "POST",
+                       json.dumps({"username": "okan", "password": PASSWORD}))
+    check(status == 200, f"signed in ({status})", body)
+
+    status, body = api(vm, "/backups/schedule")
+    check(status == 200, f"the schedule is readable from the dashboard ({status})", body)
+    check(json.loads(body).get("every") == "off",
+          "and reports the same thing hostd does", body)
+
+    status, body = api(vm, "/backups/schedule", "POST", json.dumps({"every": "sometimes"}))
+    check(status == 400, f"a schedule Homebase cannot keep to is refused there too "
+                         f"({status})", body)
+
+    # A route that can point somebody's data at a disk, reachable without an
+    # account, would be worth having and this test exists to say it is not.
+    for method in ("GET", "POST"):
+        out = ssh(vm, ["curl", "--silent", "--insecure", "-o", "/dev/null",
+                       "-w", "%{http_code}", "-X", method,
+                       "-H", "Content-Type: application/json", "-d", "{}",
+                       "https://127.0.0.1/api/v1/backups/schedule"],
+                  check=False).stdout.strip()
+        check(out == "401", f"{method} refuses a caller with no account ({out})")
+
     # Updates are looked for on their own. A server nobody touches again should
     # still find out that a security fix exists, and the unit this starts does
     # nothing until a channel is configured — so enabling it on every machine

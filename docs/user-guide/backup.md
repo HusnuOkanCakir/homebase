@@ -107,10 +107,33 @@ restoring because you were locked out, restoring alone does not help. The recove
 wrote down does, and it still works on the rebuilt machine. See
 [If you forget your password](passwords.md).
 
+## Backups that happen on their own
+
+Under **Backup**, **Automatic backups**: every night, every week, or off.
+
+Homebase backs up at about three in the morning, onto the disk you chose. If the server is
+switched off at the time — and a laptop in a cupboard usually is — it does the backup the
+next time it is switched on, rather than skipping it.
+
+The screen tells you three things, and the last one is the point:
+
+- when the next backup will happen
+- which disk it goes to
+- **whether the last one worked**
+
+If an automatic backup fails, it says so and keeps saying so. That is deliberate. The way
+automatic backups fail is quietly: the disk gets unplugged in March, and nobody finds out
+until the machine dies in November.
+
+If the disk you chose is not connected, Homebase tells you on this screen rather than
+waiting until three in the morning to find out.
+
+An automatic backup saves your settings and your files. It does not check the backup
+afterwards — checking reads every file, which takes as long as making it. Check one by hand
+now and again, under **Backups on this disk**.
+
 ## Things Homebase does not do yet
 
-- **No automatic backups on a schedule.** You have to press the button. This is the next
-  thing to build.
 - **No encryption.** Anyone holding the backup disk can read everything on it. Keep it
   somewhere you would keep a box of photographs — and do not keep your recovery code with
   it, because the disk and the code together are complete access to your server.
@@ -121,8 +144,9 @@ wrote down does, and it still works on the rebuilt machine. See
 
 ## How often
 
-Whenever you would mind losing what has changed since the last one.
+Turn on nightly backups and leave them on. That is the whole answer for most people.
 
-For most people that means: settings after you change something, and everything once a month
-or after adding a lot of photographs. The honest answer is that any backup is enormously
-better than none, and the most common backup mistake is not making one at all.
+A backup you have to remember is a backup that exists until the week you are busy, which is
+reliably the week the disk fails. Make one by hand as well before you change something you
+would mind losing — but the scheduled one is what actually saves you, because it keeps
+happening after you have stopped thinking about it.

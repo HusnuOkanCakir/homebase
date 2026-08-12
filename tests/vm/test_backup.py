@@ -179,9 +179,14 @@ def install_homebase(vm: VM, binary: Path) -> None:
         write_file(vm, f"/usr/share/homebase/apps/{manifest.name}",
                    manifest.read_text(), mode="0644")
 
-    for unit in ("homebase-hostd.service", "homebase-hostd.socket"):
+    # The scheduled-backup units go on too, so the schedule can be exercised as
+    # systemd will actually run it rather than as a file that was written.
+    for unit in ("homebase-hostd.service", "homebase-hostd.socket",
+                 "homebase-backup.service", "homebase-backup.timer"):
         write_file(vm, f"/etc/systemd/system/{unit}",
                    (REPO_ROOT / "packaging" / "systemd" / unit).read_text())
+    copy_to(vm, REPO_ROOT / "packaging" / "backup-run",
+            "/usr/libexec/homebase/backup-run", mode="0755")
 
     ssh(vm, ["sudo", "systemctl", "daemon-reload"])
     ssh(vm, ["sudo", "systemctl", "enable", "--now", "homebase-hostd.socket"])
@@ -490,6 +495,106 @@ def verify_the_machine_came_back(vm: VM) -> None:
 # --- Driver ---------------------------------------------------------------------------
 
 
+def backups_happen_without_being_asked(vm: VM) -> None:
+    """The schedule, run the way systemd runs it.
+
+    Everything before this proves a backup works when somebody asks for one.
+    That is the half people do once. The half that saves them is the one that
+    keeps happening after they stop thinking about it, and it fails in a way
+    nothing else here would notice: quietly, nightly, while reporting success.
+
+    So this does not check that a configuration file was written. It sets a
+    schedule, starts the service exactly as the timer will, and then looks on
+    the disk for a backup that was not there before.
+    """
+    step("Backups that happen on their own")
+
+    schedule = must(vm, "backup.get_schedule")
+    check(schedule["every"] == "off",
+          f"nothing is scheduled to begin with ({schedule['every']})")
+    check(schedule["enabled"] is False, "and no timer is running")
+
+    schedule = must(vm, "backup.set_schedule",
+                    {"every": "daily", "location": BACKUP_DISK})
+    check(schedule["every"] == "daily", f"a nightly backup is set up ({schedule['every']})")
+
+    # Read back from systemd rather than echoed from the request. A schedule
+    # that was accepted and is not running is the failure this reports.
+    check(schedule["enabled"] is True, "and systemd is running the timer",
+          json.dumps(schedule, indent=4))
+    check(bool(schedule.get("next_run")), f"next run: {schedule.get('next_run')}")
+
+    # The account that does the work has to be able to read the file that says
+    # where to write. hostd runs as root and wrote it; the backup runs as
+    # `homebase`, and 0640 root:root would leave every scheduled run doing
+    # nothing at all while exiting cleanly.
+    readable = ssh(vm, ["sudo", "-u", "homebase", "test", "-r",
+                        "/etc/homebase/backup-schedule.conf"], check=False)
+    owner = ssh(vm, ["sudo", "stat", "-c", "%U:%G %a",
+                     "/etc/homebase/backup-schedule.conf"]).stdout.strip()
+    check(readable.returncode == 0,
+          f"the account that runs the backup can read the schedule ({owner})",
+          "Written by root and read by the homebase account. If this fails, every "
+          "scheduled backup exits successfully having copied nothing.")
+
+    # The calendar expression is Homebase's, from a fixed table. Nothing a
+    # caller sent may end up in a file that decides what runs as root.
+    dropin = ssh(vm, ["sudo", "cat",
+                      "/etc/systemd/system/homebase-backup.timer.d/schedule.conf"]).stdout
+    check("OnCalendar=*-*-* 03:00:00" in dropin,
+          "and the timer fires at three in the morning", dropin)
+
+    # The whole point, and the only assertion here that could not be satisfied
+    # by a schedule that does nothing: start the service the way the timer will,
+    # and find a backup on the disk that was not there before.
+    step("Running the scheduled backup the way the timer does")
+
+    # Counted immediately before, so an enabled timer that decided it had a run
+    # to catch up on cannot be mistaken for this one working.
+    before = must(vm, "backup.list", {"location": BACKUP_DISK})["backups"]
+
+    started = ssh(vm, ["sudo", "systemctl", "start", "homebase-backup.service"],
+                  check=False)
+    if started.returncode != 0:
+        journal = ssh(vm, ["sudo", "journalctl", "-u", "homebase-backup",
+                           "--no-pager", "-n", "20"], check=False).stdout
+        raise TestFailure(f"the scheduled backup failed to run\n{journal}")
+
+    after = must(vm, "backup.list", {"location": BACKUP_DISK})["backups"]
+    check(len(after) == len(before) + 1,
+          f"a backup appeared on the disk without anybody asking "
+          f"({len(before)} → {len(after)})",
+          "The service ran and reported success. If the count did not change it "
+          "backed nothing up, which is the failure a schedule is most likely to "
+          "have.")
+
+    newest = max(after, key=lambda b: b.get("created_at", ""))
+    check(newest["complete"], "and it is a complete backup", json.dumps(newest, indent=4))
+
+    schedule = must(vm, "backup.get_schedule")
+    check(schedule.get("last_result") == "ok",
+          f"and Homebase reports the last automatic backup worked "
+          f"({schedule.get('last_result')})")
+
+    # Turning it off has to actually stop it. A setting that reports "off" while
+    # the timer still fires is worse than one that never worked.
+    schedule = must(vm, "backup.set_schedule", {"every": "off"})
+    check(schedule["every"] == "off", "backups can be turned off again")
+    check(schedule["enabled"] is False, "and the timer stops",
+          json.dumps(schedule, indent=4))
+
+    check(schedule.get("location") == BACKUP_DISK,
+          f"while remembering the disk that was chosen ({schedule.get('location')})",
+          "Turning a schedule off and on again should not lose the choice.")
+
+    quiet = must(vm, "backup.list", {"location": BACKUP_DISK})["backups"]
+    ssh(vm, ["sudo", "systemctl", "start", "homebase-backup.service"], check=False)
+    still = must(vm, "backup.list", {"location": BACKUP_DISK})["backups"]
+    check(len(still) == len(quiet),
+          f"and running it by hand while it is off backs nothing up "
+          f"({len(quiet)} → {len(still)})")
+
+
 def main() -> int:
     started = time.time()
     print()
@@ -564,6 +669,10 @@ def main() -> int:
         preview_before_restoring(replacement, backup_id)
         restore_onto_the_replacement(replacement, backup_id)
         verify_the_machine_came_back(replacement)
+
+        # Last, and on the machine that was rebuilt from the backup: it now
+        # starts backing itself up, without being asked.
+        backups_happen_without_being_asked(replacement)
 
         elapsed = int(time.time() - started)
         print()

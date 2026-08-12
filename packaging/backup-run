@@ -16,7 +16,27 @@ set -eu
 CONFIG=/etc/homebase/backup-schedule.conf
 SOCKET=/run/homebase/hostd.sock
 
-[ -r "$CONFIG" ] || { echo "no backup schedule configured" >&2; exit 0; }
+# Not readable is a failure, not a quiet nothing.
+#
+# The unit's ConditionPathExists already covers "no schedule has ever been set
+# up" — a condition that is not met skips the unit rather than failing it. So by
+# the time this runs the file exists, and being unable to read it means the
+# permissions are wrong. Exiting 0 there is the worst outcome available: every
+# scheduled run would report success while backing nothing up, and the dashboard
+# would say the last backup worked.
+if [ ! -r "$CONFIG" ]; then
+    echo "cannot read $CONFIG — it should be root:homebase 0640" >&2
+    exit 1
+fi
+
+every=$(sed -n 's/^every=//p' "$CONFIG" | head -1)
+if [ "$every" = "off" ]; then
+    # Reachable by starting this service by hand while the schedule is off. The
+    # destination is still recorded, so without this check that would quietly
+    # make a backup nobody asked for.
+    echo "scheduled backups are turned off"
+    exit 0
+fi
 
 # shellcheck disable=SC2034
 location=$(sed -n 's/^location=//p' "$CONFIG" | head -1)

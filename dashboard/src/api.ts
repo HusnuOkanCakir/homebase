@@ -425,6 +425,23 @@ export interface ApplicationStorage {
 
 // --- Backup -------------------------------------------------------------------
 
+/**
+ * When backups happen without anybody pressing anything.
+ *
+ * `enabled` comes from systemd rather than from what was last asked for, and
+ * `last_result` travels with it: a schedule is a promise kept nightly, and the
+ * way it fails is silently. Anything that shows the promise has to show whether
+ * it is being kept.
+ */
+export interface BackupSchedule {
+  every: "daily" | "weekly" | "off";
+  location?: string;
+  description: string;
+  enabled: boolean;
+  next_run?: string;
+  last_result?: "ok" | "failed";
+}
+
 export interface BackupSummary {
   id: string;
   location: string;
@@ -690,6 +707,19 @@ export const api = {
 
   createBackup: (location: string, includeData: boolean) =>
     post<Job>("/backups", { location, include_data: includeData }),
+
+  backupSchedule: () => get<BackupSchedule>("/backups/schedule"),
+
+  /**
+   * Choose how often backups run. Answers with the schedule as it now stands,
+   * read back from systemd — so a request that was accepted and did not take
+   * effect shows up as one.
+   *
+   * The destination is checked before this returns, which is why it is allowed
+   * longer than an ordinary write.
+   */
+  setBackupSchedule: (every: BackupSchedule["every"], location?: string) =>
+    post<BackupSchedule>("/backups/schedule", { every, location }, 60_000),
 
   /**
    * What restoring would do. Changes nothing.

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -102,14 +104,51 @@ func readBackupSchedule(ctx context.Context) BackupSchedule {
 // all of which a user would notice being wrong.
 func nextElapse(ctx context.Context, unit string) string {
 	out, err := systemctlShow(ctx, unit, "NextElapseUSecRealtime")
-	if err != nil || out == "" || out == "0" {
-		return ""
-	}
-	micros, err := time.ParseDuration(out + "us")
 	if err != nil {
 		return ""
 	}
-	return time.Unix(0, micros.Nanoseconds()).UTC().Format(time.RFC3339)
+	when, ok := parseSystemdTime(out)
+	if !ok {
+		return ""
+	}
+	return when.UTC().Format(time.RFC3339)
+}
+
+// parseSystemdTime reads back a timestamp property from `systemctl show`.
+//
+// Both forms, because systemd's own has changed and the name of the property has
+// not. `NextElapseUSecRealtime` sounds like microseconds and older systemd
+// prints microseconds; current systemd prints
+//
+//	Thu 2026-08-13 03:00:00 CEST
+//
+// Reading only the numeric form is how this field spent its first version always
+// empty — parsed, failed, and returned "" to a screen that then had nothing to
+// say. Silence is what a missing value looks like, so nothing looked wrong.
+//
+// The zone is resolved against the machine's own location: systemd prints the
+// local abbreviation, this runs on the same machine, and Go cannot turn "CEST"
+// into an offset any other way.
+func parseSystemdTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "0" || value == "n/a" || value == "infinity" {
+		return time.Time{}, false
+	}
+
+	if micros, err := strconv.ParseInt(value, 10, 64); err == nil {
+		return time.UnixMicro(micros), true
+	}
+
+	for _, layout := range []string{
+		"Mon 2006-01-02 15:04:05 MST",
+		"Mon 2006-01-02 15:04:05.000000 MST",
+		"2006-01-02 15:04:05 MST",
+	} {
+		if when, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return when, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // lastRunResult reports how the last scheduled backup ended.
@@ -147,11 +186,15 @@ func writeBackupSchedule(ctx context.Context, every, location string) error {
 		if err := runSystemctl(ctx, "disable", "--now", backupTimerUnit); err != nil {
 			return err
 		}
-		// The configuration is left in place on purpose. Turning a schedule off
-		// and turning it on again should not lose the disk somebody chose, and
-		// the service refuses to run without the timer anyway.
-		return writeRootFile(backupScheduleFile,
-			"every=off\nlocation="+location+"\n", 0o640)
+		// The disk is kept on purpose. Turning a schedule off and turning it on
+		// again should not lose the choice — and "off" is sent without a
+		// destination, because a caller turning something off has no reason to
+		// say where it was pointing. Taking the request at face value here is
+		// what silently discarded it.
+		if location == "" {
+			location = readResultFile(backupScheduleFile)["location"]
+		}
+		return writeScheduleFile("every=off\nlocation=" + location + "\n")
 	}
 
 	calendar, ok := schedules[every]
@@ -176,8 +219,7 @@ func writeBackupSchedule(ctx context.Context, every, location string) error {
 		return err
 	}
 
-	if err := writeRootFile(backupScheduleFile,
-		"every="+every+"\nlocation="+location+"\n", 0o640); err != nil {
+	if err := writeScheduleFile("every=" + every + "\nlocation=" + location + "\n"); err != nil {
 		return err
 	}
 
@@ -185,6 +227,37 @@ func writeBackupSchedule(ctx context.Context, every, location string) error {
 		return err
 	}
 	return runSystemctl(ctx, "enable", "--now", backupTimerUnit)
+}
+
+// writeScheduleFile writes the schedule where the account that acts on it can
+// read it.
+//
+// root:homebase 0640, and the group is the entire point. hostd writes this file
+// as root, and the thing that reads it is `homebase-backup.service`, which runs
+// as `homebase` — the same unprivileged account the dashboard's requests arrive
+// under, because a schedule must not be a way to reach hostd more directly than
+// a person can.
+//
+// Written root-owned rather than handed to the account outright: this file names
+// the disk somebody's data is copied onto, and the account that reads it is the
+// one an application would be running as if it got out of its container.
+func writeScheduleFile(content string) error {
+	if err := writeRootFile(backupScheduleFile, content, 0o640); err != nil {
+		return err
+	}
+	group, err := user.LookupGroup(serviceAccount)
+	if err != nil {
+		return fmt.Errorf("looking up the %s group: %w", serviceAccount, err)
+	}
+	gid, err := strconv.Atoi(group.Gid)
+	if err != nil {
+		return err
+	}
+	if err := os.Chown(backupScheduleFile, 0, gid); err != nil {
+		return fmt.Errorf("giving %s to the %s group: %w",
+			backupScheduleFile, serviceAccount, err)
+	}
+	return nil
 }
 
 func runSystemctl(ctx context.Context, args ...string) error {

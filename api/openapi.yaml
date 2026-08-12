@@ -1021,6 +1021,90 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /backups/schedule:
+    get:
+      tags: [backup]
+      summary: When backups happen by themselves
+      description: |
+        Requires `backup.read`.
+
+        `enabled` is read back from systemd rather than from what was last asked for. A
+        schedule recorded on disk that systemd is not running is exactly the failure this
+        field exists to make visible.
+
+        `last_result` is on this response rather than only in the job history because a
+        schedule fails silently: the disk is unplugged in March and nobody finds out until the
+        machine dies in November.
+      operationId: getBackupSchedule
+      responses:
+        "200":
+          description: When backups run, and how the last one went
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackupSchedule"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+    post:
+      tags: [backup]
+      summary: Choose how often backups run
+      description: |
+        Requires `backup.run`.
+
+        `every` is one of three words, checked against a fixed table before anything is
+        written. The calendar expression that ends up in a systemd unit is Homebase's, never
+        the caller's — a unit file is a way to run commands as root, so no string from a
+        request becomes part of one.
+
+        The destination is checked now rather than at three in the morning: a schedule
+        pointing at a disk that cannot hold a backup is a promise that fails in the dark,
+        weeks later, to somebody who was told it was working.
+
+        Turning the schedule off leaves the disk recorded, so turning it on again does not
+        lose the choice.
+      operationId: setBackupSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [every]
+              properties:
+                every:
+                  type: string
+                  enum: [daily, weekly, off]
+                location:
+                  type: string
+                  description: |
+                    The managed storage location backups are written to. Required unless
+                    `every` is `off`.
+      responses:
+        "200":
+          description: The schedule now in force
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackupSchedule"
+        "400":
+          description: Not a schedule Homebase can keep to, or a disk that cannot hold a backup
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
   /backups/{backup_id}/preview:
     get:
       tags: [backup]
@@ -2414,6 +2498,38 @@ components:
             reason everywhere else in Homebase: a `true` a client can send by default is not a
             confirmation, and one that names its target cannot be replayed against a different
             disk.
+
+    BackupSchedule:
+      type: object
+      additionalProperties: false
+      required: [every, description, enabled]
+      properties:
+        every:
+          type: string
+          enum: [daily, weekly, off]
+        location:
+          type: string
+          description: Where scheduled backups are written. Empty when nothing is scheduled.
+        description:
+          type: string
+          description: The schedule in words, for a screen — not a calendar expression.
+        enabled:
+          type: boolean
+          description: |
+            Whether systemd will actually run it. Read from systemd, not inferred from the
+            configuration file: a schedule recorded and not enabled is the failure worth
+            seeing.
+        next_run:
+          type: string
+          format: date-time
+          description: |
+            When systemd says it will next fire. systemd's own answer rather than one computed
+            here, because it accounts for the randomised delay, for a missed run being caught
+            up, and for the machine's timezone.
+        last_result:
+          type: string
+          enum: [ok, failed]
+          description: How the last scheduled run ended. Absent if it has never run.
 
     BackupSummary:
       type: object
