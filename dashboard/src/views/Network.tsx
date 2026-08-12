@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type NetworkStatus } from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
+import { Wifi } from "./Wifi";
 
 /**
  * How this server is connected, and what to do when it is not.
@@ -18,7 +19,7 @@ import { Message } from "../components/Message";
  * is, and puts the numbers underneath for the one person in a hundred who wants
  * them.
  */
-export function Network() {
+export function Network({ canManage }: { canManage: boolean }) {
   const [status, setStatus] = useState<NetworkStatus | null>(null);
   const [error, setError] = useState<ReturnType<typeof describeError> | null>(null);
   const [checking, setChecking] = useState(false);
@@ -170,6 +171,11 @@ export function Network() {
           {checking ? "Checking…" : "Check again"}
         </button>
       </section>
+
+      {/* Below the diagnosis, not above it. Somebody arriving here usually
+          cannot reach their server, and the first thing they need is which of
+          the three faults it is — not a list of networks to join. */}
+      <Wifi canManage={canManage} />
     </>
   );
 }

@@ -426,6 +426,39 @@ export interface ApplicationStorage {
 // --- Backup -------------------------------------------------------------------
 
 /**
+ * Wireless.
+ *
+ * `available` is false on much of the hardware Homebase runs on, and is the
+ * first thing a screen needs to know — "no networks in range" and "this machine
+ * has no wireless" send somebody to entirely different places.
+ *
+ * `has_wired_connection` decides how frightening the screen has to be: with a
+ * cable in, a failed attempt costs nothing.
+ *
+ * There is no passphrase field, in either direction. The server never returns
+ * one.
+ */
+export interface WifiStatus {
+  available: boolean;
+  interface?: string;
+  connected: boolean;
+  ssid?: string;
+  addresses?: string[];
+  signal?: number;
+  bars?: number;
+  configured: boolean;
+  has_wired_connection: boolean;
+}
+
+export interface WifiNetwork {
+  ssid: string;
+  signal: number;
+  bars: number;
+  security: "open" | "wep" | "wpa" | "wpa3";
+  current: boolean;
+}
+
+/**
  * A diagnostic file, and what is in it.
  *
  * `excludes` is shown to the user rather than kept in the documentation,
@@ -743,6 +776,30 @@ export const api = {
 
   createBackup: (location: string, includeData: boolean) =>
     post<Job>("/backups", { location, include_data: includeData }),
+
+  // --- Wireless ---------------------------------------------------------------
+
+  wifiStatus: () => get<WifiStatus>("/network/wifi"),
+
+  /** A POST because it takes seconds and is asked for by pressing a button. */
+  scanWifi: () =>
+    post<{ networks: WifiNetwork[]; message?: string }>(
+      "/network/wifi/scan",
+      undefined,
+      120_000,
+    ),
+
+  /**
+   * Join a network.
+   *
+   * Allowed longer than anything else in the API: if it fails, the server puts
+   * the previous configuration back and applies it again *before* answering, so
+   * this waits for the rollback too — which is the right thing to wait for.
+   */
+  joinWifi: (ssid: string, passphrase: string) =>
+    post<WifiStatus>("/network/wifi", { ssid, passphrase }, 300_000),
+
+  forgetWifi: () => post<WifiStatus>("/network/wifi/forget", undefined, 150_000),
 
   // --- When something is wrong ------------------------------------------------
 

@@ -7,7 +7,7 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–8 complete. Milestone 9 next.** A USB stick turns a Windows
+**Current position: Milestones 0–8 complete. Milestone 9 in progress.** A USB stick turns a Windows
 laptop into a working server, a new server says what to do next, and it is then reachable by
 name over HTTPS from any device in the house. It backs itself up every night, looks for
 updates on its own, applies one and puts the previous version back if it does not work, and
@@ -15,12 +15,16 @@ survives having its power cut mid-`dpkg` — and when something does go wrong it
 file safe to send to somebody, repair itself, or start again without losing anybody's
 photographs.
 
-What is missing is hardware. Everything above is proven in VMs, on Intel with KVM, with
-emulated disks and a wired network. Milestone 9 is the first time any of it meets a real
-laptop — which is where Wi-Fi, lid-close behaviour, thermal throttling and USB disks that
-misbehave all arrive at once. Making the installer stick also still takes one command on a
-Linux machine; the graphical tool for Windows and macOS is Milestone 10, and it is what
-Stage 1 is still missing.
+It also joins a wireless network now, and refuses a wrong password without changing
+anything — proven against `mac80211_hwsim`, which is a real `mac80211` stack with a
+simulated radio, so the handshake is genuine even though the card is not.
+
+What is still missing is hardware. Everything above is proven in VMs, on Intel with KVM,
+with emulated disks. Milestone 9 is the first time any of it meets a real laptop — which is
+where driver quirks, lid-close behaviour, thermal throttling and USB disks that misbehave
+all arrive at once. Making the installer stick also still takes one command on a Linux
+machine; the graphical tool for Windows and macOS is Milestone 10, and it is what Stage 1 is
+still missing.
 
 Nothing has been released. The release machinery exists and has never been run for real, and
 there is no host for the update archive yet.
@@ -286,7 +290,8 @@ is why Stage 1 is not done.
 
 - [x] Ethernet DHCP, local hostname, mDNS discovery, local HTTPS on the ordinary ports
 - [x] Network diagnostics and an honest offline state
-- [→] Wi-Fi setup — **moved to Milestone 9**, where there is real wireless hardware
+- [→] Wi-Fi setup — **moved to Milestone 9**, where wireless hardware could be tested
+      against. It shipped there, against simulated radios on the real `mac80211` stack
 - [→] Optional private remote access — **deferred past Stage 1**
 
 Public internet exposure stays out of scope.
@@ -329,9 +334,15 @@ not work in the one respect it exists for, and nothing failed. Recorded in
 **Wi-Fi moved to Milestone 9** rather than being written here. QEMU has no wireless device,
 and a Wi-Fi setup flow that has never touched a real adapter is a guess about the one
 operation whose failure mode is *the server is now unreachable and the way to fix it was the
-network*. Milestone 9 is where the laptops and their various adapters are. Until then a
-Homebase server needs a network cable, and that is a real gap: a thin laptop without an
-Ethernet port cannot be one yet.
+network*.
+
+The premise turned out to be half wrong, which is worth recording. QEMU has no wireless
+device, but the *kernel* does: `mac80211_hwsim` puts simulated radios on the real `mac80211`
+stack, so `wpa_supplicant`, `netplan` and `iw` cannot tell the difference. That is enough to
+test every line of Homebase's own code and every claim it makes to the user. It is not
+enough to test drivers, firmware or roaming, which still need laptops — so the deferral was
+right about *what* needed hardware and wrong about *all of it* needing hardware. Shipped in
+Milestone 9.
 
 **Private remote access is deferred past Stage 1.** It is not in the Stage 1 definition of
 done, it cannot be tested without an account on somebody else's service, and depending on a
@@ -460,17 +471,68 @@ recognisable strings in each of those places and then greps the finished bundle 
 A support tool that quietly contains the password database is not an unhelpful support tool;
 it is a disclosure with a download button.
 
-### Milestone 9 — Hardware alpha
+### Milestone 9 — Hardware alpha — in progress
 
+- [x] **Wi-Fi setup from the dashboard** — moved here from Milestone 7, and now proven
+      against simulated radios rather than deferred again
 - [ ] Intel and AMD laptops, with and without TPM, various Wi-Fi adapters
 - [ ] UEFI and Secure Boot, lid-close behaviour, sleep prevention, thermal reporting
 - [ ] Power-loss recovery, Wi-Fi reconnection, USB disk handling
-- [ ] **Wi-Fi setup from the dashboard** — moved here from Milestone 7, because the failure
-      mode of getting it wrong is a server that can no longer be reached to fix it, and the
-      VM lab has no wireless hardware to get it wrong on
 
 **Done when:** three different laptops complete install → first boot → app install → reboot
 → backup → restore, with no manual Linux commands at any point.
+
+#### Wi-Fi, and what a simulated radio does and does not prove
+
+Wi-Fi was held out of Milestone 7 because **the failure mode is a server that can no longer
+be reached to fix it** — every other operation in Homebase fails by not working — and there
+was no wireless hardware to get it wrong on. It is here because there turned out to be, near
+enough.
+
+`mac80211_hwsim` is the kernel's simulated wireless driver. It creates real `wlanN`
+interfaces on the real `mac80211` stack, so `wpa_supplicant`, `netplan` and `iw` behave
+exactly as they do on a card. `make vm-test-wifi` builds two radios, runs `hostapd` with
+WPA2 on one as the house router and `dnsmasq` behind it, and has the server join from the
+other. The association and the four-way handshake are real; only the radio is not.
+
+**What that proves** is every line of Homebase's own code, and the claims that matter:
+
+- a wrong password changes nothing, and says so — the previous configuration is put back and
+  re-applied *before* the error returns, so the message can honestly say the server is
+  connected exactly as it was
+- the Ethernet configuration is never touched, checked by comparing the wired address before
+  and after a failed attempt
+- the cable still wins afterwards, checked against the routing table rather than against the
+  file that was written
+- the passphrase is in none of: the status, a scan, the audit log, or a diagnostic file
+- an SSID with a newline or a quote in it cannot change the shape of the settings file
+
+**What it does not prove** is the half this milestone still owes, and none of it can be
+faked: driver quirks and firmware that will not load, cards that vanish on resume, regulatory
+domains that make a channel disappear, roaming between two access points with the same name,
+and the specific misery of a Realtek adapter. Those need laptops.
+
+Three decisions carry the safety, and each is in the code rather than in a warning:
+
+**netplan, not NetworkManager.** netplan is what an Ubuntu Server install already uses, and
+running two things that both believe they own the network is a well-known way to lose it.
+
+**The settings file is JSON.** A netplan file is YAML and JSON is valid YAML, so it is
+produced by `encoding/json` rather than by formatting — which means a network name containing
+a quote or a newline is escaped by construction, in a file that decides what the machine
+connects to. Hand-formatting somebody else's string into that file is the kind of quoting
+that is right until the day it is not.
+
+**Wireless is written to one file, and the cable's is never read.** That is what makes a
+failed attempt unable to strand a machine that is plugged in.
+
+The test found two bugs, and the second is the interesting one. `/etc/netplan` was read-only
+for `hostd` under `ProtectSystem=strict`, so the write failed — the same shape as the
+`/etc/apt` bug in Milestone 8. But the failure was reported as `wifi.did_not_join`, with a
+message saying to check the password, **and the wrong-password test passed on it**: it was
+refused, nothing changed, no file was left behind. Every assertion held and none of them
+were about a password. There are now two error codes, and the test asserts the failure came
+from joining rather than from writing.
 
 ### Milestone 10 — The graphical stick-maker
 

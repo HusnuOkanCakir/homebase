@@ -237,7 +237,7 @@ func (s *Server) handleOperation(w http.ResponseWriter, r *http.Request) {
 				Phase:     "result",
 				Outcome:   "rejected",
 				ErrorCode: ErrConfirmationRequired.Code,
-				Params:    json.RawMessage(body),
+				Params:    redactSecrets(body, op.Secret),
 			})
 			s.writeError(w, reqID, ErrConfirmationRequired)
 			return
@@ -253,7 +253,7 @@ func (s *Server) handleOperation(w http.ResponseWriter, r *http.Request) {
 		PeerUID:   peer.UID,
 		PeerPID:   peer.PID,
 		Phase:     "attempt",
-		Params:    json.RawMessage(body),
+		Params:    redactSecrets(body, op.Secret),
 	}
 	if err := s.auditor.Write(attempt); err != nil {
 		s.log.Error("audit write failed; refusing to proceed", "error", err, "request_id", reqID)

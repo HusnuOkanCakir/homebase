@@ -1292,6 +1292,182 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /network/wifi:
+    get:
+      tags: [network]
+      summary: Whether this server has wireless, and what it has joined
+      description: |
+        Requires `network.diagnose`.
+
+        `available` is false on much of the hardware Homebase runs on, and is the first thing
+        a screen needs to know — "no networks in range" and "this machine cannot see networks
+        at all" send somebody to entirely different places.
+
+        `has_wired_connection` is what decides how frightening the screen has to be. Setting
+        up Wi-Fi over a cable is safe, because the cable survives a failure; changing it while
+        wireless is the only connection is the case that can strand the machine.
+
+        **The passphrase is never returned**, by this or by anything else.
+      operationId: getWifiStatus
+      responses:
+        "200":
+          description: What the wireless is doing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WifiStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+    post:
+      tags: [network]
+      summary: Join a wireless network
+      description: |
+        Requires `network.modify`. **The only operation in the API that can change how this
+        server is reached**, which is why it was held back from Milestone 7 until it could be
+        tested.
+
+        Homebase writes exactly one netplan file and reads none of the others, so an Ethernet
+        connection is never touched: if this is being done over a cable, the cable is still
+        there afterwards no matter how badly the wireless goes. Wireless takes a worse route
+        metric than the cable, so a machine with both prefers the cable.
+
+        **A failure is rolled back before this answers.** The previous configuration is put
+        back and re-applied, and only then does the error return — so the caller waits for the
+        rollback too, and the message can honestly say nothing has changed. The usual reason
+        is a wrong password.
+
+        Can take a minute or more: associating and getting an address is seconds, and a
+        failure is that plus the rollback.
+      operationId: joinWifi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ssid]
+              properties:
+                ssid:
+                  type: string
+                  maxLength: 32
+                passphrase:
+                  type: string
+                  minLength: 8
+                  maxLength: 63
+                  description: |
+                    Omitted for an open network. Written to a root-only file and never
+                    returned by any endpoint.
+      responses:
+        "200":
+          description: The server joined the network
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WifiStatus"
+        "400":
+          description: Not a network name or password Wi-Fi can accept
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: This server has no wireless card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            The server did not join. The previous configuration has already been put back.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /network/wifi/scan:
+    post:
+      tags: [network]
+      summary: List the wireless networks this server can see
+      description: |
+        Requires `network.diagnose`. Changes nothing and does not disturb an existing
+        connection.
+
+        **A `POST` despite changing nothing.** Scanning takes seconds, tunes the radio away
+        from its channel while it runs, and is something a person asks for by pressing a
+        button — a `GET` that a browser may retry, prefetch or cache is the wrong shape.
+
+        Strongest signal first, one row per network name rather than one per access point, and
+        hidden networks are left out because a row that cannot be picked is worse than no row.
+      operationId: scanWifi
+      responses:
+        "200":
+          description: What the card can hear
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [networks]
+                properties:
+                  networks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WifiNetwork"
+                  message:
+                    type: string
+                    description: |
+                      What to say when the list is empty, which is a different thing from an
+                      error and needs different words.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: This server has no wireless card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /network/wifi/forget:
+    post:
+      tags: [network]
+      summary: Stop using wireless on this server
+      description: |
+        Requires `network.modify`. Removes Homebase's wireless configuration and applies the
+        change.
+
+        This can disconnect a server that is only on Wi-Fi, and is then reversible only by
+        somebody who can still reach it.
+      operationId: forgetWifi
+      responses:
+        "200":
+          description: Wireless is no longer configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WifiStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
   /system/diagnostics:
     post:
       tags: [system]
@@ -1992,6 +2168,66 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    WifiStatus:
+      type: object
+      additionalProperties: false
+      required: [available, connected, configured, has_wired_connection]
+      properties:
+        available:
+          type: boolean
+          description: Whether this machine has a wireless card at all.
+        interface:
+          type: string
+        connected:
+          type: boolean
+          description: |
+            Asked of the kernel rather than inferred from having an address: an interface can
+            hold a stale address after the network has gone.
+        ssid:
+          type: string
+        addresses:
+          type: array
+          items:
+            type: string
+        signal:
+          type: integer
+          description: Strength in dBm — negative, closer to zero is better.
+        bars:
+          type: integer
+          minimum: 0
+          maximum: 4
+        configured:
+          type: boolean
+          description: |
+            Whether Homebase has written a wireless configuration. Separate from `connected`:
+            a configured network that is not joined is a state somebody needs to see, and it
+            looks like nothing at all otherwise.
+        has_wired_connection:
+          type: boolean
+          description: |
+            Whether a cable is also carrying an address. What decides how frightening the
+            screen has to be.
+
+    WifiNetwork:
+      type: object
+      additionalProperties: false
+      required: [ssid, signal, bars, security, current]
+      properties:
+        ssid:
+          type: string
+        signal:
+          type: integer
+        bars:
+          type: integer
+          minimum: 0
+          maximum: 4
+        security:
+          type: string
+          enum: [open, wep, wpa, wpa3]
+          description: In the words needed to warn somebody, not to configure anything.
+        current:
+          type: boolean
+
     NetworkStatus:
       type: object
       additionalProperties: false

@@ -67,6 +67,16 @@ EXPECTED = {
     "storage.remove_location": ("medium", "required"),
     "storage.unmount": ("medium", "required"),
     "storage.list_disks": ("read", "none"),
+
+    # Wireless. Joining is high and explicit not because it destroys anything —
+    # it destroys nothing — but because it is the only operation that can leave
+    # the machine unreachable from the browser that asked for it. Scanning must
+    # stay a read: a scan that quietly joined something would be the worst
+    # possible surprise on this surface.
+    "network.wifi_connect": ("high", "explicit"),
+    "network.wifi_forget": ("medium", "required"),
+    "network.wifi_scan": ("read", "none"),
+    "network.wifi_status": ("read", "none"),
     # Backup. restore is the third operation that destroys data irreversibly,
     # and the only one where what it overwrites is usually what somebody is
     # trying to save. preview must stay read-only: it is what a user is shown
@@ -133,6 +143,41 @@ def main() -> int:
             problems.append(
                 f"{operation['name']} only reads but demands "
                 f"{operation['confirmation']!r} confirmation")
+
+    # Secrets, declared rather than guessed at.
+    #
+    # The audit log records the parameters of every privileged call and is
+    # append-only, so anything written into it is written for good. hostd deals
+    # in references — an application id, a disk id — and that invariant made it
+    # safe to record everything, until network.wifi_connect needed a passphrase
+    # by value. It went to the log in plain text, and a VM test looking for it
+    # there is what found it.
+    #
+    # So the operations known to take a secret are listed here, away from the
+    # code that declares them. Adding one means changing this file in the same
+    # commit, which is the point.
+    TAKES_A_SECRET = {
+        "network.wifi_connect": ["passphrase"],
+    }
+    for name, fields in TAKES_A_SECRET.items():
+        operation = declared.get(name)
+        if operation is None:
+            problems.append(f"{name} is no longer declared")
+            continue
+        for field in fields:
+            if field not in operation.get("secret", []):
+                problems.append(
+                    f"{name} does not declare {field!r} as a secret; it would be "
+                    f"written to the audit log in plain text")
+
+    # And the other direction: an operation that declares a secret is one
+    # somebody has thought about. One that appears here without being in the list
+    # above has been added without that thought reaching this file.
+    for operation in declared.values():
+        if operation.get("secret") and operation["name"] not in TAKES_A_SECRET:
+            problems.append(
+                f"{operation['name']} declares secret fields "
+                f"{operation['secret']} and is not listed in this file")
 
     if problems:
         print("The privilege declarations changed in a way that needs a human:\n")

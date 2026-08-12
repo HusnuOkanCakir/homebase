@@ -65,7 +65,13 @@ func main() {
 	}
 	storage := hostd.NewStorageServices(*storageDir, *stateDir)
 	hostd.RegisterStorageOperations(registry, storage)
-	hostd.RegisterNetworkOperations(registry, hostd.NewNetworkServices())
+	network := hostd.NewNetworkServices()
+	hostd.RegisterNetworkOperations(registry, network)
+
+	// Wireless is registered separately: it is the first thing in Homebase that
+	// can change how the machine is reached, and keeping it apart from the
+	// read-only network operations makes that visible in one place.
+	hostd.RegisterWifiOperations(registry, network)
 	updates := hostd.NewUpdateServices()
 	hostd.RegisterUpdateOperations(registry, updates)
 

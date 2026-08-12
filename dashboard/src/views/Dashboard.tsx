@@ -180,7 +180,7 @@ export function Dashboard({ user, onSignOut }: Props) {
         ) : tab === "backup" ? (
           <Backup canManage={user.permissions.includes("backup.run")} />
         ) : tab === "network" ? (
-          <Network />
+          <Network canManage={user.permissions.includes("network.modify")} />
         ) : tab === "updates" ? (
           <Updates canManage={user.permissions.includes("update.manage")} />
         ) : tab === "repair" ? (

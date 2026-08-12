@@ -341,7 +341,7 @@ def build_hostd(version: str, binaries: Path) -> Path:
         # binary, every backup fails at the point of writing the settings —
         # which is what happened on every machine not installed from the ISO,
         # since only the installer's autoinstall happened to pull it in.
-        depends="systemd, adduser, sqlite3",
+        depends="systemd, adduser, sqlite3, iw, wpasupplicant",
         description=(
             "Homebase privileged host service\n"
             " The only component of Homebase that runs as root. It accepts a fixed,\n"

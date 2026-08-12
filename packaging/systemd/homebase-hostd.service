@@ -103,6 +103,17 @@ ReadWritePaths=-/etc/hosts
 # homebase-update-check.service, which is a fixed unit installed by the package.
 ReadWritePaths=-/etc/apt/sources.list.d -/etc/apt/preferences.d
 
+# One directory, for one file: /etc/netplan/90-homebase-wifi.yaml, whose name is
+# a constant in the code. hostd writes the wireless network somebody chose and
+# never reads or touches the file that configures the cable — which is what makes
+# a failed Wi-Fi attempt unable to strand the machine.
+#
+# Found by the wireless test, which failed here with "read-only file system"
+# while reporting it as a wrong password. The message was wrong as well as the
+# sandbox, and both were fixed: a configuration that cannot be written is not the
+# same fault as a network that will not let you in.
+ReadWritePaths=-/etc/netplan
+
 # AF_UNIX for the socket; AF_NETLINK for reading network state later. No
 # AF_INET: hostd never talks to the network, and should not be able to.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK

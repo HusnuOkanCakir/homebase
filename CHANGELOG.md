@@ -353,6 +353,36 @@ Milestone 0 — contracts and project machinery. No product code.
   identity, and deliberately keeps the update channel, because a machine that forgets where
   its security fixes come from is worse than one that remembers
 
+- **Wi-Fi setup from the dashboard**, carried from Milestone 7 and now proven rather than
+  deferred again. `mac80211_hwsim` puts simulated radios on the real `mac80211` stack, so
+  `make vm-test-wifi` runs `hostapd` with WPA2 as the house router and has the server join
+  from a second radio — a real association and a real four-way handshake, with only the radio
+  simulated. What it cannot cover is drivers, firmware and roaming, which still need laptops
+- **A wrong password changes nothing, and says so.** The previous configuration is put back
+  and re-applied *before* the error returns, so the caller waits for the rollback and the
+  message can honestly say the server is connected exactly as it was. This is the whole
+  reason the feature was held back: every other operation in Homebase fails by not working,
+  and this one can fail by making the machine unreachable from the browser configuring it
+- The Ethernet configuration is never read or written. Homebase writes one netplan file, and
+  wireless takes a worse route metric — so a machine with both prefers the cable, and a
+  failed attempt over a cable costs nothing. Checked by comparing the wired address either
+  side of a failure, and the routing table after a success
+- **The settings file is JSON**, because a netplan file is YAML and JSON is valid YAML. It is
+  produced by an encoder rather than by formatting, so a network name containing a quote or a
+  newline is escaped by construction — in a file that decides what the machine connects to
+- The passphrase appears in none of: the wireless status, a scan, the audit log, or a
+  diagnostic file. Checked in the VM against a real one that was really used
+- **An operation can now declare which of its fields are secret**, and the audit log records
+  those as `[redacted]`. The log holds the parameters of every privileged call, append-only
+  and kept indefinitely, and that was safe on the strength of an invariant: hostd deals in
+  references — an application id, a disk id — never in values anybody would mind seeing.
+  Wi-Fi is the first genuine exception, because netplan needs the passphrase itself. The
+  declaration lives on the operation, appears in `--describe`, and is enforced in both
+  directions by `scripts/check_operations.py`
+- The field is redacted rather than removed: "there was a passphrase and it is not recorded"
+  and "there was no passphrase" are different facts, and somebody reconstructing an incident
+  needs the first
+
 ### Fixed
 
 Three bugs of the same shape, each shipped in the commit before the test that caught it, and
@@ -376,6 +406,16 @@ test that runs is root.
 - **The diagnostic file could not be downloaded.** Its directory was `root:root 0750`, so the
   file inside being readable made no difference: core could not list the directory, and the
   download answered `404` with the file sitting there
+
+And a fourth of the same family, plus the one that makes it interesting. `/etc/netplan` was
+read-only for `hostd` under `ProtectSystem=strict`, so joining a network could not write its
+settings — the same shape as the `/etc/apt` bug above. But it was reported as
+`wifi.did_not_join`, with a message telling somebody to check their password, **and the
+wrong-password test passed on it**: the attempt was refused, nothing changed, and no file was
+left behind. Every assertion held; none of them were about a password. There are now two
+error codes — a settings file that cannot be written is a broken installation, a network that
+will not let the machine in is almost always a wrong password — and the test asserts which
+one it got.
 
 ### Changed
 
