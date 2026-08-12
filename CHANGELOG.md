@@ -265,6 +265,17 @@ Milestone 0 — contracts and project machinery. No product code.
 - The stages are translated rather than passed through. "applying" is accurate and tells a
   person nothing; what they want to know is whether it is safe to walk away, and the answer
   differs between downloading and installing
+- **Bills of materials**, in CycloneDX, written by `make packages` and published beside the
+  artifact they describe. Read from the linked binary with `go version -m` rather than from
+  `go.mod`: one lists what was asked for, the other what arrived, and an SBOM that overstates
+  an artifact turns every advisory into a false alarm
+- The build now **fails if `homebase-hostd` gains a third-party dependency**, checked against
+  the binary rather than against `go.mod` — which is where something arriving through a
+  transitive path would show up. Its bill of materials is empty, and that emptiness is a
+  claim being made rather than a file nobody wrote
+- SBOMs are deterministic: the same inputs produce the same bytes, because ADR-0018 promotes
+  artifacts by comparing checksums and a document that changed on every build would be one
+  more thing that could not be compared
 - `make vm-test-update` (303s): a real archive over HTTP, a real machine, and the checks
   the design exists for. **An archive tampered with and re-signed by somebody else's key is
   refused**, and the version inserted into it is never offered. **A package Homebase does not

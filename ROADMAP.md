@@ -352,7 +352,11 @@ charging for it.
 - [x] An Updates screen and the API behind it, so none of this needs a terminal — including
       that all four routes refuse an unauthenticated caller, which is worth exercising on a
       surface that can install root-level code
-- [ ] Signed release artifacts in CI, SBOMs, build attestations
+- [x] **SBOMs**, in CycloneDX, read from the linked binary rather than from `go.mod` — and
+      `homebase-hostd`'s must be empty, so the build fails if the privileged service ever
+      acquires third-party code
+- [ ] A release workflow: signed artifacts from CI, build attestations, promotion gated on
+      a manual approval
 - [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
 - [ ] Backup scheduling and update timers — the same machinery, deferred from Milestone 5

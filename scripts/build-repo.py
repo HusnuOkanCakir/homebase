@@ -144,6 +144,15 @@ def add_to_pool(repo: Path, debs: list[Path]) -> None:
 
         shutil.copy2(deb, target)
 
+        # The bill of materials travels beside the artifact it describes, in the
+        # pool rather than in the index. Anyone holding a .deb can then fetch the
+        # SBOM for exactly those bytes — which is the only version of the
+        # question worth answering, since "what is in Homebase 0.9.0?" depends on
+        # which 0.9.0.
+        sbom = deb.parent / (deb.name.split("_")[0] + "_" + deb.name.split("_")[1] + ".cdx.json")
+        if sbom.exists():
+            shutil.copy2(sbom, target.parent / sbom.name)
+
 
 def scan_pool(repo: Path) -> list[dict[str, str]]:
     """Ask apt-ftparchive to describe everything in the pool.

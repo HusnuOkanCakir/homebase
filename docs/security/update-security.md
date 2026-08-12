@@ -47,8 +47,24 @@ Every release publishes:
 
 - Signed `.deb` packages and installer image
 - SHA-256 checksums for each artifact
-- An SBOM in SPDX or CycloneDX
+- An SBOM in CycloneDX — **built** ✅
 - Build provenance attestation
+
+**The SBOM is read from the linked binary**, with `go version -m`, rather than from `go.mod`.
+`go.mod` lists what was asked for; `go list -m all` includes modules needed to build and test
+but never linked. An SBOM that overstates what is in an artifact is nearly as unhelpful as one
+that understates it — every advisory becomes a false alarm, and false alarms are how people
+stop reading them.
+
+It also enforces something. `homebase-hostd`'s bill of materials must be **empty**: the
+privileged service carries no third-party code ([ADR-0002](../decisions/0002-implementation-languages.md)),
+and the build fails if it ever does. CI already checks `go.mod`; this checks the artifact
+somebody actually runs, which is where a dependency arriving through a transitive path would
+show up.
+
+Each SBOM travels beside the `.deb` it describes, in the pool rather than in the index, so
+anybody holding an artifact can fetch the bill of materials for exactly those bytes. "What is
+in Homebase 0.9.0?" is not answerable without knowing *which* 0.9.0.
 
 ## Client verification
 

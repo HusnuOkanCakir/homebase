@@ -188,6 +188,11 @@ run-fresh: go-build dash-build ## Same, but discard the existing account and sta
 .PHONY: packages
 packages: go-build dash-build ## Build the Debian packages into dist/
 	@python3 scripts/build-packages.py --version $(VERSION)
+	@python3 scripts/build-sbom.py --version $(VERSION)
+
+.PHONY: sbom
+sbom: go-build ## Write the bills of materials for the built binaries
+	@python3 scripts/build-sbom.py --version $(VERSION)
 
 VERSION ?= 0.0.0~dev
 
