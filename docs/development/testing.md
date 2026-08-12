@@ -155,6 +155,24 @@ about the blast radius rather than the diff. **A change to how the product is
 reached — a port, a scheme, a path, a unit file — reaches every suite that
 reaches the product**, and the cost of finding out is a few minutes each.
 
+**A fourth suite was broken by that same change and stayed broken for a
+milestone.** `vm-test-core` had not been touched since Milestone 2 and had not
+been run since; it was found at the end of Milestone 8 by running every suite
+rather than the ones that looked relevant. Three suites were fixed at the time
+because somebody thought of three. That is the argument for the run below rather
+than for a better memory:
+
+```sh
+for t in hostd core packages apps storage backup network update dashboard; do
+    make vm-test-$t || echo "FAILED: $t"
+done
+```
+
+Roughly twenty minutes for the lot. Worth it before closing a milestone, and
+worth it after anything that changes how the product is reached or installed.
+The installer suite is left out of that loop deliberately — it takes fifteen
+minutes on its own and boots a real Ubuntu ISO.
+
 ### Tests that depend on chance
 
 `vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.
