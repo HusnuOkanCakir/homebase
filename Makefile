@@ -40,7 +40,7 @@ $(STAMP): requirements-dev.txt
 # --- The full check ----------------------------------------------------------
 
 .PHONY: check
-check: hygiene lint validate docs-build go-lint go-check ## Run every check CI runs
+check: hygiene lint validate docs-build go-lint go-check test-repo ## Run every check CI runs
 	@echo
 	@echo "All checks passed."
 
@@ -145,6 +145,12 @@ go-lint: ## gofmt and go vet
 	fi
 	@go vet ./...
 	@echo "Go: formatted and vetted."
+
+# The release machinery, checked without a VM and without Homebase's own
+# binaries: what is under test is the archive around them.
+.PHONY: test-repo
+test-repo: ## Check the archive verifier refuses the archives it should
+	@python3 tests/unit/test_repo.py
 
 .PHONY: hostd-describe
 hostd-describe: ## Print the privileged operation registry as JSON

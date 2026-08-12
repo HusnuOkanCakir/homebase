@@ -1,0 +1,22 @@
+# zizmor's configuration.
+#
+# The rule for this file is that every entry states why, in enough detail that
+# somebody can disagree with it. A list of silenced audits with no reasons is how
+# a security tool becomes decoration.
+
+rules:
+  cache-poisoning:
+    ignore:
+      # The audit fires on `actions/setup-node` being present at all, on the
+      # grounds that it caches by default. It does not: setup-node caches only
+      # when `cache:` names a package manager, and the release build sets none —
+      # which is the fix the audit asks for.
+      #
+      # The risk itself is real and taken seriously. The dependency caches are
+      # writable by any run on this repository, including one from a pull
+      # request. On CI a poisoned cache costs a wrong test result; in the release
+      # build it would be baked into a signed artifact that machines install as
+      # root, and then attested to as having been built from this commit. So
+      # caching is switched off for both toolchains in release.yml, and only
+      # there.
+      - release.yml

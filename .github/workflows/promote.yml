@@ -1,0 +1,137 @@
+name: Promote
+
+# Move a tested artifact to another channel. Nothing is rebuilt.
+#
+# This is the only way to reach stable, and that is the point of it. A rebuild
+# between beta and stable produces a different artifact from the one that was
+# tested, so `build-repo.py promote` copies the index entry the source channel
+# recorded after checking the file still hashes to it — different bytes under the
+# same version are refused rather than shipped.
+#
+# The manual approval is a GitHub environment protection rule on the target
+# channel, not a step in this file. `environment: stable` means the job waits for
+# a reviewer; `environment: beta` may not. That is deliberate: the gate belongs to
+# the channel, so it stays in force no matter which workflow reaches it, and
+# nobody can remove it by editing a workflow in a pull request.
+#
+# See docs/release/process.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The Debian version to promote, e.g. 0.2.0~beta.1"
+        required: true
+        type: string
+      from:
+        description: "The channel it is in now"
+        required: true
+        type: choice
+        options: [development, alpha, beta]
+      to:
+        description: "The channel to move it to"
+        required: true
+        type: choice
+        options: [alpha, beta, stable]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-${{ inputs.to }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: ${{ inputs.from }} → ${{ inputs.to }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.to }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Refuse to promote a channel to itself
+        env:
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+        run: |
+          if [ "$FROM" = "$TO" ]; then
+            echo "::error::$FROM and $TO are the same channel."
+            exit 1
+          fi
+
+      - name: Install the archive tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils
+
+      # The archive as it stands. Promotion reads the source channel's index, so
+      # it needs the repository that channel was published into — not a fresh
+      # build, which is the entire thing being avoided.
+      - name: Fetch the current archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM: ${{ inputs.from }}
+        run: |
+          set -euo pipefail
+          run_id="$(gh run list --workflow release.yml --status success \
+            --json databaseId --jq '.[0].databaseId')"
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful release run to take the archive from."
+            exit 1
+          fi
+          mkdir -p dist
+          gh run download "$run_id" --name "archive-${FROM}" --dir dist/repo
+
+      - name: Import the signing key
+        id: key
+        env:
+          SIGNING_KEY: ${{ secrets.ARCHIVE_SIGNING_KEY }}
+          TO: ${{ inputs.to }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIGNING_KEY}" ]; then
+            echo "::error::No ARCHIVE_SIGNING_KEY in the ${TO} environment."
+            exit 1
+          fi
+          GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          printf '%s' "${SIGNING_KEY}" | gpg --batch --quiet --import
+          fingerprint="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')"
+          echo "fingerprint=${fingerprint}" >> "$GITHUB_OUTPUT"
+          echo "::add-mask::${fingerprint}"
+
+      # Refuses if the artifact in the pool no longer hashes to what the source
+      # channel's index recorded — which is a rebuild wearing a tested version's
+      # name.
+      - name: Promote the artifact
+        env:
+          VERSION: ${{ inputs.version }}
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+          KEY: ${{ steps.key.outputs.fingerprint }}
+        run: |
+          python3 scripts/build-repo.py promote \
+            --version "$VERSION" --from "$FROM" --to "$TO" --key "$KEY"
+
+      - name: Verify the archive the way a machine will
+        env:
+          VERSION: ${{ inputs.version }}
+          TO: ${{ inputs.to }}
+        run: |
+          python3 scripts/build-repo.py verify \
+            --channel "$TO" --version "$VERSION"
+
+      - name: Forget the key
+        if: always()
+        run: |
+          if [ -n "${GNUPGHOME:-}" ] && [ -d "${GNUPGHOME}" ]; then
+            rm -rf "${GNUPGHOME}"
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: archive-${{ inputs.to }}
+          path: dist/repo
+          if-no-files-found: error
+          retention-days: 90
