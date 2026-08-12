@@ -1,0 +1,25 @@
+[Unit]
+Description=Homebase — look for updates from time to time
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0018-updates-are-a-signed-apt-repository.md
+
+[Timer]
+Unit=homebase-update-check.service
+
+# Once a day. Not hourly: nothing here installs anything, so checking more often
+# only tells the archive how many servers exist and how often each is switched
+# on, which is information a local-first product has no business collecting
+# about its own users.
+OnCalendar=daily
+
+# The machine may well have been off. Without this a server that is used at
+# weekends would never check at all, and would sit on a version with a known
+# hole while its dashboard said nothing.
+Persistent=true
+
+# Spread out over six hours, so every Homebase in the world does not ask at
+# midnight. On a household network this costs nothing; on the archive it is the
+# difference between a flat load and a daily spike.
+RandomizedDelaySec=6h
+
+[Install]
+WantedBy=timers.target

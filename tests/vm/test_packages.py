@@ -501,6 +501,18 @@ def verify_scheduled_backups(vm: VM) -> None:
           "and after both refusals nothing has been scheduled",
           json.dumps(body))
 
+    # Updates are looked for on their own. A server nobody touches again should
+    # still find out that a security fix exists, and the unit this starts does
+    # nothing until a channel is configured — so enabling it on every machine
+    # costs nothing and being switched off costs somebody a patch.
+    state = ssh(vm, ["systemctl", "is-enabled", "homebase-update-check.timer"],
+                check=False).stdout.strip()
+    check(state == "enabled", f"the update check runs on its own ({state})")
+
+    timer = ssh(vm, ["cat", "/lib/systemd/system/homebase-update-check.timer"]).stdout
+    check("Persistent=true" in timer,
+          "including on a server that is only switched on at weekends")
+
 
 def verify_reboot(vm: VM) -> None:
     step("Everything comes back after a reboot")

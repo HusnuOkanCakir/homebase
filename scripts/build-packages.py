@@ -111,6 +111,13 @@ if [ "$1" = "configure" ]; then
     # the first connection and is not running the rest of the time.
     if [ -d /run/systemd/system ]; then
         systemctl enable --now homebase-hostd.socket >/dev/null 2>&1 || true
+
+        # Looking for updates on its own. The unit it starts does nothing at
+        # all until an update source is configured, so enabling it here is
+        # safe on a machine that has never been pointed at a channel — and it
+        # means a server that is never touched again still finds out that a
+        # security fix exists.
+        systemctl enable --now homebase-update-check.timer >/dev/null 2>&1 || true
     fi
 fi
 
@@ -315,7 +322,8 @@ def build_hostd(version: str, binaries: Path) -> Path:
                  root / "usr/libexec/homebase/update-run", 0o755)
 
     for unit in ("homebase-hostd.service", "homebase-hostd.socket",
-                 "homebase-update-check.service", "homebase-update-apply.service"):
+                 "homebase-update-check.service", "homebase-update-apply.service",
+                 "homebase-update-check.timer"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,

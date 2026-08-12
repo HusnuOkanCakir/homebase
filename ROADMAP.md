@@ -361,13 +361,21 @@ charging for it.
       is the setting that makes it work on the machine Homebase runs on: a laptop in a
       cupboard is asleep at three in the morning more often than not, and without it the
       run is skipped silently, every night, until somebody needs it
-- [ ] The schedule in the dashboard, and the update timer that uses the same machinery
+- [x] **The update check runs on its own**, once a day, catching up if the machine was off.
+      Not hourly: nothing it does installs anything, and checking more often would only tell
+      the archive how many servers exist and when each is switched on
+- [ ] The backup schedule in the dashboard — the operations work, but setting one still
+      means calling the API
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
 - [x] **Backup scheduling** — a systemd timer, not a ticker inside core. `Persistent=true`
       is the setting that makes it work on the machine Homebase runs on: a laptop in a
       cupboard is asleep at three in the morning more often than not, and without it the
       run is skipped silently, every night, until somebody needs it
-- [ ] The schedule in the dashboard, and the update timer that uses the same machinery
+- [x] **The update check runs on its own**, once a day, catching up if the machine was off.
+      Not hourly: nothing it does installs anything, and checking more often would only tell
+      the archive how many servers exist and when each is switched on
+- [ ] The backup schedule in the dashboard — the operations work, but setting one still
+      means calling the API
 - [ ] Recovery: diagnostic bundle, service repair, reinstall preserving data, factory reset
       (credential reset shipped in Milestone 5)
 

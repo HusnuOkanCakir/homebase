@@ -281,6 +281,12 @@ Milestone 0 — contracts and project machinery. No product code.
 - `backup.get_schedule` reports whether systemd will *actually* run it, read from systemd
   rather than from the file — a schedule recorded on disk and never enabled is exactly the
   failure worth making visible — along with when it next fires and how the last one went
+- **Updates are looked for on their own**, once a day, enabled on every installation. The
+  unit does nothing until a channel is configured, so this costs nothing on a machine that
+  has never been pointed at one — and it means a server nobody touches again still finds out
+  that a security fix exists. Once a day rather than hourly, because checking more often
+  would only tell the archive how many servers exist and how often each is switched on,
+  which a local-first product has no business collecting about its own users
 - **Bills of materials**, in CycloneDX, written by `make packages` and published beside the
   artifact they describe. Read from the linked binary with `go version -m` rather than from
   `go.mod`: one lists what was asked for, the other what arrived, and an SBOM that overstates
