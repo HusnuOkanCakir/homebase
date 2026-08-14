@@ -547,6 +547,82 @@ def verify_scheduled_backups(vm: VM) -> None:
           "including on a server that is only switched on at weekends")
 
 
+def verify_the_cli_can_drive_the_server(vm: VM) -> None:
+    """The whole product from a terminal, which is the point of Milestone 10.
+
+    Every command here is an ordinary API client — the same surface the dashboard
+    uses, with the same permission checks and the same job records. Nothing
+    reaches hostd directly, because a second path to a privileged operation is a
+    second place for the checks to be wrong.
+
+    The assertions worth having are the two a CLI is judged by: `--json` produces
+    something a script can parse, and the exit codes distinguish "failed" from
+    "used wrongly" from "not answering".
+    """
+    step("Driving the server from a terminal")
+
+    # Authentication by being root, with no token to create first. This is the
+    # line that decides whether the CLI is pleasant or not.
+    result = ssh(vm, ["sudo", "homebasectl", "system"], check=False)
+    check(result.returncode == 0,
+          f"`sudo homebasectl system` works with no setup ({result.returncode})",
+          (result.stdout + result.stderr)[-400:])
+    check("Memory:" in result.stdout, "and reports the machine",
+          result.stdout[:300])
+
+    # --json is the interface a script builds on, so it has to parse.
+    result = ssh(vm, ["sudo", "homebasectl", "system", "--json"], check=False)
+    check(result.returncode == 0, "and answers as JSON")
+    try:
+        parsed = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise TestFailure(f"--json did not produce JSON: {error}\n{result.stdout[:300]}")
+    check(parsed.get("hostname") == "homebase-pkg",
+          f"which parses, and names the machine ({parsed.get('hostname')})")
+
+    for command in (["apps"], ["storage"], ["network"], ["update", "status"]):
+        result = ssh(vm, ["sudo", "homebasectl", *command, "--json"], check=False)
+        check(result.returncode == 0,
+              f"`homebasectl {' '.join(command)} --json` works ({result.returncode})",
+              (result.stdout + result.stderr)[-300:])
+        json.loads(result.stdout)
+
+    # An unprivileged caller has no way in, which is the other half of
+    # authenticating by being root.
+    result = ssh(vm, ["homebasectl", "system"], check=False)
+    check(result.returncode != 0,
+          f"an ordinary user is refused ({result.returncode})",
+          "Running as root is what authenticates this. Without that, it must "
+          "ask for a token rather than working anyway.")
+    check("HOMEBASE_TOKEN" in (result.stdout + result.stderr),
+          "and is told how to authenticate",
+          (result.stdout + result.stderr)[-300:])
+
+    # The exit codes, which are the difference between a usable script and a
+    # script that treats every outcome the same way.
+    result = ssh(vm, ["sudo", "homebasectl", "nonsense"], check=False)
+    check(result.returncode == 2,
+          f"a command that does not exist exits 2, not 1 ({result.returncode})")
+
+    result = ssh(vm, ["sudo", "homebasectl", "apps", "install"], check=False)
+    check(result.returncode == 2,
+          f"and so does a command missing its argument ({result.returncode})")
+
+    result = ssh(vm, ["sudo", "homebasectl", "--address", "https://127.0.0.1:9",
+                      "system"], check=False)
+    check(result.returncode == 3,
+          f"a server that is not answering exits 3 ({result.returncode})",
+          "A script has to be able to tell 'Homebase is down' from 'that "
+          "operation failed'.")
+
+    # And it can actually change something, through the job system.
+    result = ssh(vm, ["sudo", "homebasectl", "backup", "schedule", "off"], check=False)
+    check(result.returncode == 0, f"it can write, not only read ({result.returncode})",
+          (result.stdout + result.stderr)[-300:])
+    check("never" in result.stdout.lower() or "off" in result.stdout.lower(),
+          "and says what it did", result.stdout[:200])
+
+
 def verify_temperature_reporting(vm: VM) -> None:
     """A machine with no sensors must say so, not report zero.
 
@@ -756,6 +832,7 @@ def main() -> int:
         verify_reinstall_is_idempotent(vm, second)
         verify_scheduled_backups(vm)
         verify_temperature_reporting(vm)
+        verify_the_cli_can_drive_the_server(vm)
         verify_factory_reset(vm)
         verify_reboot(vm)
         verify_removal_keeps_data(vm)

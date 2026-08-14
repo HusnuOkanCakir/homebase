@@ -603,27 +603,50 @@ refused, nothing changed, no file was left behind. Every assertion held and none
 were about a password. There are now two error codes, and the test asserts the failure came
 from joining rather than from writing.
 
-### Milestone 10 — The whole product from a terminal
+### Milestone 10 — The whole product from a terminal — in progress
 
 `homebasectl` today has three commands: `installer`, `recovery-code`, `list-accounts`.
 Everything else — applications, storage, backups, updates, wireless, repair — is reachable
 only through the HTTP API or the dashboard. For somebody who lives in a terminal that is the
 wrong way round.
 
-- [ ] A command surface over the whole API: `homebasectl apps`, `storage`, `backup`,
-      `update`, `network`, `repair`
-- [ ] Authentication that suits a shell — a token in the config file or the environment,
-      created once, rather than a browser session
-- [ ] Machine-readable output on demand (`--json`), because the point of a CLI is composing
-      it with other things
-- [ ] Sensible exit codes: a script that cannot tell "failed" from "did nothing" is a script
-      that will one day do neither and report success
+- [x] A command surface over the API: `system`, `apps`, `storage`, `backup`, `update`,
+      `network`, `repair`, `diagnostics`
+- [x] **Authentication by being on the machine.** Running as root it reads the database and
+      mints a short-lived session, which is what root can do anyway; otherwise it wants a
+      token. No setup, nothing to rotate, and `sudo homebasectl apps` simply works
+- [x] `--json` on everything, printing core's answer unmodified rather than something
+      reshaped here — a CLI whose JSON is its own invention drifts from the API it claims
+      to expose
+- [x] Exit codes that distinguish failure (1) from misuse (2) from the server not answering
+      at all (3)
+- [ ] The operations still missing: restoring a backup, formatting and attaching a disk,
+      changing the update channel, factory reset — the destructive ones, which need their
+      confirmations thought about at a terminal rather than copied from the browser
 
 **Done when:** every operation the dashboard can perform can be performed from a terminal,
 over SSH, on the machine itself — and a shell script can drive an install end to end.
 
 It comes first among what is left because it is the surface everything after it lands on.
 Building the VPN or file sharing before it would mean building each twice.
+
+**It is an API client, not a second way in.** As root it could open `hostd`'s socket
+directly, and does not: a second path to a privileged operation is a second place for the
+permission checks, the job records and the events to be wrong. The two commands that *do*
+read the database directly — `recovery-code` and `list-accounts` — exist for a server nobody
+can sign in to, which is the whole point of them (ADR-0015).
+
+**Passwords are never arguments.** The Wi-Fi password comes from the environment or a
+prompt with echo off. An argument is in the shell history and in `ps` output for every user
+on the machine for as long as the command runs, which for joining a network is up to a
+minute.
+
+The VM test found two things on its first two runs, both about the shape of a CLI rather
+than about Homebase. `homebasectl apps --json` was read as a subcommand called `--json` and
+refused — the first thing anybody types. And shared flags did not work *before* the
+subcommand, although the help had always listed them under "Options" as though they were
+global: `--address` first exited 2 as an unknown command. A documented flag that is refused
+is worse than one that does not exist.
 
 ### Milestone 11 — Reachable from anywhere
 

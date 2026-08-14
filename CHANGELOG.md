@@ -399,6 +399,27 @@ Milestone 0 — contracts and project machinery. No product code.
   zero**. Homebase does not control fans and does not pretend to; it says so, which is the
   difference between opening a cupboard door and buying a new laptop
 
+- **`homebasectl` drives the server.** `system`, `apps`, `storage`, `backup`, `update`,
+  `network`, `repair` and `diagnostics` — an ordinary client of the same HTTP API the
+  dashboard uses, with the same permission checks, job records and events. As root it could
+  open hostd's socket directly and deliberately does not: a second path to a privileged
+  operation is a second place for the checks to be wrong
+- **Authentication by being on the machine.** Running as root it reads the database and
+  mints a ten-minute session — which is what root can do anyway, with `sqlite3`, less
+  carefully. No token to create, store, rotate or leak, and `sudo homebasectl apps` simply
+  works. An unprivileged caller needs `HOMEBASE_TOKEN` instead, which is deliberately the
+  less convenient path
+- `--json` everywhere, printing core's answer unmodified. That is the interface to build on;
+  a CLI whose JSON is its own invention drifts from the API it claims to expose
+- Exit codes a script can branch on: `1` failed, `2` used wrongly, `3` the server is not
+  answering. A script that cannot tell "that operation failed" from "Homebase is down" will
+  eventually treat both the same way
+- Anything slow waits and reports how it ended rather than returning a job number, so the
+  polling loop is written once here instead of once per caller
+- **The Wi-Fi password is never an argument** — `HOMEBASE_WIFI_PASSWORD`, or a prompt with
+  echo off. An argument is in the shell history and in `ps` output for every user on the
+  machine for as long as the command runs
+
 ### Fixed
 
 Three bugs of the same shape, each shipped in the commit before the test that caught it, and

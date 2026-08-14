@@ -116,6 +116,7 @@ nav:
       - Versioning: release/versioning.md
   - User guide:
       - Overview: user-guide/index.md
+      - From a terminal: user-guide/terminal.md
       - Installing Homebase: user-guide/installing.md
       - First steps: user-guide/first-steps.md
       - Applications: user-guide/applications.md
