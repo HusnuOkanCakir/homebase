@@ -81,6 +81,28 @@ func NewBackupServices(storage *StorageServices, apps *AppServices,
 // RegisterBackupOperations adds the backup domain to a registry.
 func RegisterBackupOperations(r *Registry, services *BackupServices) {
 	r.MustRegister(Operation{
+		Name:    "backup.get_schedule",
+		Summary: "Report when backups run by themselves, and how the last one went.",
+		Risk:    RiskRead,
+		Confirm: ConfirmNone,
+		Timeout: 15 * time.Second,
+		Handler: Typed(services.getSchedule),
+	})
+
+	r.MustRegister(Operation{
+		Name:    "backup.set_schedule",
+		Summary: "Choose how often backups run by themselves, and where they go.",
+		// Low. It destroys nothing and can be changed again — but it decides
+		// whether anything gets backed up at all, so it is not a read.
+		Risk:        RiskLow,
+		Permissions: []string{"backup.run"},
+		Confirm:     ConfirmNone,
+		Timeout:     30 * time.Second,
+		Rollback:    "backup.set_schedule, with the previous schedule",
+		Handler:     Typed(services.setSchedule),
+	})
+
+	r.MustRegister(Operation{
 		Name:    "backup.list",
 		Summary: "List the backups on a storage location.",
 		Risk:    RiskRead,
@@ -1014,4 +1036,57 @@ func chownTree(root string) error {
 		}
 		return chownToService(path)
 	})
+}
+
+// --- Scheduling ---------------------------------------------------------------
+
+func (s *BackupServices) getSchedule(ctx context.Context, _ struct{}) (any, error) {
+	return readBackupSchedule(ctx), nil
+}
+
+type setScheduleRequest struct {
+	// Every is "daily", "weekly" or "off".
+	Every string `json:"every"`
+
+	// Location is where backups go. Required unless turning the schedule off.
+	Location string `json:"location,omitempty"`
+}
+
+func (s *BackupServices) setSchedule(ctx context.Context, req setScheduleRequest) (any, error) {
+	every := strings.ToLower(strings.TrimSpace(req.Every))
+	if _, known := schedules[every]; !known && every != "off" {
+		return nil, &Error{
+			Code:        "backup.unknown_schedule",
+			Message:     "That is not a schedule Homebase can keep to.",
+			Detail:      fmt.Sprintf("asked for %q; the choices are daily, weekly and off", req.Every),
+			Recoverable: true,
+			Recovery:    "Choose daily, weekly, or off.",
+			Status:      400,
+		}
+	}
+
+	location := strings.TrimSpace(req.Location)
+	if every != "off" {
+		// The destination is checked now rather than at three in the morning.
+		// A schedule pointing at a disk that cannot hold a backup is a promise
+		// that fails in the dark, weeks later, to somebody who was told it was
+		// working.
+		state, found := s.storage.LocationByID(location)
+		if err := s.requireUsableDestination(location, state, found); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := writeBackupSchedule(ctx, every, location); err != nil {
+		return nil, &Error{
+			Code:        "backup.schedule_failed",
+			Message:     "The backup schedule could not be set up.",
+			Detail:      err.Error(),
+			Recoverable: true,
+			Recovery:    "Try again. If it keeps failing, check the system logs.",
+			Status:      500,
+		}
+	}
+
+	return readBackupSchedule(ctx), nil
 }

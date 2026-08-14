@@ -125,6 +125,11 @@ type SystemResources struct {
 	LoadAverage   [3]float64 `json:"load_average"`
 	UptimeSeconds int64      `json:"uptime_seconds"`
 	Power         Power      `json:"power"`
+
+	// Temperature is how hot the machine is, or that it cannot tell. Homebase
+	// runs on old laptops in cupboards, and a machine cooking itself looks from
+	// the outside exactly like a machine that is broken.
+	Temperature Temperature `json:"temperature"`
 }
 
 type Memory struct {
@@ -161,6 +166,7 @@ func systemGetResources(ctx context.Context, _ NoParams) (any, error) {
 		LoadAverage:   load,
 		UptimeSeconds: uptime,
 		Power:         readPower(),
+		Temperature:   readTemperature(sysThermal),
 	}, nil
 }
 

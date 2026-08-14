@@ -213,6 +213,15 @@ type SystemResources struct {
 		OnBattery      *bool `json:"on_battery"`
 		BatteryPercent *int  `json:"battery_percent"`
 	} `json:"power"`
+
+	// Temperature, with a nil reading meaning "this machine cannot tell" rather
+	// than "cold". Every VM is in that state and so is some real hardware.
+	Temperature struct {
+		Celsius *int   `json:"celsius"`
+		Sensor  string `json:"sensor,omitempty"`
+		State   string `json:"state,omitempty"`
+		Message string `json:"message,omitempty"`
+	} `json:"temperature"`
 }
 
 func (c *Client) SystemInfo(ctx context.Context) (*SystemInfo, error) {
@@ -280,4 +289,142 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// NetworkInterface is one way the server is attached to a network.
+type NetworkInterface struct {
+	Name      string   `json:"name"`
+	Kind      string   `json:"kind"`
+	Up        bool     `json:"up"`
+	Addresses []string `json:"addresses,omitempty"`
+	MAC       string   `json:"mac,omitempty"`
+}
+
+// NetworkStatus is how the server is connected, and whether it is.
+type NetworkStatus struct {
+	Hostname  string `json:"hostname"`
+	MDNSName  string `json:"mdns_name"`
+	MDNSWorks bool   `json:"mdns_works"`
+
+	Interfaces  []NetworkInterface `json:"interfaces"`
+	Gateway     string             `json:"gateway,omitempty"`
+	Nameservers []string           `json:"nameservers,omitempty"`
+
+	// Online and Reachable are separate on purpose. A server with an address on
+	// a network whose broadband is down is a different problem from a server
+	// with no address, and they look identical from a browser that will not
+	// load.
+	Online    bool `json:"online"`
+	Reachable bool `json:"reachable"`
+}
+
+func (c *Client) NetworkStatus(ctx context.Context) (*NetworkStatus, error) {
+	var status NetworkStatus
+	if err := c.Call(ctx, "network.status", nil, false, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+// Component is one of the packages an installation is made of.
+type Component struct {
+	Package string `json:"package"`
+	Version string `json:"version"`
+	State   string `json:"state"`
+}
+
+// UpdateStatus is what this machine is running, and where it updates from.
+type UpdateStatus struct {
+	Version string `json:"version"`
+
+	// Consistent and Interrupted are the two ways a half-applied update shows
+	// up, and they are separate because they are found differently: components
+	// disagreeing about their version, and dpkg leaving work unfinished. A
+	// machine can be either without being the other.
+	Consistent  bool `json:"consistent"`
+	Interrupted bool `json:"interrupted"`
+
+	Components []Component `json:"components"`
+
+	Channel string `json:"channel"`
+	Origin  string `json:"origin"`
+}
+
+func (c *Client) UpdateStatus(ctx context.Context) (*UpdateStatus, error) {
+	var status UpdateStatus
+	if err := c.Call(ctx, "update.status", nil, false, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+// UpdateCheckResult is what the archive offers, and whether it answered.
+type UpdateCheckResult struct {
+	Current   string `json:"current"`
+	Available string `json:"available"`
+
+	UpdateAvailable bool   `json:"update_available"`
+	Channel         string `json:"channel"`
+	Reachable       bool   `json:"reachable"`
+	Detail          string `json:"detail,omitempty"`
+}
+
+func (c *Client) UpdateCheck(ctx context.Context) (*UpdateCheckResult, error) {
+	var result UpdateCheckResult
+	if err := c.Call(ctx, "update.check", nil, false, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UpdateChannel is where a machine gets updates from.
+type UpdateChannel struct {
+	Channel   string `json:"channel"`
+	Origin    string `json:"origin"`
+	Reachable bool   `json:"reachable"`
+	Detail    string `json:"detail,omitempty"`
+}
+
+func (c *Client) ConfigureUpdates(ctx context.Context, channel string) (*UpdateChannel, error) {
+	var result UpdateChannel
+	// Confirmed here rather than asking the caller for a word to type. The
+	// dashboard's own warning is the confirmation, and hostd's requirement
+	// exists so that nothing reaches this operation by accident.
+	if err := c.Call(ctx, "update.configure",
+		map[string]string{"channel": channel}, true, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UpdateStarted is the answer to asking for an update, which is not the answer
+// to whether it worked: by the time that is known, hostd will have restarted.
+type UpdateStarted struct {
+	Started bool `json:"started"`
+}
+
+func (c *Client) ApplyUpdate(ctx context.Context) (*UpdateStarted, error) {
+	var result UpdateStarted
+	if err := c.Call(ctx, "update.apply", nil, true, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// UpdateProgress is how far an update got, and how it ended.
+type UpdateProgress struct {
+	Stage   string `json:"stage"`
+	Result  string `json:"result,omitempty"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+	Running bool   `json:"running"`
+}
+
+func (c *Client) UpdateProgress(ctx context.Context) (*UpdateProgress, error) {
+	var progress UpdateProgress
+	if err := c.Call(ctx, "update.progress", nil, false, &progress); err != nil {
+		return nil, err
+	}
+	return &progress, nil
 }

@@ -1,0 +1,230 @@
+name: Release
+
+# Builds a release from a tag, signs the archive, and proves it verifies before
+# it is published.
+#
+# Three properties this workflow exists to hold:
+#
+#   - **The tag decides everything, and cannot decide stable.** scripts/release.py
+#     turns the tag into a version and a channel, and there is no tag that reaches
+#     stable. Getting there means promoting an artifact that has already been
+#     through beta, which is promote.yml and its manual approval.
+#
+#   - **Building never touches the signing key.** The build job has no secrets and
+#     no environment. The key is only reachable from the publish job, whose
+#     environment is named after the channel — so `beta` can require a reviewer
+#     without `development` needing one.
+#
+#   - **The archive is verified before it leaves.** `build-repo.py verify` reads the
+#     finished archive back the way a machine will: gpgv against the exported
+#     keyring, Release against the index, the index against the pool. It shares no
+#     code with the writer, which is the point.
+#
+# Provenance attestations are keyless — Sigstore, bound to this workflow's OIDC
+# identity. Nothing long-lived is stored for them, so the strongest claim about
+# where an artifact came from is also the one with no secret to steal.
+#
+# See docs/release/process.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to build, e.g. v0.2.0-alpha.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # No secrets, no environment, no signing. Everything here would be safe to run
+  # on any commit — which is what makes it safe to attest.
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Both needed by attest-build-provenance: id-token to prove who this
+      # workflow is, attestations to record the result.
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      semver: ${{ steps.plan.outputs.semver }}
+      channel: ${{ steps.plan.outputs.channel }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      # Caching is off here, and only here.
+      #
+      # The dependency caches are writable by any workflow run on this
+      # repository, including one from a pull request. On CI, restoring a
+      # poisoned cache costs a wrong test result. Here it would be baked into a
+      # signed artifact that machines install as root, and attested to as having
+      # been built from this commit. A release is rare and a few minutes is
+      # nothing; the caches are shared state and this build must not read them.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false
+
+      # Node 20 rather than the runner's default, so a release builds the
+      # dashboard with the version CI tested it with. No `cache:`, and
+      # .github/zizmor.yml records why the audit is silenced for this one step.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+
+      # What this tag releases, and where. Refuses a tag that would publish
+      # straight to stable, a version with no changelog entry, and a semver
+      # prerelease that would sort after the release it precedes.
+      - name: Decide what this tag releases
+        id: plan
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: python3 scripts/release.py plan --tag "$RELEASE_TAG"
+
+      - name: Build the dashboard
+        run: |
+          cd dashboard
+          npm ci
+          npm run build
+
+      - name: Build packages and bills of materials
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: make packages VERSION="$VERSION"
+
+      # Bound to the artifacts by digest. Anyone holding a .deb can ask whether
+      # this workflow, at this commit, produced exactly those bytes.
+      - name: Attest what built these packages
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.deb
+
+      - name: Attest the bills of materials
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: dist/homebase-core_${{ steps.plan.outputs.version }}_amd64.deb
+          sbom-path: dist/homebase-core_${{ steps.plan.outputs.version }}.cdx.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packages
+          path: |
+            dist/*.deb
+            dist/*.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  # The only job that can reach the signing key. Its environment is the channel,
+  # so protection rules are set per channel rather than per workflow.
+  publish:
+    name: publish to ${{ needs.build.outputs.channel }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ needs.build.outputs.channel }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: packages
+          path: dist
+
+      - name: Install the archive tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils
+
+      # Into a directory of its own, removed at the end of the job. The default
+      # GNUPGHOME on a runner is a home directory other steps can read.
+      - name: Import the signing key
+        id: key
+        env:
+          SIGNING_KEY: ${{ secrets.ARCHIVE_SIGNING_KEY }}
+          CHANNEL: ${{ needs.build.outputs.channel }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SIGNING_KEY}" ]; then
+            echo "::error::No ARCHIVE_SIGNING_KEY in the ${CHANNEL} environment."
+            echo "The archive is signed by a key held in the environment for the channel"
+            echo "being published to. See docs/release/process.md."
+            exit 1
+          fi
+          GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          printf '%s' "${SIGNING_KEY}" | gpg --batch --quiet --import
+          fingerprint="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')"
+          echo "fingerprint=${fingerprint}" >> "$GITHUB_OUTPUT"
+          echo "::add-mask::${fingerprint}"
+
+      - name: Publish to ${{ needs.build.outputs.channel }}
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          CHANNEL: ${{ needs.build.outputs.channel }}
+          KEY: ${{ steps.key.outputs.fingerprint }}
+        run: |
+          python3 scripts/build-repo.py publish \
+            --version "$VERSION" --channel "$CHANNEL" --key "$KEY"
+
+      # The gate. Reads the finished archive back the way apt will, and fails the
+      # release rather than shipping an archive that does not verify.
+      - name: Verify the archive the way a machine will
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          CHANNEL: ${{ needs.build.outputs.channel }}
+        run: |
+          python3 scripts/build-repo.py verify \
+            --channel "$CHANNEL" --version "$VERSION"
+
+      - name: Forget the key
+        if: always()
+        run: |
+          if [ -n "${GNUPGHOME:-}" ] && [ -d "${GNUPGHOME}" ]; then
+            rm -rf "${GNUPGHOME}"
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: archive-${{ needs.build.outputs.channel }}
+          path: dist/repo
+          if-no-files-found: error
+          retention-days: 90
+
+      # A prerelease on GitHub, because every tag this workflow accepts is one.
+      # gh rather than a third-party action: it is already on the runner, and a
+      # release is not worth another dependency in the trusted path.
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          SEMVER: ${{ needs.build.outputs.semver }}
+          CHANNEL: ${{ needs.build.outputs.channel }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --title "Homebase $SEMVER" \
+            --prerelease \
+            --notes "Published to the ${CHANNEL} channel.
+
+          Verify a package against the workflow that built it:
+
+              gh attestation verify homebase-core_*.deb --repo ${{ github.repository }}
+          " \
+            dist/*.deb dist/*.cdx.json \
+            || gh release upload "$TAG" dist/*.deb dist/*.cdx.json --clobber

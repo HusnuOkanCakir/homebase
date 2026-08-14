@@ -7,6 +7,9 @@ import { Applications } from "./Applications";
 import { Storage } from "./Storage";
 import { Backup } from "./Backup";
 import { Security } from "./Security";
+import { Network } from "./Network";
+import { Updates } from "./Updates";
+import { Repair } from "./Repair";
 import { FirstSteps } from "./FirstSteps";
 import { Restarting } from "./Restarting";
 
@@ -21,7 +24,15 @@ import { Restarting } from "./Restarting";
 
 const REFRESH_MS = 5000;
 
-type Tab = "overview" | "applications" | "storage" | "backup" | "security";
+type Tab =
+  | "overview"
+  | "applications"
+  | "storage"
+  | "backup"
+  | "network"
+  | "updates"
+  | "security"
+  | "repair";
 
 interface Props {
   user: User;
@@ -106,11 +117,35 @@ export function Dashboard({ user, onSignOut }: Props) {
           Backup
         </button>
         <button
+          className={tab === "network" ? "tab tab-current" : "tab"}
+          aria-current={tab === "network" ? "page" : undefined}
+          onClick={() => setTab("network")}
+        >
+          Network
+        </button>
+        <button
+          className={tab === "updates" ? "tab tab-current" : "tab"}
+          aria-current={tab === "updates" ? "page" : undefined}
+          onClick={() => setTab("updates")}
+        >
+          Updates
+        </button>
+        <button
           className={tab === "security" ? "tab tab-current" : "tab"}
           aria-current={tab === "security" ? "page" : undefined}
           onClick={() => setTab("security")}
         >
           Security
+        </button>
+        {/* Last, and named for what somebody is thinking rather than for what
+            it does. Nobody looks for "recovery"; they look for the tab that
+            sounds like "this is not working". */}
+        <button
+          className={tab === "repair" ? "tab tab-current" : "tab"}
+          aria-current={tab === "repair" ? "page" : undefined}
+          onClick={() => setTab("repair")}
+        >
+          Something&rsquo;s wrong
         </button>
       </nav>
 
@@ -144,6 +179,12 @@ export function Dashboard({ user, onSignOut }: Props) {
           <Storage canManage={user.permissions.includes("storage.modify")} />
         ) : tab === "backup" ? (
           <Backup canManage={user.permissions.includes("backup.run")} />
+        ) : tab === "network" ? (
+          <Network canManage={user.permissions.includes("network.modify")} />
+        ) : tab === "updates" ? (
+          <Updates canManage={user.permissions.includes("update.manage")} />
+        ) : tab === "repair" ? (
+          <Repair serverName={system?.hostname ?? ""} />
         ) : (
           <Security username={user.username} />
         )}

@@ -89,6 +89,47 @@ type CreateBackupResult struct {
 	Message    string   `json:"message"`
 }
 
+// BackupSchedule is when backups happen by themselves, and how the last one went.
+//
+// Enabled is read back from systemd rather than inferred from what was asked
+// for. A schedule recorded on disk that systemd is not running is the failure
+// this field exists to make visible, and a screen that showed the request back
+// would never show it.
+type BackupSchedule struct {
+	Every       string `json:"every"`
+	Location    string `json:"location,omitempty"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	NextRun     string `json:"next_run,omitempty"`
+	LastResult  string `json:"last_result,omitempty"`
+}
+
+func (c *Client) BackupSchedule(ctx context.Context) (*BackupSchedule, error) {
+	var schedule BackupSchedule
+	if err := c.Call(ctx, "backup.get_schedule", struct{}{}, false, &schedule); err != nil {
+		return nil, err
+	}
+	return &schedule, nil
+}
+
+// SetBackupSchedule chooses how often backups run, and where they go.
+//
+// every is "daily", "weekly" or "off" — hostd checks it against a fixed table
+// before anything reaches a unit file, so this passes the word through rather
+// than translating it into a calendar expression here.
+func (c *Client) SetBackupSchedule(ctx context.Context, every, location string) (*BackupSchedule, error) {
+	params := struct {
+		Every    string `json:"every"`
+		Location string `json:"location,omitempty"`
+	}{Every: every, Location: location}
+
+	var schedule BackupSchedule
+	if err := c.Call(ctx, "backup.set_schedule", params, false, &schedule); err != nil {
+		return nil, err
+	}
+	return &schedule, nil
+}
+
 func (c *Client) Backups(ctx context.Context, location string) ([]BackupSummary, error) {
 	var out struct {
 		Backups []BackupSummary `json:"backups"`

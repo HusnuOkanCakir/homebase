@@ -108,8 +108,19 @@ func TestTheFirewallLetsTheDashboardThrough(t *testing.T) {
 	}
 	config := withoutComments(rendered)
 
-	if !strings.Contains(config, "ufw allow 8080/tcp") {
+	// The ordinary ports, because the address on the machine's own screen is a
+	// name with no number after it.
+	if !strings.Contains(config, "ufw allow 443/tcp") {
 		t.Error("the firewall does not let the dashboard through")
+	}
+	if !strings.Contains(config, "ufw allow 80/tcp") {
+		t.Error("plain HTTP is blocked, so somebody typing the name without " +
+			"https:// reaches nothing rather than being redirected")
+	}
+	// Without this the server does not answer to its own name, and the address
+	// printed on its screen is the only way to reach it.
+	if !strings.Contains(config, "ufw allow 5353/udp") {
+		t.Error("mDNS is blocked, so <hostname>.local resolves nowhere")
 	}
 	if !strings.Contains(config, "ufw default deny incoming") {
 		t.Error("the firewall does not deny everything else")

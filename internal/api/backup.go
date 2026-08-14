@@ -30,6 +30,9 @@ func (s *Server) registerBackupRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/backups", s.require(auth.PermBackupRead, s.handleListBackups))
 	mux.Handle("POST /api/v1/backups", s.require(auth.PermBackupRun, s.handleCreateBackup))
 
+	mux.Handle("GET /api/v1/backups/schedule", s.require(auth.PermBackupRead, s.handleBackupSchedule))
+	mux.Handle("POST /api/v1/backups/schedule", s.require(auth.PermBackupRun, s.handleSetBackupSchedule))
+
 	mux.Handle("GET /api/v1/backups/{id}/preview", s.require(auth.PermBackupRead, s.handlePreviewRestore))
 	mux.Handle("POST /api/v1/backups/{id}/verify", s.require(auth.PermBackupRead, s.handleVerifyBackup))
 	mux.Handle("POST /api/v1/backups/{id}/restore", s.require(auth.PermBackupRun, s.handleRestoreBackup))
@@ -121,6 +124,76 @@ func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request, user
 			report.Progress("done", percent(100), "The backup is finished.")
 		},
 	})
+}
+
+// --- Backups that happen without anybody pressing anything -------------------------
+
+// handleBackupSchedule reports when backups run, and how the last one went.
+//
+// The last result is on the same response as the schedule on purpose. A
+// schedule is a promise made once and kept nightly, and the way it fails is
+// silently: the disk is unplugged in March, and nobody finds out until the
+// machine dies in November. Anything that shows the promise has to show whether
+// it is being kept.
+func (s *Server) handleBackupSchedule(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	schedule, err := s.host.BackupSchedule(ctx)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, schedule)
+}
+
+func (s *Server) handleSetBackupSchedule(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var body struct {
+		Every    string `json:"every"`
+		Location string `json:"location,omitempty"`
+	}
+	if !s.decode(w, r, &body) {
+		return
+	}
+
+	every := strings.ToLower(strings.TrimSpace(body.Every))
+	if every == "" {
+		s.writeError(w, r, http.StatusBadRequest, apiError{
+			Code:        "request.missing_field",
+			Message:     "Homebase needs to know how often to back up.",
+			Detail:      "every is required",
+			Recoverable: true,
+			Recovery:    "Choose every night, every week, or off.",
+		})
+		return
+	}
+
+	// Long enough for hostd to check the destination is a disk that can actually
+	// hold a backup, which is a mount and a statfs rather than a guess.
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	schedule, err := s.host.SetBackupSchedule(ctx, every, strings.TrimSpace(body.Location))
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	// Turning backups off is recorded above 'info'. It is one click, it is
+	// invisible afterwards, and it is the change somebody will want to find in
+	// the history on the day they discover there is nothing to restore.
+	if schedule.Every == "off" {
+		s.events.Warn(r.Context(), "backup.schedule_disabled", "",
+			"scheduled backups were turned off",
+			"Backups will now only happen when you ask for one.")
+	} else {
+		s.recordAppEvent(r.Context(), "backup.schedule_changed", events.SeverityInfo,
+			schedule.Location, "", "Backups will now run "+schedule.Description+".")
+	}
+	s.log.Info("backup schedule changed", "every", schedule.Every,
+		"location", schedule.Location, "enabled", schedule.Enabled, "by", user.Username)
+
+	writeJSON(w, http.StatusOK, schedule)
 }
 
 func (s *Server) handleVerifyBackup(w http.ResponseWriter, r *http.Request, user *auth.User) {

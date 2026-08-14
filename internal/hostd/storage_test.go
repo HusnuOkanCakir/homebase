@@ -510,3 +510,55 @@ func TestPluggableUsesTransportRatherThanTheRemovableFlag(t *testing.T) {
 		}
 	}
 }
+
+// The installation media a machine booted from is not storage.
+//
+// `make vm-run` showed the cloud-init seed volume — 375 kB, labelled cidata —
+// in the list of disks, offering to erase and prepare the thing the machine had
+// just booted from. Nobody keeps photographs on half a megabyte, so a floor
+// costs nothing and removes an invitation to break the machine you are looking
+// at.
+func TestVolumesTooSmallToBeStorageAreNotOffered(t *testing.T) {
+	machine := newFakeMachine(t)
+
+	// A cloud-init seed, as QEMU presents one.
+	machine.addDisk(t, "vdb", 732, false, "", "virtio")
+	// And a real disk, which must still be there.
+	machine.addDisk(t, "sda", 4*1024*1024*1024/512, false, "QEMU HARDDISK", "usb")
+
+	disks, err := machine.scanner.disks()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, disk := range disks {
+		if disk.Device == "vdb" {
+			t.Error("the seed volume the machine booted from is offered as storage")
+		}
+	}
+	if len(disks) != 1 || disks[0].Device != "sda" {
+		t.Errorf("got %d disks %v, want just sda", len(disks), names(disks))
+	}
+}
+
+// The floor must not hide a disk somebody actually owns.
+func TestASmallButRealDiskIsStillOffered(t *testing.T) {
+	machine := newFakeMachine(t)
+	machine.addDisk(t, "sdb", 2*1024*1024*1024/512, false, "Tiny USB", "usb")
+
+	disks, err := machine.scanner.disks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(disks) != 1 {
+		t.Fatalf("a 2 GB disk was hidden: %v", names(disks))
+	}
+}
+
+func names(disks []Disk) []string {
+	var out []string
+	for _, d := range disks {
+		out = append(out, d.Device)
+	}
+	return out
+}

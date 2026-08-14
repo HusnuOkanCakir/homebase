@@ -95,6 +95,10 @@ nav:
       - 0012 hostd owns the catalogue: decisions/0012-hostd-owns-the-catalogue.md
       - 0013 Storage identity and mounting: decisions/0013-storage-identity-and-mounting.md
       - 0014 Backups readable without Homebase: decisions/0014-backups-are-readable-without-homebase.md
+      - 0015 Password recovery: decisions/0015-password-recovery.md
+      - 0016 Installation media: decisions/0016-installation-media.md
+      - 0017 Local HTTPS and discovery: decisions/0017-local-https-and-discovery.md
+      - 0018 Updates are a signed APT repository: decisions/0018-updates-are-a-signed-apt-repository.md
       - Template: decisions/template.md
   - Security:
       - Threat model: security/threat-model.md
@@ -112,12 +116,16 @@ nav:
       - Versioning: release/versioning.md
   - User guide:
       - Overview: user-guide/index.md
+      - From a terminal: user-guide/terminal.md
       - Installing Homebase: user-guide/installing.md
       - First steps: user-guide/first-steps.md
       - Applications: user-guide/applications.md
       - Storage: user-guide/storage.md
       - Backup and restore: user-guide/backup.md
+      - Finding your server: user-guide/network.md
+      - Using Wi-Fi: user-guide/wifi.md
       - If you forget your password: user-guide/passwords.md
+      - When something is wrong: user-guide/recovery.md
 
 extra:
   social:

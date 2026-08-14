@@ -40,41 +40,131 @@ const defaultDatabase = "/var/lib/homebase/homebase.db"
 var version = "dev"
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintf(os.Stderr, "\n%s\n", err)
-		os.Exit(1)
+	err := run(os.Args[1:], os.Stdout, os.Stderr)
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "\n%s\n", err)
+
+	// Exit codes a script can branch on. "Failed" and "used wrongly" and "the
+	// server is not there" want different handling, and a caller that cannot
+	// tell them apart will eventually treat all three the same way.
+	var usage usageError
+	switch {
+	case errors.As(err, &usage):
+		os.Exit(exitUsage)
+	case strings.Contains(err.Error(), "not answering on this machine"):
+		os.Exit(exitNotAnswering)
+	default:
+		os.Exit(exitFailed)
 	}
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
+	// Shared flags may come before the subcommand as well as after it, because
+	// the help has always presented them as global and a flag that is documented
+	// and refused is worse than one that does not exist.
+	args, err := takeGlobalFlags(args)
+	if err != nil {
+		return err
+	}
+
 	if len(args) == 0 {
 		usage(stderr)
-		return errors.New("no command given")
+		return usageError{errors.New("no command given")}
 	}
 
 	switch args[0] {
+	// These two read the database directly rather than going through the API,
+	// because they exist for a machine whose API cannot be signed into. That is
+	// the whole point of them (ADR-0015).
 	case "recovery-code":
 		return recoveryCode(args[1:], stdout)
 	case "list-accounts":
 		return listAccounts(args[1:], stdout)
 	case "installer":
 		return installer(args[1:], stdout, stderr)
+
+	// Everything below is an ordinary API client, with the same permission
+	// checks, job records and events as the dashboard.
+	case "setup":
+		return setupCommand(args[1:], stdout)
+	case "system":
+		return systemCommand(args[1:], stdout)
+	case "apps":
+		return appsCommand(args[1:], stdout)
+	case "storage":
+		return storageCommand(args[1:], stdout)
+	case "backup":
+		return backupCommand(args[1:], stdout)
+	case "update":
+		return updateCommand(args[1:], stdout)
+	case "network":
+		return networkCommand(args[1:], stdout)
+	case "repair":
+		return repairCommand(args[1:], stdout)
+	case "diagnostics":
+		return diagnosticsCommand(args[1:], stdout)
+
 	case "-h", "--help", "help":
 		usage(stdout)
 		return nil
 	default:
 		usage(stderr)
-		return fmt.Errorf("unknown command %q", args[0])
+		return usageError{fmt.Errorf("unknown command %q", args[0])}
 	}
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `homebasectl — Homebase console tool
+	fmt.Fprint(w, `homebasectl — Homebase from a terminal
+
+  homebasectl setup NAME
+        Create the first administrator, on a server that has none. The
+        password is read from HOMEBASE_PASSWORD or asked for. Prints a
+        recovery code, once — write it down.
+
+  homebasectl system
+        What this machine is: version, uptime, memory, load, temperature.
+
+  homebasectl apps [list]
+  homebasectl apps install|start|stop|restart|uninstall NAME
+  homebasectl apps logs NAME
+        The application catalogue, and what is installed from it.
+
+  homebasectl storage [list]
+  homebasectl storage disks
+        The disks Homebase manages, and every disk it can see.
+
+  homebasectl backup list DISK
+  homebasectl backup now DISK
+  homebasectl backup schedule [daily|weekly|off [DISK]]
+        Backups. With no arguments, "schedule" reports the one in force —
+        including whether systemd is actually running it, and how the last
+        one went.
+
+  homebasectl update [status]
+  homebasectl update check
+  homebasectl update apply
+        Where updates come from, whether one is waiting, and applying it.
+
+  homebasectl network [status]
+  homebasectl network wifi scan
+  homebasectl network wifi join "NETWORK NAME"
+        How this server is connected. The Wi-Fi password is read from
+        HOMEBASE_WIFI_PASSWORD or asked for — never passed as an argument,
+        because arguments are visible in ps and in shell history.
+
+  homebasectl repair
+        Check a short list of things that are often wrong and put right what
+        it can. Deletes nothing.
+
+  homebasectl diagnostics
+        Write a file describing this server, safe to send to somebody. It
+        prints what the file does not contain.
 
   homebasectl recovery-code [--user NAME]
-        Create a new recovery code for an account and print it. The previous
-        code stops working. Use the code on the sign-in page, under "I have
-        forgotten my password", to choose a new password.
+        Create a new recovery code and print it. The previous one stops
+        working. For a server nobody can sign in to.
 
   homebasectl list-accounts
         Show the accounts on this server.
@@ -84,10 +174,20 @@ func usage(w io.Writer) {
         Run "homebasectl installer help" for what it can do.
 
 Options:
+  --json            Print the server\'s answer as JSON, unmodified. This is
+                    the interface to build on; the readable form is not.
+  --address URL     The server to talk to (default `+defaultAddress+`)
   --database PATH   Where Homebase keeps its database
                     (default `+defaultDatabase+`)
 
-Run as root: the database belongs to the Homebase service account.
+Authentication:
+  Run as root and homebasectl reads the database to authenticate itself,
+  which is what root can do anyway. Otherwise it needs a token in
+  HOMEBASE_TOKEN or `+configPath()+`.
+
+Exit codes:
+  0  it worked          2  the command was used wrongly
+  1  it failed          3  Homebase is not answering on this machine
 `)
 }
 

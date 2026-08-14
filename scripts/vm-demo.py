@@ -83,17 +83,10 @@ def install(vm: VM, packages: list[Path]) -> None:
 
     ssh(vm, ["sudo", "sh", "-c", "rm -f /tmp/*.deb"], check=False)
 
-    # core listens on localhost in production, behind a reverse proxy that
-    # Milestone 7 brings. Until then the forwarded port has to reach it, so this
-    # widens the listen address — for this demo machine only, and it is worth
-    # knowing that is not what ships.
-    ssh(vm, ["sudo", "mkdir", "-p", "/etc/systemd/system/homebase-core.service.d"])
-    ssh(vm, ["sudo", "sh", "-c",
-             "printf '[Service]\\nExecStart=\\n"
-             "ExecStart=/usr/libexec/homebase/core --listen 0.0.0.0:8080\\n' > "
-             "/etc/systemd/system/homebase-core.service.d/demo-listen.conf"])
-    ssh(vm, ["sudo", "systemctl", "daemon-reload"])
-    ssh(vm, ["sudo", "systemctl", "restart", "homebase-core.service"])
+    # No listen-address override any more. The package sets HOMEBASE_LISTEN and
+    # HOMEBASE_LISTEN_TLS itself, and the drop-in that used to be here restated
+    # the whole ExecStart line — which would have silently dropped TLS the moment
+    # it was added, exactly as the comment in cmd/core warned.
 
     ok("installed")
 
@@ -101,16 +94,39 @@ def install(vm: VM, packages: list[Path]) -> None:
 def wait_for_dashboard(vm: VM, timeout: int = 120) -> str:
     step("Waiting for the dashboard")
 
-    url = f"http://127.0.0.1:{vm.api_port}"
+    # HTTPS, because that is what Homebase serves. The plain port answers every
+    # request with a redirect here, so following one is also a check that the
+    # redirect works.
+    #
+    # --insecure is the "proceed once" a person clicks in a browser: the
+    # certificate is Homebase's own and nothing on this machine has been told to
+    # trust it. The fingerprint printed on the server's own screen is what makes
+    # that check meaningful for a real user.
+    url = f"https://127.0.0.1:{vm.dashboard_port}"
+    plain = f"http://127.0.0.1:{vm.api_port}"
     deadline = time.time() + timeout
 
     while time.time() < deadline:
         result = subprocess.run(
-            ["curl", "--silent", "--show-error", "--max-time", "5", url],
+            ["curl", "--silent", "--show-error", "--insecure", "--max-time", "5", url],
             capture_output=True, text=True,
         )
         if result.returncode == 0 and "Homebase" in result.stdout:
             ok(f"serving on {url}")
+
+            # The redirect is checked rather than followed. It points at the
+            # guest's own port 443, which the host reaches on a different
+            # forwarded port — so following it from here would look broken while
+            # being right for every real user.
+            redirect = subprocess.run(
+                ["curl", "--silent", "--output", "/dev/null", "--max-time", "5",
+                 "--write-out", "%{http_code} %{redirect_url}", plain],
+                capture_output=True, text=True,
+            ).stdout.strip()
+            if redirect.startswith("307") and "https://" in redirect:
+                ok(f"and plain HTTP redirects to HTTPS ({redirect.split()[1]})")
+            else:
+                info(f"plain HTTP answered {redirect!r}")
             return url
         time.sleep(2)
 

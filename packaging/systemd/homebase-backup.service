@@ -1,0 +1,36 @@
+[Unit]
+Description=Homebase — the scheduled backup
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/user-guide/backup.md
+
+# Nothing to do until a schedule has been set up. Failing here is better than
+# failing inside curl with a message written for somebody who knows what a
+# Unix socket is.
+ConditionPathExists=/etc/homebase/backup-schedule.conf
+
+# The socket, not the service: hostd is socket-activated and is not running
+# between requests.
+After=homebase-hostd.socket
+Requires=homebase-hostd.socket
+
+[Service]
+Type=oneshot
+
+# As the unprivileged account, which is what hostd's peer check expects. A
+# scheduled backup has exactly the privileges the dashboard has — the schedule
+# is not a way to reach hostd more directly than a person can.
+User=homebase
+Group=homebase
+
+ExecStart=/usr/libexec/homebase/backup-run
+
+# Long enough to copy a disk's worth of photographs over USB 2 on an old
+# laptop. hostd bounds the operation itself; this only stops a wedged copy
+# holding the timer forever.
+TimeoutStartSec=7200
+
+# It writes through hostd and touches nothing itself.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes

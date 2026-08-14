@@ -40,9 +40,23 @@ $(STAMP): requirements-dev.txt
 # --- The full check ----------------------------------------------------------
 
 .PHONY: check
-check: hygiene lint validate docs-build go-lint ## Run every check CI runs
+check: hygiene lint validate docs-build go-lint go-check test-repo ## Run every check CI runs
 	@echo
 	@echo "All checks passed."
+
+# The Go tests, without the race detector.
+#
+# `check` used to stop at gofmt and vet, which is how a commit went out with a
+# failing test in it: the checks that ran all passed, and the one that would
+# have caught it was a separate command nobody had reason to think of. A gate
+# that does not cover what you changed is a gate you learn to trust wrongly.
+#
+# Without -race so this stays a few seconds rather than a minute; `make go-test`
+# runs the full thing and so does CI.
+.PHONY: go-check
+go-check:
+	@go test ./... > /dev/null || (go test ./...; exit 1)
+	@echo "Go: tests pass."
 
 # --- Individual checks -------------------------------------------------------
 
@@ -132,6 +146,12 @@ go-lint: ## gofmt and go vet
 	@go vet ./...
 	@echo "Go: formatted and vetted."
 
+# The release machinery, checked without a VM and without Homebase's own
+# binaries: what is under test is the archive around them.
+.PHONY: test-repo
+test-repo: ## Check the archive verifier refuses the archives it should
+	@python3 tests/unit/test_repo.py
+
 .PHONY: hostd-describe
 hostd-describe: ## Print the privileged operation registry as JSON
 	@go run ./cmd/hostd --describe
@@ -174,6 +194,11 @@ run-fresh: go-build dash-build ## Same, but discard the existing account and sta
 .PHONY: packages
 packages: go-build dash-build ## Build the Debian packages into dist/
 	@python3 scripts/build-packages.py --version $(VERSION)
+	@python3 scripts/build-sbom.py --version $(VERSION)
+
+.PHONY: sbom
+sbom: go-build ## Write the bills of materials for the built binaries
+	@python3 scripts/build-sbom.py --version $(VERSION)
 
 VERSION ?= 0.0.0~dev
 
@@ -229,6 +254,10 @@ vm-test-core: ## The vertical slice: setup, sign in, read system, reboot, job re
 vm-test-dashboard: ## The milestone's user journey, in a real browser against a real VM
 	@python3 tests/vm/test_dashboard.py
 
+.PHONY: vm-test-network
+vm-test-network: ## Two machines: reachable by name from the other one
+	@python3 tests/vm/test_network.py
+
 .PHONY: vm-test-packages
 vm-test-packages: ## Install, upgrade and purge the .debs on a clean machine
 	@python3 tests/vm/test_packages.py
@@ -252,6 +281,18 @@ vm-test-backup: ## Back up one machine, destroy it, restore onto a different one
 .PHONY: vm-test-storage
 vm-test-storage: ## Add a real USB disk, unplug it, reconnect it; nothing may corrupt
 	@python3 tests/vm/test_storage.py
+
+.PHONY: vm-test-update
+vm-test-update: ## Update from a signed archive, and refuse one that was tampered with
+	@python3 tests/vm/test_update.py
+
+.PHONY: vm-test-secureboot
+vm-test-secureboot: ## Boot and run with Secure Boot enforcing, as laptops ship
+	@python3 tests/vm/test_secureboot.py
+
+.PHONY: vm-test-wifi
+vm-test-wifi: ## Join a simulated wireless network; a wrong password must cost nothing
+	@python3 tests/vm/test_wifi.py
 
 .PHONY: vm-test-apps
 vm-test-apps: ## Install an application, use it, reboot, uninstall; data must survive

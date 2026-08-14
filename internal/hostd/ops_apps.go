@@ -339,6 +339,14 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 
 	status.Installed = boolPtr(true)
 	switch {
+	// Checked before Running, because Docker reports both while a container is
+	// being brought back after it exited. An application crash-looping every two
+	// seconds was described as "running", which is how File Browser and Jellyfin
+	// spent four milestones unable to start while the tests — which asserted on
+	// exactly this word — stayed green.
+	case state.State.Restarting:
+		status.State = StateFailed
+
 	case state.State.Running:
 		status.State = StateRunning
 
@@ -386,6 +394,19 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 		return nil, err
 	}
 
+	// Before the download, not after it.
+	//
+	// This check already existed for app.start, for the same reason, and the
+	// install path did not call it: Jellyfin is a gigabyte, so asking to install
+	// it without choosing a disk first spent several minutes downloading and
+	// then refused with "Jellyfin needs somewhere to keep its files" — a message
+	// that was true before the first byte and would have cost nothing to say
+	// then. On a home connection that is ten minutes of somebody's evening and
+	// their whole month's data allowance, spent to be told no.
+	if err := s.requireStorage(manifest); err != nil {
+		return nil, err
+	}
+
 	name := containerName(manifest.ID)
 
 	// Already installed is not a failure. Installing twice should converge on
@@ -417,12 +438,19 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 
 	// Private directories are created before the container so the bind mounts
 	// have somewhere to land. Owned by the service account, mode 0750.
-	binds, err := s.prepareStorage(manifest)
+	// The account this application runs as, and which owns everything it can
+	// reach. Created on first install and reused afterwards.
+	as, err := ensureAppOwner(s.stateDir, manifest.ID)
+	if err != nil {
+		return nil, internalError("preparing an account for " + manifest.Name + ": " + err.Error())
+	}
+
+	binds, err := s.prepareStorage(manifest, as)
 	if err != nil {
 		return nil, err
 	}
 
-	config := s.buildContainer(manifest, binds)
+	config := s.buildContainer(manifest, binds, as)
 	if _, err := s.docker.createContainer(ctx, name, config); err != nil {
 		return nil, wrapDockerError(err,
 			"create_failed",
@@ -674,10 +702,14 @@ func (s *AppServices) logs(ctx context.Context, params AppLogsParams) (any, erro
 // Everything here comes from the manifest hostd read off disk. Nothing comes
 // from the caller, which is what makes this safe to do in a root process — see
 // ADR-0012.
-func (s *AppServices) buildContainer(manifest Manifest, binds []string) containerConfig {
+func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner) containerConfig {
 	config := containerConfig{
 		Image: manifest.Container.Reference(),
-		Cmd:   manifest.Container.Command,
+		// The application's own account, which is also what owns every file it
+		// can reach. Without this the container runs as root with no
+		// CAP_DAC_OVERRIDE and cannot write its own data directory.
+		User: as.String(),
+		Cmd:  manifest.Container.Command,
 		Labels: map[string]string{
 			"homebase.app":      manifest.ID,
 			"homebase.managed":  "true",
@@ -736,13 +768,31 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string) containe
 	for _, device := range manifest.Permissions.Devices {
 		// Device names are a fixed enumeration in the schema, mapped here to
 		// paths. A manifest cannot name a device path directly.
-		if path, ok := deviceePaths[device]; ok {
-			config.HostConfig.Devices = append(config.HostConfig.Devices, deviceMapping{
-				PathOnHost:        path,
-				PathInContainer:   path,
-				CgroupPermissions: "rwm",
-			})
+		path, ok := deviceePaths[device]
+		if !ok {
+			continue
 		}
+
+		// A device that is not on this machine is left out rather than passed
+		// through. Docker refuses to create a container whose device is missing
+		// — "error gathering device information while adding custom device
+		// /dev/dri: no such file or directory" — so declaring one made Jellyfin
+		// impossible to start on any machine without a graphics card, which is
+		// every virtual machine and a good share of old laptops.
+		//
+		// These are accelerators, not requirements: without /dev/dri Jellyfin
+		// transcodes on the processor, and without /dev/dvb it cannot record
+		// television but still plays everything else. Refusing to run at all
+		// is the wrong answer to hardware somebody does not have.
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+
+		config.HostConfig.Devices = append(config.HostConfig.Devices, deviceMapping{
+			PathOnHost:        path,
+			PathInContainer:   path,
+			CgroupPermissions: "rwm",
+		})
 	}
 
 	return config
@@ -762,7 +812,7 @@ var deviceePaths = map[string]string{
 // one, which is storage.assign's job and lands with the storage milestone. An
 // application declaring user-selected storage installs and runs without it
 // rather than refusing.
-func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
+func (s *AppServices) prepareStorage(manifest Manifest, as owner) ([]string, error) {
 	var binds []string
 
 	assignments := map[string]Assignment{}
@@ -772,7 +822,7 @@ func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 
 	for _, storage := range manifest.Storage {
 		if storage.Type == "user-selected" {
-			bind, err := s.prepareUserSelected(manifest, storage, assignments)
+			bind, err := s.prepareUserSelected(manifest, storage, assignments, as)
 			if err != nil {
 				return nil, err
 			}
@@ -797,13 +847,25 @@ func (s *AppServices) prepareStorage(manifest Manifest) ([]string, error) {
 		// /srv/homebase/apps/<id> as 0750 root:root. core then cannot traverse
 		// into it, which means it cannot back the data up: a silent failure of
 		// the one thing a user would most notice missing.
-		if err := s.makeOwnedDir(hostPath); err != nil {
+		if err := s.makeOwnedDir(hostPath, as); err != nil {
 			return nil, &Error{
 				Code:        "app.storage_unavailable",
 				Message:     "Homebase could not create somewhere for " + manifest.Name + " to keep its files.",
 				Detail:      err.Error(),
 				Recoverable: false,
 				Status:      500,
+			}
+		}
+
+		// makeOwnedDir only touches what it creates, so a directory that was
+		// already there keeps whoever owned it before — which on any machine
+		// installed before applications had identifiers of their own is the
+		// shared service account, and the application still cannot write.
+		// Handing the tree over is what makes an upgrade work rather than
+		// only a fresh install.
+		if os.Geteuid() == 0 {
+			if err := giveTo(hostPath, as); err != nil {
+				return nil, internalError("setting ownership on " + hostPath + ": " + err.Error())
 			}
 		}
 
@@ -838,7 +900,7 @@ func (s *AppServices) requireStorage(manifest Manifest) error {
 		if storage.Type != "user-selected" {
 			continue
 		}
-		if _, err := s.prepareUserSelected(manifest, storage, assignments); err != nil {
+		if _, err := s.locateUserSelected(manifest, storage, assignments); err != nil {
 			return err
 		}
 	}
@@ -852,7 +914,46 @@ func (s *AppServices) requireStorage(manifest Manifest) error {
 // disk: it produces a media server with an empty library, a database rebuilt
 // from nothing, and a root filesystem quietly filling up. Refusing is worse in
 // the moment and better every time after it. See ADR-0013.
-func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment) (string, error) {
+// prepareUserSelected resolves the disk *and* creates the directory on it.
+//
+// Split from locateUserSelected because requireStorage runs before the image is
+// downloaded, purely to answer "can this run at all" — and a check that creates
+// directories and changes their ownership is not a check.
+func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment, as owner) (string, error) {
+	hostPath, err := s.locateUserSelected(manifest, storage, assignments)
+	if err != nil {
+		return "", err
+	}
+
+	if err := os.MkdirAll(hostPath, 0o750); err != nil {
+		return "", &Error{
+			Code:        "app.storage_unavailable",
+			Message:     "Homebase could not use that disk for " + manifest.Name + ".",
+			Detail:      err.Error(),
+			Recoverable: true,
+			Recovery:    "The disk may be full, faulty or read-only.",
+			Status:      500,
+		}
+	}
+	if os.Geteuid() == 0 {
+		// Recursive: on a machine that installed this application before it had
+		// an account of its own, the files are still owned by the shared
+		// service account and the container could not read them.
+		if err := giveTo(hostPath, as); err != nil {
+			return "", internalError("setting ownership on " + hostPath + ": " + err.Error())
+		}
+	}
+
+	mode := "rw"
+	if storage.ReadOnly() {
+		mode = "ro"
+	}
+	return hostPath + ":" + storage.MountPath + ":" + mode, nil
+}
+
+// locateUserSelected answers where an application's chosen disk puts its files,
+// and refuses if there is no answer. It reads; it never writes.
+func (s *AppServices) locateUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment) (string, error) {
 	described := storage.Description
 	if described == "" {
 		described = storage.ID
@@ -913,27 +1014,7 @@ func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestSto
 		return "", internalError("refusing to mount " + hostPath + ": outside " + mountPoint)
 	}
 
-	if err := os.MkdirAll(hostPath, 0o750); err != nil {
-		return "", &Error{
-			Code:        "app.storage_unavailable",
-			Message:     "Homebase could not use that disk for " + manifest.Name + ".",
-			Detail:      err.Error(),
-			Recoverable: true,
-			Recovery:    "The disk may be full, faulty or read-only.",
-			Status:      500,
-		}
-	}
-	if os.Geteuid() == 0 {
-		if err := chownToService(hostPath); err != nil {
-			return "", internalError("setting ownership on " + hostPath + ": " + err.Error())
-		}
-	}
-
-	mode := "rw"
-	if storage.ReadOnly() {
-		mode = "ro"
-	}
-	return hostPath + ":" + storage.MountPath + ":" + mode, nil
+	return hostPath, nil
 }
 
 // checkResources refuses an install the machine cannot support, before spending
@@ -1000,7 +1081,17 @@ func (s *AppServices) requireInstalled(ctx context.Context, manifest Manifest) e
 // Directories that already exist are left alone: an existing one may have been
 // set up deliberately, and quietly rewriting ownership on a path somebody else
 // manages is not this function's business.
-func (s *AppServices) makeOwnedDir(path string) error {
+// makeOwnedDir creates a directory and every parent below the data root.
+//
+// Intermediates belong to the service account, not to the application: they are
+// shared — /srv/homebase/apps holds every application's directory — and giving
+// the root to whichever application happened to be installed first would put one
+// application's files inside a directory another one owns, and stop core
+// traversing it to make a backup.
+//
+// The leaf an application actually writes to is handed over separately, by the
+// caller, once it exists.
+func (s *AppServices) makeOwnedDir(path string, _ owner) error {
 	relative, err := filepath.Rel(s.dataRoot, path)
 	if err != nil || strings.HasPrefix(relative, "..") {
 		return fmt.Errorf("%s is not under %s", path, s.dataRoot)
@@ -1282,4 +1373,30 @@ func chownToService(path string) error {
 		return err
 	}
 	return os.Chown(path, uid, gid)
+}
+
+// giveToServiceGroup keeps a path owned by root and lets the service group read
+// it.
+//
+// The pattern for everything hostd writes as root and core reads as `homebase`:
+// the backup schedule, the diagnostics directory. Ownership stays with root
+// because these describe the machine rather than belong to it, and the group is
+// what lets the unprivileged half see them at all.
+//
+// It is worth its own function because getting it wrong is silent. A root:root
+// 0640 file is perfectly readable by everything that writes it and by every test
+// that runs as root, and invisible to the one account that actually needs it.
+func giveToServiceGroup(path string) error {
+	group, err := user.LookupGroup(serviceAccount)
+	if err != nil {
+		return fmt.Errorf("looking up the %s group: %w", serviceAccount, err)
+	}
+	gid, err := strconv.Atoi(group.Gid)
+	if err != nil {
+		return err
+	}
+	if err := os.Chown(path, 0, gid); err != nil {
+		return fmt.Errorf("giving %s to the %s group: %w", path, serviceAccount, err)
+	}
+	return nil
 }

@@ -1,0 +1,339 @@
+#!/bin/sh
+#
+# The part of updating that has to reach the network.
+#
+# hostd does not run apt, and this script exists because of one line in
+# homebase-hostd.service:
+#
+#     RestrictAddressFamilies=AF_UNIX AF_NETLINK
+#
+# The privileged service cannot open a network socket. That is deliberate and
+# worth keeping — a root process that cannot talk to the internet is a much
+# smaller thing to get wrong — so the work that must talk to the internet
+# happens here instead, in a fixed unit installed by the package, started by
+# hostd through systemd and never composed from anything a caller sent.
+#
+# There is no argument taken from a request. The action is the first argument
+# and must be one of three literal words, each written into a unit file the
+# package installs, because this script runs as root with no sandbox at all: it
+# installs system packages, which is not something that can be done from inside
+# one.
+#
+# Results are written as key=value lines rather than JSON. Emitting correct JSON
+# from shell means escaping, and escaping done by hand in the one place a
+# hostile value could arrive is not a trade worth making.
+
+set -eu
+
+RESULT_DIR=/var/lib/homebase
+SOURCE_PARTS=/etc/apt/sources.list.d
+SNAPSHOT_DIR=/var/lib/homebase/update-snapshot
+DATABASE=/var/lib/homebase/homebase.db
+
+# The four packages an installation is made of. Named rather than globbed: a
+# glob would quietly stop covering one that was renamed, and these move together
+# because they depend on each other with `(= version)`.
+PACKAGES="homebase-hostd homebase-core homebase-apps homebase-dashboard"
+
+export DEBIAN_FRONTEND=noninteractive
+export LC_ALL=C
+
+action="${1:-}"
+
+# Refresh only Homebase's own source.
+#
+# Ubuntu's mirrors have nothing to do with whether a Homebase update exists, and
+# a mirror that is slow or unreachable should not make Homebase's updates fail
+# for a reason that has nothing to do with Homebase.
+#
+# Error-Mode=any is not tidiness. By default `apt-get update` exits 0 when a
+# source fails — including when its signature does not verify — because it
+# assumes other sources will do. Only one source is being refreshed here, so
+# "some source failed" and "this failed" are the same event. Without this, an
+# archive signed by the wrong key was reported as reachable and up to date,
+# which is the exact failure the signing exists to prevent. Found by the test
+# that tampers with the archive on purpose.
+refresh() {
+    apt-get update \
+        -o Dir::Etc::SourceList=/dev/null \
+        -o "Dir::Etc::SourceParts=$SOURCE_PARTS" \
+        -o APT::Update::Error-Mode=any 2>&1
+}
+
+# The lines apt prefixes with E: or W: are the ones that say what went wrong.
+# The rest is a transcript of what it was doing.
+complaint() {
+    grep -E '^(E|W):' | tr '\n' ' ' | cut -c1-400
+}
+
+write_result() {
+    # Written and renamed, so hostd never reads half a result.
+    mv "$RESULT_DIR/.$action.new" "$RESULT_DIR/$action"
+}
+
+# health_ok answers whether the machine is working after an update.
+#
+# Three questions, because they fail differently. Are the four packages all at
+# the version we meant to install — a half-applied set reads as installed and
+# still disagrees. Did the services come back. And does core actually answer,
+# rather than merely being a process systemd has not noticed dying yet.
+HEALTH_DETAIL=""
+health_ok() {
+    want="$1"
+
+    for pkg in $PACKAGES; do
+        have=$(dpkg-query --show --showformat='${Version}' "$pkg" 2>/dev/null || true)
+        if [ "$have" != "$want" ]; then
+            HEALTH_DETAIL="$pkg is at '$have' after updating to $want"
+            return 1
+        fi
+    done
+
+    for unit in homebase-hostd.socket homebase-core.service; do
+        if [ "$(systemctl is-active "$unit" 2>/dev/null)" != "active" ]; then
+            HEALTH_DETAIL="$unit is not running after the update"
+            return 1
+        fi
+    done
+
+    # --insecure because the certificate is the server's own (ADR-0017), and
+    # what is being asked here is whether core answers at all.
+    if ! curl --silent --insecure --max-time 10 -o /dev/null \
+              https://127.0.0.1/api/v1/health; then
+        HEALTH_DETAIL="the dashboard does not answer after the update"
+        return 1
+    fi
+
+    HEALTH_DETAIL=""
+    return 0
+}
+
+# roll_back puts the machine back on the version it was running.
+#
+# The previous version is still in the archive's index — `publish` keeps it
+# there for exactly this — so apt can install it by name. The database snapshot
+# goes back too, because a newer version may have migrated it and older code
+# reading a migrated database is the inconsistent state this whole sequence
+# exists to avoid.
+roll_back() {
+    previous="$1"
+    stage=rolling-back
+    record
+
+    if [ -z "$previous" ]; then
+        stage=rolled-back-failed; outcome=failed
+        detail="$detail — and there was no previous version to return to"
+        record
+        return
+    fi
+
+    targets=""
+    for pkg in $PACKAGES; do
+        targets="$targets $pkg=$previous"
+    done
+
+    if ! output=$(apt-get install -y --allow-downgrades $targets 2>&1); then
+        stage=rolled-back-failed; outcome=failed
+        detail="$detail — and going back to $previous failed: $(printf '%s\n' "$output" | complaint)"
+        record
+        return
+    fi
+
+    if [ -f "$SNAPSHOT_DIR/homebase.db" ]; then
+        systemctl stop homebase-core.service 2>/dev/null || true
+        cp -a "$SNAPSHOT_DIR/homebase.db" "$DATABASE"
+        chown homebase:homebase "$DATABASE" 2>/dev/null || true
+        systemctl start homebase-core.service 2>/dev/null || true
+    fi
+    if [ -d "$SNAPSHOT_DIR/etc-homebase" ]; then
+        cp -a "$SNAPSHOT_DIR/etc-homebase/." /etc/homebase/
+    fi
+
+    stage=rolled-back; outcome=failed
+    detail="$detail — the server was put back on $previous"
+    record
+}
+
+case "$action" in
+check)
+    output=$(refresh) && rc=0 || rc=$?
+
+    {
+        if [ "$rc" -ne 0 ]; then
+            echo "reachable=false"
+            echo "detail=$(printf '%s\n' "$output" | complaint)"
+        else
+            echo "reachable=true"
+            # apt-cache policy applies pinning and priorities, so it answers
+            # what would actually happen rather than what is published.
+            candidate=$(apt-cache policy homebase-core 2>/dev/null \
+                        | awk '/Candidate:/ {print $2; exit}')
+            if [ "$candidate" = "(none)" ]; then candidate=""; fi
+            echo "available=$candidate"
+        fi
+        echo "finished=$(date -u +%s)"
+    } > "$RESULT_DIR/.$action.new"
+
+    write_result
+    exit 0
+    ;;
+apply)
+    # Progress is written as it happens, not at the end.
+    #
+    # A machine that loses power part way through has to leave evidence of where
+    # it got to, because that is the difference between "this needs finishing"
+    # and "this never started". The file is rewritten whole at each stage and
+    # renamed into place, so it is never read half-written.
+    stage=""
+    detail=""
+    outcome=""
+
+    record() {
+        {
+            echo "stage=$stage"
+            if [ -n "$outcome" ]; then echo "result=$outcome"; fi
+            if [ -n "$detail" ]; then
+                echo "detail=$(printf '%s' "$detail" | tr '\n' ' ' | cut -c1-400)"
+            fi
+            if [ -n "$outcome" ]; then echo "finished=$(date -u +%s)"; fi
+            echo "from=$from"
+            echo "to=$to"
+        } > "$RESULT_DIR/.apply.new"
+        mv "$RESULT_DIR/.apply.new" "$RESULT_DIR/apply"
+    }
+
+    installed_version() {
+        dpkg-query --show --showformat='${Version}' "$1" 2>/dev/null || true
+    }
+
+    from=$(installed_version homebase-core)
+    to=""
+
+    stage=refreshing
+    record
+    if ! output=$(refresh); then
+        stage=refreshing; outcome=failed
+        detail=$(printf '%s\n' "$output" | complaint)
+        record
+        exit 1
+    fi
+
+    to=$(apt-cache policy homebase-core 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+    if [ -z "$to" ] || [ "$to" = "(none)" ]; then
+        stage=refreshing; outcome=failed
+        detail="the archive offers no version of homebase-core"
+        record
+        exit 1
+    fi
+
+    # Downgrade protection. apt would happily install an older candidate if the
+    # archive offered one, and an attacker who can serve an old-but-validly-
+    # signed index can otherwise push a machine back to a version with a known
+    # hole — every signature involved being genuine.
+    if [ -n "$from" ] && ! dpkg --compare-versions "$to" gt "$from"; then
+        stage=refreshing; outcome=failed
+        detail="the archive offers $to, which is not newer than the installed $from"
+        record
+        exit 1
+    fi
+
+    # Everything is fetched and verified before anything is applied, so an
+    # update that fails here — no space, no network, a bad signature — has
+    # changed nothing at all. This removes the largest slice of the
+    # interruption window without any cleverness.
+    stage=downloading
+    record
+    if ! output=$(apt-get install -y -d $PACKAGES 2>&1); then
+        stage=downloading; outcome=failed
+        detail=$(printf '%s\n' "$output" | complaint)
+        record
+        exit 1
+    fi
+
+    # What apt does not own: the database a migration will run against, and the
+    # configuration. Application data in /srv/homebase is deliberately not
+    # copied — it is measured in hundreds of gigabytes, no package touches it,
+    # and copying it would fill the disk it is trying to protect.
+    stage=snapshot
+    record
+    rm -rf "$SNAPSHOT_DIR"
+    mkdir -p "$SNAPSHOT_DIR"
+    if [ -f "$DATABASE" ]; then
+        # VACUUM INTO rather than cp: a copy of a live SQLite database can catch
+        # it mid-write, and a snapshot that restores into corruption is worse
+        # than none.
+        sqlite3 "$DATABASE" "VACUUM INTO '$SNAPSHOT_DIR/homebase.db'" || {
+            stage=snapshot; outcome=failed
+            detail="could not snapshot the database; refusing to update without one"
+            record
+            exit 1
+        }
+    fi
+    if [ -d /etc/homebase ]; then
+        cp -a /etc/homebase "$SNAPSHOT_DIR/etc-homebase"
+    fi
+    echo "$from" > "$SNAPSHOT_DIR/version"
+
+    stage=applying
+    record
+    if ! output=$(apt-get install -y $PACKAGES 2>&1); then
+        stage=applying
+        detail=$(printf '%s\n' "$output" | complaint)
+        roll_back "$from"
+        exit 1
+    fi
+
+    # Give the units a moment to come back before asking whether they did. The
+    # packages restart them, and a health check that runs during the restart
+    # reports a failure that is not one.
+    stage=health
+    record
+    sleep 5
+
+    if ! health_ok "$to"; then
+        detail="$HEALTH_DETAIL"
+        roll_back "$from"
+        exit 1
+    fi
+
+    stage=done
+    outcome=ok
+    record
+    exit 0
+    ;;
+repair)
+    # Finish a package transaction that was interrupted.
+    #
+    # This is what `update.status` reporting `interrupted` means, and it is the
+    # command that error message has been naming since the first commit of the
+    # update work. It lives here rather than in hostd for the same reason
+    # everything else in this file does: hostd's unit sets ProtectSystem=strict,
+    # and completing a dpkg transaction writes across the whole filesystem.
+    #
+    # Nothing here reaches the network. `dpkg --configure -a` finishes what is
+    # already unpacked, which is the whole point — a machine that lost power
+    # mid-update has the packages on disk and needs no archive to finish with
+    # them. That matters because the machine most likely to be in this state is
+    # one somebody is trying to fix without a working internet connection.
+    if ! output=$(dpkg --configure -a 2>&1); then
+        echo "$output" >&2
+        echo "could not finish the interrupted update" >&2
+        exit 1
+    fi
+    [ -n "$output" ] && echo "$output"
+
+    # And then anything left unconfigured because a dependency was missing.
+    # Allowed to fail: it may need the network, and a machine that is offline
+    # has still been improved by the line above.
+    if ! apt-get --fix-broken install -y >/dev/null 2>&1; then
+        echo "some packages are still waiting on dependencies" >&2
+    fi
+
+    echo "the interrupted update has been finished"
+    exit 0
+    ;;
+*)
+    echo "update-run: unknown action '$action'" >&2
+    exit 64
+    ;;
+esac

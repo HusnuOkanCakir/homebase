@@ -153,6 +153,11 @@ class VM:
     dashboard_port: int
     pid: int | None = None
 
+    # secure_boot means the firmware enforces signature checking, with
+    # Microsoft's keys enrolled — which is what a laptop bought in the last
+    # decade ships with, and therefore what Homebase has to boot under.
+    secure_boot: bool = False
+
     @property
     def dir(self) -> Path:
         return RUN_DIR / self.name
@@ -226,23 +231,55 @@ class VM:
 
 # --- Prerequisites -----------------------------------------------------------
 
-def find_ovmf() -> tuple[Path, Path]:
-    """Locate OVMF firmware. Homebase is UEFI-only; BIOS boot would test the wrong path."""
-    code_candidates = [
-        "/usr/share/OVMF/OVMF_CODE_4M.fd",
-        "/usr/share/OVMF/OVMF_CODE.fd",
-        "/usr/share/edk2/ovmf/OVMF_CODE.fd",
-        "/usr/share/qemu/OVMF_CODE.fd",
-    ]
-    vars_candidates = [
-        "/usr/share/OVMF/OVMF_VARS_4M.fd",
-        "/usr/share/OVMF/OVMF_VARS.fd",
-        "/usr/share/edk2/ovmf/OVMF_VARS.fd",
-        "/usr/share/qemu/OVMF_VARS.fd",
-    ]
+def find_ovmf(secure_boot: bool = False) -> tuple[Path, Path]:
+    """Locate UEFI firmware. Homebase is UEFI-only; BIOS boot would test the wrong path.
+
+    With `secure_boot`, the firmware is the Secure Boot build and the variable
+    store is the one with **Microsoft's keys already enrolled** — which is what
+    a laptop bought in the last decade ships with, and what Homebase therefore
+    has to boot under. Ubuntu's `shimx64.efi` is signed by Microsoft's UEFI CA,
+    so a correct installation boots; anything that replaced the boot path with
+    something unsigned does not, and that is the point of testing it.
+    """
+    if secure_boot:
+        code_candidates = [
+            "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd",
+            "/usr/share/OVMF/OVMF_CODE.secboot.fd",
+            "/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd",
+        ]
+        # The `.ms` variable store: Microsoft's PK, KEK and db enrolled, Secure
+        # Boot on. The plain store has no keys, which leaves the firmware in
+        # setup mode — where it boots anything and proves nothing.
+        vars_candidates = [
+            "/usr/share/OVMF/OVMF_VARS_4M.ms.fd",
+            "/usr/share/OVMF/OVMF_VARS.ms.fd",
+            "/usr/share/edk2/ovmf/OVMF_VARS.ms.fd",
+        ]
+    else:
+        code_candidates = [
+            "/usr/share/OVMF/OVMF_CODE_4M.fd",
+            "/usr/share/OVMF/OVMF_CODE.fd",
+            "/usr/share/edk2/ovmf/OVMF_CODE.fd",
+            "/usr/share/qemu/OVMF_CODE.fd",
+        ]
+        vars_candidates = [
+            "/usr/share/OVMF/OVMF_VARS_4M.fd",
+            "/usr/share/OVMF/OVMF_VARS.fd",
+            "/usr/share/edk2/ovmf/OVMF_VARS.fd",
+            "/usr/share/qemu/OVMF_VARS.fd",
+        ]
+
     code = next((Path(p) for p in code_candidates if Path(p).exists()), None)
     varsf = next((Path(p) for p in vars_candidates if Path(p).exists()), None)
     if not code or not varsf:
+        if secure_boot:
+            raise VMError(
+                "Secure Boot firmware (OVMF with Microsoft's keys) not found.",
+                "Install it with: sudo apt install ovmf. The files needed are "
+                "OVMF_CODE_4M.secboot.fd and OVMF_VARS_4M.ms.fd — the second is "
+                "the one with Microsoft's keys enrolled, and without it the "
+                "firmware is in setup mode and enforces nothing.",
+            )
         raise VMError(
             "UEFI firmware (OVMF) not found.",
             "Install it with: sudo apt install ovmf. Homebase ships UEFI-only, so the "
@@ -439,7 +476,7 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 # --- Lifecycle ---------------------------------------------------------------
 
-def create(name: str, force: bool = False) -> VM:
+def create(name: str, force: bool = False, secure_boot: bool = False) -> VM:
     check_prerequisites()
 
     existing = RUN_DIR / name
@@ -458,6 +495,7 @@ def create(name: str, force: bool = False) -> VM:
         ssh_port=free_port(2222),
         api_port=free_port(8080),
         dashboard_port=free_port(8443),
+        secure_boot=secure_boot,
     )
     vm.dir.mkdir(parents=True, exist_ok=True)
 
@@ -484,29 +522,58 @@ def create(name: str, force: bool = False) -> VM:
     build_seed_iso(vm, public_key)
     ok("cloud-init seed built")
 
-    _, ovmf_vars = find_ovmf()
+    # A copy per machine: the firmware writes to it, and a shared store would
+    # mean one VM's boot entries leaking into the next.
+    _, ovmf_vars = find_ovmf(secure_boot)
     shutil.copy(ovmf_vars, vm.efi_vars)
+    vm.secure_boot = secure_boot
 
     vm.save()
     return vm
 
 
-def start(vm: VM) -> None:
+def start(vm: VM, lan: int | None = None) -> None:
+    """Boot the machine.
+
+    `lan` joins it to a shared network segment with every other machine
+    given the same number. QEMU's user-mode networking isolates each VM
+    behind its own NAT, which is right for everything else and makes it
+    impossible to test the one claim this milestone rests on: that a server
+    is reachable *by name* from another device. mDNS is multicast, and
+    multicast needs a shared segment.
+
+    A multicast socket rather than a bridge or a tap: those need root, and
+    ADR-0010 says the VM lab does not.
+    """
     if vm.is_running():
         info(f"'{vm.name}' is already running (pid {vm.pid})")
         return
 
-    ovmf_code, _ = find_ovmf()
+    ovmf_code, _ = find_ovmf(vm.secure_boot)
+
+    # Secure Boot needs SMM, and this is not a detail that can be skipped.
+    #
+    # The variable store holding the keys has to be writable by the firmware and
+    # by nothing else. Without SMM, an operating system can write to it directly
+    # — so the firmware would happily enforce signatures against a key list
+    # anything on the machine could replace, which enforces nothing. OVMF knows
+    # this and refuses to claim Secure Boot is on without it.
+    machine = "q35,accel=kvm"
+    firmware = []
+    if vm.secure_boot:
+        machine += ",smm=on"
+        firmware = ["-global", "driver=cfi.pflash01,property=secure,value=on"]
 
     cmd = [
         "qemu-system-x86_64",
         "-name", vm.name,
-        "-machine", "q35,accel=kvm",
+        "-machine", machine,
         "-cpu", "host",
         "-smp", str(VM_CPUS),
         "-m", str(VM_MEMORY_MB),
         "-nographic",
         "-nodefaults",
+        *firmware,
         # UEFI: Homebase ships UEFI-only.
         "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={ovmf_code}",
         "-drive", f"if=pflash,format=raw,unit=1,file={vm.efi_vars}",
@@ -517,10 +584,21 @@ def start(vm: VM) -> None:
         (
             f"user,id=net0"
             f",hostfwd=tcp::{vm.ssh_port}-:22"
-            f",hostfwd=tcp::{vm.api_port}-:8080"
-            f",hostfwd=tcp::{vm.dashboard_port}-:8443"
+            f",hostfwd=tcp::{vm.api_port}-:80"
+            f",hostfwd=tcp::{vm.dashboard_port}-:443"
         ),
         "-device", "virtio-net-pci,netdev=net0",
+    ]
+
+    if lan is not None:
+        # Same multicast group and port for every machine on this segment, so
+        # they see each other's broadcasts the way they would on one switch.
+        cmd += [
+            "-netdev", f"socket,id=lan0,mcast=230.0.0.{lan}:{11000 + lan}",
+            "-device", "virtio-net-pci,netdev=lan0",
+        ]
+
+    cmd += [
         "-serial", f"file:{vm.console_log}",
         "-monitor", "none",
         # A USB controller with nothing on it. Disks are attached at runtime

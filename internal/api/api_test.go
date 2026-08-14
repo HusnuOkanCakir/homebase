@@ -192,12 +192,56 @@ func TestSessionCookieIsProtected(t *testing.T) {
 	if !cookie.HttpOnly {
 		t.Error("the session cookie is readable by JavaScript")
 	}
-	if !cookie.Secure {
-		t.Error("the session cookie would travel over plain HTTP")
-	}
 	if cookie.SameSite != http.SameSiteLaxMode && cookie.SameSite != http.SameSiteStrictMode {
 		t.Error("the session cookie is sent cross-site")
 	}
+
+	// Secure is deliberately *not* asserted here.
+	//
+	// This test used to require it unconditionally, which sounded like the
+	// stricter choice and was the reason Homebase did not work: browsers
+	// discard a Secure cookie that arrives over plain HTTP, so on a real
+	// installation the session vanished and /auth/me answered 401 straight
+	// after a correct password. The flag now follows the connection, and the
+	// property worth pinning is that pairing — see
+	// TestTheSessionCookieMatchesTheConnectionItWasIssuedOn, and
+	// TestTheSessionCookieIsSecureOverTLS for the other half.
+	if cookie.Secure {
+		t.Error("this request carried no TLS, so a Secure cookie would be discarded")
+	}
+}
+
+// The other half: over TLS the flag must be on, or the cookie would travel in
+// the clear the moment somebody reached the server over plain HTTP as well.
+func TestTheSessionCookieIsSecureOverTLS(t *testing.T) {
+	h := newHarness(t)
+
+	server := httptest.NewTLSServer(h.handler)
+	defer server.Close()
+
+	client := server.Client()
+	response, err := client.Post(server.URL+"/api/v1/setup", "application/json",
+		strings.NewReader(`{"username":"okan","password":"`+goodPassword+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("setup returned %d", response.StatusCode)
+	}
+
+	for _, cookie := range response.Cookies() {
+		if cookie.Name != SessionCookie {
+			continue
+		}
+		if !cookie.Secure {
+			t.Error("the session cookie is not Secure over TLS, so it would also " +
+				"travel over plain HTTP")
+		}
+		return
+	}
+	t.Fatal("no session cookie")
 }
 
 // --- Authorisation -----------------------------------------------------------

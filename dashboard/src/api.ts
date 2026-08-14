@@ -121,11 +121,15 @@ async function request<T>(
 
 const get = <T>(path: string, timeoutMs?: number) =>
   request<T>(path, { method: "GET" }, timeoutMs);
-const post = <T>(path: string, body?: unknown) =>
-  request<T>(path, {
-    method: "POST",
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
+const post = <T>(path: string, body?: unknown, timeoutMs?: number) =>
+  request<T>(
+    path,
+    {
+      method: "POST",
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+    timeoutMs,
+  );
 
 // --- Types -------------------------------------------------------------------
 
@@ -153,6 +157,90 @@ export interface RecoveryStatus {
   last_used_at?: string;
 }
 
+
+/** One of the four packages a Homebase installation is made of. */
+export interface Component {
+  package: string;
+  version: string;
+  state: string;
+}
+
+/**
+ * What this server is running.
+ *
+ * Four packages rather than one version string, because the interesting failure
+ * is that they disagree — they move together by dependency, so apt cannot
+ * produce a mixed set on purpose. Only an interrupted update can, and a machine
+ * in that state usually still works, which is why nothing else notices.
+ */
+export interface UpdateStatus {
+  version: string;
+  consistent: boolean;
+  interrupted: boolean;
+  components: Component[];
+  channel: string;
+  origin: string;
+}
+
+export interface UpdateCheck {
+  current: string;
+  available: string;
+  update_available: boolean;
+  channel: string;
+  reachable: boolean;
+  detail?: string;
+}
+
+export interface UpdateChannel {
+  channel: string;
+  origin: string;
+  reachable: boolean;
+  detail?: string;
+}
+
+/**
+ * How far an update got.
+ *
+ * `result` is empty while it is still running. That emptiness is the signal:
+ * the server cannot remember anything across an update, because the update
+ * restarts it.
+ */
+export interface UpdateProgress {
+  stage: string;
+  result?: "ok" | "failed";
+  from?: string;
+  to?: string;
+  detail?: string;
+  running: boolean;
+}
+
+/** One way the server is attached to a network. */
+export interface NetworkInterface {
+  name: string;
+  kind: string;
+  up: boolean;
+  addresses?: string[];
+  mac?: string;
+}
+
+/**
+ * How the server is connected.
+ *
+ * `reachable` and `online` are separate deliberately: a server with an address
+ * on a network whose broadband is down is a different problem from a server
+ * with no address, and both look identical from a browser that will not load.
+ */
+export interface NetworkStatus {
+  hostname: string;
+  mdns_name: string;
+  mdns_works: boolean;
+  interfaces: NetworkInterface[];
+  gateway?: string;
+  nameservers?: string[];
+  online: boolean;
+  reachable: boolean;
+}
+
 export interface SystemInfo {
   hostname: string;
   os: string;
@@ -167,6 +255,19 @@ export interface SystemInfo {
     /** null means the machine has no battery — which is not the same as "not on battery". */
     on_battery: boolean | null;
     battery_percent: number | null;
+  };
+  /**
+   * How hot the machine is.
+   *
+   * `celsius: null` means it cannot tell — every VM, and some real hardware.
+   * Never zero, which would look wonderfully cool.
+   */
+  temperature: {
+    celsius: number | null;
+    sensor?: string;
+    state?: "ok" | "warm" | "hot";
+    /** Only set when something is worth telling somebody. */
+    message?: string;
   };
 }
 
@@ -337,6 +438,92 @@ export interface ApplicationStorage {
 
 // --- Backup -------------------------------------------------------------------
 
+/**
+ * Wireless.
+ *
+ * `available` is false on much of the hardware Homebase runs on, and is the
+ * first thing a screen needs to know — "no networks in range" and "this machine
+ * has no wireless" send somebody to entirely different places.
+ *
+ * `has_wired_connection` decides how frightening the screen has to be: with a
+ * cable in, a failed attempt costs nothing.
+ *
+ * There is no passphrase field, in either direction. The server never returns
+ * one.
+ */
+export interface WifiStatus {
+  available: boolean;
+  interface?: string;
+  connected: boolean;
+  ssid?: string;
+  addresses?: string[];
+  signal?: number;
+  bars?: number;
+  configured: boolean;
+  has_wired_connection: boolean;
+}
+
+export interface WifiNetwork {
+  ssid: string;
+  signal: number;
+  bars: number;
+  security: "open" | "wep" | "wpa" | "wpa3";
+  current: boolean;
+}
+
+/**
+ * A diagnostic file, and what is in it.
+ *
+ * `excludes` is shown to the user rather than kept in the documentation,
+ * because the question "is this safe to send to somebody?" is asked at the
+ * moment of sending.
+ */
+export interface Diagnostics {
+  path: string;
+  bytes?: number;
+  created_at: string;
+  includes: string[];
+  excludes: string[];
+  message: string;
+}
+
+export interface RepairStep {
+  what: string;
+  done?: string;
+  problem?: string;
+}
+
+export interface RepairResult {
+  steps: RepairStep[];
+  /** Zero means whatever is wrong is not something repair knows how to fix. */
+  changed: number;
+  healthy: boolean;
+  message: string;
+}
+
+export interface FactoryResetResult {
+  removed?: string[];
+  kept?: string[];
+  message: string;
+}
+
+/**
+ * When backups happen without anybody pressing anything.
+ *
+ * `enabled` comes from systemd rather than from what was last asked for, and
+ * `last_result` travels with it: a schedule is a promise kept nightly, and the
+ * way it fails is silently. Anything that shows the promise has to show whether
+ * it is being kept.
+ */
+export interface BackupSchedule {
+  every: "daily" | "weekly" | "off";
+  location?: string;
+  description: string;
+  enabled: boolean;
+  next_run?: string;
+  last_result?: "ok" | "failed";
+}
+
 export interface BackupSummary {
   id: string;
   location: string;
@@ -446,6 +633,36 @@ export const api = {
   me: () => get<User>("/auth/me"),
 
   system: () => get<SystemInfo>("/system"),
+
+  /**
+   * How the server is connected. Slower than most reads, because deciding
+   * whether the internet is reachable means waiting for something not to answer.
+   */
+  network: () => get<NetworkStatus>("/network", 25_000),
+
+  /** What version this server is running. */
+  updateStatus: () => get<UpdateStatus>("/system/update"),
+
+  /**
+   * Ask the channel whether there is anything newer.
+   *
+   * Slow by nature: it reaches the network, and deciding a repository is
+   * unreachable means waiting for something not to answer.
+   */
+  checkForUpdate: () => post<UpdateCheck>("/system/update/check", undefined, 180_000),
+
+  setUpdateChannel: (channel: string) =>
+    post<UpdateChannel>("/system/update/channel", { channel }, 180_000),
+
+  /**
+   * Start an update. This returns as soon as the server has accepted it, and
+   * not when it has finished — the update restarts the server that is answering,
+   * so there is no response that could describe the outcome. Poll
+   * `updateProgress` afterwards.
+   */
+  applyUpdate: () => post<{ started: boolean }>("/system/update/apply", undefined, 60_000),
+
+  updateProgress: () => get<UpdateProgress>("/system/update/progress"),
 
   /**
    * Restart the server.
@@ -572,6 +789,73 @@ export const api = {
 
   createBackup: (location: string, includeData: boolean) =>
     post<Job>("/backups", { location, include_data: includeData }),
+
+  // --- Wireless ---------------------------------------------------------------
+
+  wifiStatus: () => get<WifiStatus>("/network/wifi"),
+
+  /** A POST because it takes seconds and is asked for by pressing a button. */
+  scanWifi: () =>
+    post<{ networks: WifiNetwork[]; message?: string }>(
+      "/network/wifi/scan",
+      undefined,
+      120_000,
+    ),
+
+  /**
+   * Join a network.
+   *
+   * Allowed longer than anything else in the API: if it fails, the server puts
+   * the previous configuration back and applies it again *before* answering, so
+   * this waits for the rollback too — which is the right thing to wait for.
+   */
+  joinWifi: (ssid: string, passphrase: string) =>
+    post<WifiStatus>("/network/wifi", { ssid, passphrase }, 300_000),
+
+  forgetWifi: () => post<WifiStatus>("/network/wifi/forget", undefined, 150_000),
+
+  // --- When something is wrong ------------------------------------------------
+
+  /**
+   * Collect a diagnostic file. Long, because it reads a day of the journal —
+   * and on a machine that is having trouble, that is when the journal is
+   * longest.
+   */
+  collectDiagnostics: () =>
+    post<Diagnostics>("/system/diagnostics", undefined, 180_000),
+
+  /** Where the browser downloads the file from. Always the newest one. */
+  diagnosticsDownloadURL: () => `${BASE}/system/diagnostics/download`,
+
+  /**
+   * Try to fix what is wrong. Long, because finishing an interrupted package
+   * transaction is dpkg running maintainer scripts.
+   */
+  repair: () => post<RepairResult>("/system/repair", undefined, 720_000),
+
+  /**
+   * Remove every account and every setting. `confirm` must be the server's own
+   * name — the one string specific to this machine.
+   */
+  factoryReset: (confirm: string, keepData: boolean) =>
+    post<FactoryResetResult>(
+      "/system/factory-reset",
+      { confirm, keep_data: keepData },
+      360_000,
+    ),
+
+  backupSchedule: () => get<BackupSchedule>("/backups/schedule"),
+
+  /**
+   * Choose how often backups run. Answers with the schedule as it now stands,
+   * read back from systemd — so a request that was accepted and did not take
+   * effect shows up as one.
+   *
+   * The destination is checked before this returns, which is why it is allowed
+   * longer than an ordinary write.
+   */
+  setBackupSchedule: (every: BackupSchedule["every"], location?: string) =>
+    post<BackupSchedule>("/backups/schedule", { every, location }, 60_000),
 
   /**
    * What restoring would do. Changes nothing.

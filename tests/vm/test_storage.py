@@ -545,6 +545,33 @@ def verify_it_runs_from_the_disk(vm: VM) -> str:
     status = must(vm, "app.status", {"id": APP})
     check(status["state"] == "running", f"it is running ({status['state']})")
 
+    # And still running a minute later, which is a different claim.
+    #
+    # File Browser writes a database into its own directory on startup. For four
+    # milestones it could not — the directory belonged to somebody else and the
+    # container had no capability to override that — so it panicked and Docker
+    # restarted it, for ever. This assertion existed and passed throughout,
+    # because Docker reports a container it is restarting as running.
+    #
+    # An application that is up because it has been up for a while is the only
+    # kind worth reporting as up.
+    settled = None
+    for _ in range(12):
+        time.sleep(5)
+        settled = must(vm, "app.status", {"id": APP})
+        if settled["state"] != "running":
+            break
+    check(settled["state"] == "running",
+          f"and is still running a minute later ({settled['state']})",
+          "A crash-looping container is reported as failed now, so this catches "
+          "an application that starts and cannot keep going.")
+
+    restarts = ssh(vm, ["sudo", "docker", "inspect", f"homebase-{APP}",
+                        "--format", "{{.RestartCount}}"], check=False).stdout.strip()
+    check(restarts in ("0", ""), f"without having been restarted ({restarts})",
+          "Restarts mean it fell over and Docker brought it back, which is not "
+          "the same as working.")
+
     # Its bind mount points at the disk, not at the system disk. Read from
     # Docker rather than from Homebase, so this is what actually happened.
     binds = ssh(vm, ["sudo", "docker", "inspect", f"homebase-{APP}",

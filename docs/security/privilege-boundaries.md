@@ -149,6 +149,41 @@ the network.
 Rejections are audited too. An attempt to invoke something not permitted is exactly what you
 want a record of.
 
+### What the audit log does not record
+
+The audit log holds the parameters of every privileged call, append-only, kept indefinitely.
+That was safe on the strength of an invariant: **`hostd` deals in references — an application
+id, a disk id, a storage location — never in values anybody would mind seeing.** A password
+never reaches it, because `core` stores an argon2id hash and `hostd` is never told one.
+
+`network.wifi_connect` is the first genuine exception. `netplan` needs the Wi-Fi passphrase
+itself, and there is no reference form of it. The passphrase went into the log in plain text,
+and what found it was a VM test that looked for it there rather than a review that thought
+about it.
+
+The fix is a declaration rather than a heuristic. An operation names the request fields that
+must never be recorded:
+
+```go
+Secret: []string{"passphrase"},
+```
+
+and the server replaces them with `"[redacted]"` before the event is written. Three
+properties follow:
+
+- **It is part of the operation**, next to the handler, and it appears in `--describe` — so
+  the set of operations handling secrets is reviewable in the same place as the set requiring
+  confirmation
+- **The field is present but hidden**, not removed. "There was a passphrase and it is not
+  recorded" and "there was no passphrase" are different facts, and the first is the one
+  somebody reconstructing an incident needs
+- **`scripts/check_operations.py` enforces it in both directions**: an operation known to take
+  a secret must declare it, and an operation that declares one must be listed in that file —
+  so adding a secret means changing a file whose only purpose is to be read in review
+
+A body that does not parse as a JSON object is dropped rather than recorded. If the shape is
+not what it should be, nothing knows what is in it.
+
 ## How to tell the boundary has been broken
 
 Warning signs in a pull request, roughly in order of severity:

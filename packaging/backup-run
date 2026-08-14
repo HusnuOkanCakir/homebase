@@ -1,0 +1,65 @@
+#!/bin/sh
+#
+# A scheduled backup.
+#
+# Started by homebase-backup.timer, and it does exactly one thing: ask hostd to
+# run the backup that was already configured. The destination is read from a
+# file hostd wrote, not passed in — a timer that could be pointed at a disk by
+# whoever edits a unit file would be a way to write somebody's data somewhere
+# they did not choose.
+#
+# Runs as the `homebase` user, which is what hostd's peer check expects. The
+# socket is root:homebase 0660, and group membership is the boundary.
+
+set -eu
+
+CONFIG=/etc/homebase/backup-schedule.conf
+SOCKET=/run/homebase/hostd.sock
+
+# Not readable is a failure, not a quiet nothing.
+#
+# The unit's ConditionPathExists already covers "no schedule has ever been set
+# up" — a condition that is not met skips the unit rather than failing it. So by
+# the time this runs the file exists, and being unable to read it means the
+# permissions are wrong. Exiting 0 there is the worst outcome available: every
+# scheduled run would report success while backing nothing up, and the dashboard
+# would say the last backup worked.
+if [ ! -r "$CONFIG" ]; then
+    echo "cannot read $CONFIG — it should be root:homebase 0640" >&2
+    exit 1
+fi
+
+every=$(sed -n 's/^every=//p' "$CONFIG" | head -1)
+if [ "$every" = "off" ]; then
+    # Reachable by starting this service by hand while the schedule is off. The
+    # destination is still recorded, so without this check that would quietly
+    # make a backup nobody asked for.
+    echo "scheduled backups are turned off"
+    exit 0
+fi
+
+# shellcheck disable=SC2034
+location=$(sed -n 's/^location=//p' "$CONFIG" | head -1)
+[ -n "$location" ] || { echo "no destination in $CONFIG" >&2; exit 1; }
+
+# hostd owns everything about how a backup is made, including refusing to write
+# one onto the disk it is backing up. This is a trigger, not a policy.
+response=$(curl --silent --show-error --max-time 3600 \
+    --unix-socket "$SOCKET" \
+    -w '\n%{http_code}' \
+    -X POST -H 'Content-Type: application/json' \
+    -d "{\"location\": \"$location\"}" \
+    http://hostd/v1/op/backup.create)
+
+status=$(printf '%s' "$response" | tail -1)
+body=$(printf '%s' "$response" | sed '$d')
+
+if [ "$status" != "200" ]; then
+    # Printed rather than swallowed: this goes to the journal, and a scheduled
+    # backup that fails silently is worse than one that never ran, because the
+    # user believes it worked.
+    echo "backup failed ($status): $body" >&2
+    exit 1
+fi
+
+echo "backup completed"

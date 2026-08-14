@@ -264,10 +264,19 @@ func TestReadPermissionCannotRestore(t *testing.T) {
 		t.Fatalf("backup.read could not list backups: %d", rec.Code)
 	}
 
+	fake.responses["backup.get_schedule"] = map[string]any{"every": "off", "enabled": false}
+	if rec := h.do("GET", "/api/v1/backups/schedule", "", headers); rec.Code != http.StatusOK {
+		t.Fatalf("backup.read could not see when backups run: %d", rec.Code)
+	}
+
+	fake.responses["backup.set_schedule"] = map[string]any{"every": "daily"}
 	before := len(fake.calls)
 
 	for _, request := range []struct{ path, body string }{
 		{"/api/v1/backups", `{"location":"spare"}`},
+		// Setting a schedule is not a read: it decides whether anything gets
+		// backed up at all, and it points a nightly job at a disk.
+		{"/api/v1/backups/schedule", `{"every":"daily","location":"spare"}`},
 		{"/api/v1/backups/" + backupID + "/restore?location=spare", `{"confirm":"` + backupID + `"}`},
 		{"/api/v1/backups/" + backupID + "/delete?location=spare", `{"confirm":"` + backupID + `"}`},
 	} {
@@ -288,6 +297,8 @@ func TestBackupEndpointsRequireAuthentication(t *testing.T) {
 	for _, request := range []struct{ method, path string }{
 		{"GET", "/api/v1/backups?location=spare"},
 		{"POST", "/api/v1/backups"},
+		{"GET", "/api/v1/backups/schedule"},
+		{"POST", "/api/v1/backups/schedule"},
 		{"GET", "/api/v1/backups/" + backupID + "/preview?location=spare"},
 		{"POST", "/api/v1/backups/" + backupID + "/restore?location=spare"},
 		{"POST", "/api/v1/backups/" + backupID + "/delete?location=spare"},
@@ -301,5 +312,116 @@ func TestBackupEndpointsRequireAuthentication(t *testing.T) {
 
 	if len(fake.calls) != 0 {
 		t.Errorf("unauthenticated requests reached hostd: %v", fake.calls)
+	}
+}
+
+// --- The schedule -------------------------------------------------------------------
+
+// The schedule is reported as systemd has it, not as it was asked for.
+//
+// The interesting case is a schedule that was accepted and is not running:
+// `every: daily` with `enabled: false`. If core were to synthesise a reply from
+// the request, that state could never appear, and the one failure mode of an
+// automatic backup — it stops, and nobody notices for eight months — would be
+// invisible on the screen built to show it.
+func TestTheScheduleIsReportedAsSystemdHasIt(t *testing.T) {
+	h, fake := backupHarness(t)
+	headers := h.signedIn(t)
+
+	fake.responses["backup.set_schedule"] = map[string]any{
+		"every": "daily", "location": "spare",
+		"description": "every night, at about three in the morning",
+		"enabled":     false,
+	}
+
+	rec := h.do("POST", "/api/v1/backups/schedule", `{"every":"daily","location":"spare"}`, headers)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	var schedule struct {
+		Every   string `json:"every"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &schedule); err != nil {
+		t.Fatal(err)
+	}
+	if schedule.Every != "daily" {
+		t.Errorf("every = %q, want daily", schedule.Every)
+	}
+	if schedule.Enabled {
+		t.Error("a schedule systemd is not running was reported as enabled; " +
+			"the one failure this field exists to show would be invisible")
+	}
+}
+
+func TestTheScheduleNeedsToKnowHowOften(t *testing.T) {
+	h, fake := backupHarness(t)
+	headers := h.signedIn(t)
+
+	fake.responses["backup.set_schedule"] = map[string]any{"every": "off"}
+
+	for _, body := range []string{`{}`, `{"every":""}`, `{"every":"   "}`} {
+		rec := h.do("POST", "/api/v1/backups/schedule", body, headers)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s returned %d; want 400", body, rec.Code)
+		}
+	}
+
+	if calls := fake.callsTo("backup.set_schedule"); len(calls) != 0 {
+		t.Errorf("%d schedules were set without being told how often", len(calls))
+	}
+}
+
+// hostd owns which words are schedules — it has the table that turns one into a
+// calendar expression. core normalises case and passes the word through rather
+// than keeping a second list that can drift from it.
+func TestTheScheduleWordIsPassedToHostdNormalised(t *testing.T) {
+	h, fake := backupHarness(t)
+	headers := h.signedIn(t)
+
+	fake.responses["backup.set_schedule"] = map[string]any{
+		"every": "weekly", "location": "spare", "enabled": true,
+	}
+
+	rec := h.do("POST", "/api/v1/backups/schedule", `{"every":" Weekly ","location":" spare "}`, headers)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	calls := fake.callsTo("backup.set_schedule")
+	if len(calls) != 1 {
+		t.Fatalf("%d calls to backup.set_schedule, want 1", len(calls))
+	}
+	if got := calls[0].Body["every"]; got != "weekly" {
+		t.Errorf("every reached hostd as %q, want weekly", got)
+	}
+	if got := calls[0].Body["location"]; got != "spare" {
+		t.Errorf("location reached hostd as %q, want spare", got)
+	}
+}
+
+// Turning backups off is one click, invisible afterwards, and the change
+// somebody will want to find in the history on the day they discover there is
+// nothing to restore.
+func TestTurningBackupsOffIsRecorded(t *testing.T) {
+	h, fake := backupHarness(t)
+	headers := h.signedIn(t)
+
+	fake.responses["backup.set_schedule"] = map[string]any{
+		"every": "off", "location": "spare", "enabled": false,
+	}
+
+	if rec := h.do("POST", "/api/v1/backups/schedule", `{"every":"off"}`, headers); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	rec := h.do("GET", "/api/v1/events?limit=50", "", headers)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reading events: %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "backup.schedule_disabled") {
+		t.Errorf("turning scheduled backups off left no trace in the history:\n%s",
+			rec.Body.String())
 	}
 }

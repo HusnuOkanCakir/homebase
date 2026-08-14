@@ -5,8 +5,10 @@ info:
   version: 1.0.0-draft
   summary: The only supported interface to a Homebase server.
   description: |
-    The system, job, event and application endpoints below are implemented. Storage,
-    networking, backup and update are still contract-only and are marked as such.
+    Every endpoint below is implemented and served. CI checks this specification against
+    the routes `core` actually serves, in both directions, so a path documented here and
+    missing from the server fails the build. The recovery tools — diagnostic bundle, service
+    repair, factory reset — arrive later in Milestone 8 and are not described yet.
 
     The dashboard, `homebasectl` and — from Stage 2 — the local AI operator are all clients
     of this API. Nothing bypasses it, and nothing that uses it holds privilege of its own:
@@ -46,6 +48,10 @@ tags:
     description: Backing up this server, and putting it back
   - name: auth
     description: Sessions, and getting back in when the password is gone
+  - name: network
+    description: How the server is connected, and whether it is
+  - name: update
+    description: What version this server runs, and where it updates from
   - name: events
     description: Structured events and the audit trail
 
@@ -1015,6 +1021,90 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /backups/schedule:
+    get:
+      tags: [backup]
+      summary: When backups happen by themselves
+      description: |
+        Requires `backup.read`.
+
+        `enabled` is read back from systemd rather than from what was last asked for. A
+        schedule recorded on disk that systemd is not running is exactly the failure this
+        field exists to make visible.
+
+        `last_result` is on this response rather than only in the job history because a
+        schedule fails silently: the disk is unplugged in March and nobody finds out until the
+        machine dies in November.
+      operationId: getBackupSchedule
+      responses:
+        "200":
+          description: When backups run, and how the last one went
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackupSchedule"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+    post:
+      tags: [backup]
+      summary: Choose how often backups run
+      description: |
+        Requires `backup.run`.
+
+        `every` is one of three words, checked against a fixed table before anything is
+        written. The calendar expression that ends up in a systemd unit is Homebase's, never
+        the caller's — a unit file is a way to run commands as root, so no string from a
+        request becomes part of one.
+
+        The destination is checked now rather than at three in the morning: a schedule
+        pointing at a disk that cannot hold a backup is a promise that fails in the dark,
+        weeks later, to somebody who was told it was working.
+
+        Turning the schedule off leaves the disk recorded, so turning it on again does not
+        lose the choice.
+      operationId: setBackupSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [every]
+              properties:
+                every:
+                  type: string
+                  enum: [daily, weekly, off]
+                location:
+                  type: string
+                  description: |
+                    The managed storage location backups are written to. Required unless
+                    `every` is `off`.
+      responses:
+        "200":
+          description: The schedule now in force
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackupSchedule"
+        "400":
+          description: Not a schedule Homebase can keep to, or a disk that cannot hold a backup
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
   /backups/{backup_id}/preview:
     get:
       tags: [backup]
@@ -1165,6 +1255,569 @@ paths:
           $ref: "#/components/responses/BackupNotFound"
         "428":
           $ref: "#/components/responses/ConfirmationRequired"
+
+  /network:
+    get:
+      tags: [network]
+      summary: How this server is connected
+      description: |
+        Requires `network.diagnose`.
+
+        Exists to tell three faults apart that are indistinguishable from a browser that
+        will not load: the server has no address, the server has no internet, or nothing
+        here is wrong and the problem is at the other end. A server that cannot make that
+        distinction sends its owner to restart a router for an hour over a problem with
+        their phone.
+
+        Read live from the kernel on every request — `/sys/class/net`, `/proc/net/route`
+        and `/etc/resolv.conf` — rather than from anything remembered. Reachability is
+        tested by opening a TCP connection to a well-known resolver *by address*: ICMP is
+        blocked on plenty of networks, and resolving a name first would make a broken
+        resolver look like a broken connection.
+
+        Slower than most reads, because deciding the internet is unreachable means waiting
+        for something not to answer.
+      operationId: getNetwork
+      responses:
+        "200":
+          description: How the server is connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /network/wifi:
+    get:
+      tags: [network]
+      summary: Whether this server has wireless, and what it has joined
+      description: |
+        Requires `network.diagnose`.
+
+        `available` is false on much of the hardware Homebase runs on, and is the first thing
+        a screen needs to know — "no networks in range" and "this machine cannot see networks
+        at all" send somebody to entirely different places.
+
+        `has_wired_connection` is what decides how frightening the screen has to be. Setting
+        up Wi-Fi over a cable is safe, because the cable survives a failure; changing it while
+        wireless is the only connection is the case that can strand the machine.
+
+        **The passphrase is never returned**, by this or by anything else.
+      operationId: getWifiStatus
+      responses:
+        "200":
+          description: What the wireless is doing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WifiStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+    post:
+      tags: [network]
+      summary: Join a wireless network
+      description: |
+        Requires `network.modify`. **The only operation in the API that can change how this
+        server is reached**, which is why it was held back from Milestone 7 until it could be
+        tested.
+
+        Homebase writes exactly one netplan file and reads none of the others, so an Ethernet
+        connection is never touched: if this is being done over a cable, the cable is still
+        there afterwards no matter how badly the wireless goes. Wireless takes a worse route
+        metric than the cable, so a machine with both prefers the cable.
+
+        **A failure is rolled back before this answers.** The previous configuration is put
+        back and re-applied, and only then does the error return — so the caller waits for the
+        rollback too, and the message can honestly say nothing has changed. The usual reason
+        is a wrong password.
+
+        Can take a minute or more: associating and getting an address is seconds, and a
+        failure is that plus the rollback.
+      operationId: joinWifi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ssid]
+              properties:
+                ssid:
+                  type: string
+                  maxLength: 32
+                passphrase:
+                  type: string
+                  minLength: 8
+                  maxLength: 63
+                  description: |
+                    Omitted for an open network. Written to a root-only file and never
+                    returned by any endpoint.
+      responses:
+        "200":
+          description: The server joined the network
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WifiStatus"
+        "400":
+          description: Not a network name or password Wi-Fi can accept
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: This server has no wireless card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            The server did not join. The previous configuration has already been put back.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /network/wifi/scan:
+    post:
+      tags: [network]
+      summary: List the wireless networks this server can see
+      description: |
+        Requires `network.diagnose`. Changes nothing and does not disturb an existing
+        connection.
+
+        **A `POST` despite changing nothing.** Scanning takes seconds, tunes the radio away
+        from its channel while it runs, and is something a person asks for by pressing a
+        button — a `GET` that a browser may retry, prefetch or cache is the wrong shape.
+
+        Strongest signal first, one row per network name rather than one per access point, and
+        hidden networks are left out because a row that cannot be picked is worse than no row.
+      operationId: scanWifi
+      responses:
+        "200":
+          description: What the card can hear
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [networks]
+                properties:
+                  networks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WifiNetwork"
+                  message:
+                    type: string
+                    description: |
+                      What to say when the list is empty, which is a different thing from an
+                      error and needs different words.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: This server has no wireless card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /network/wifi/forget:
+    post:
+      tags: [network]
+      summary: Stop using wireless on this server
+      description: |
+        Requires `network.modify`. Removes Homebase's wireless configuration and applies the
+        change.
+
+        This can disconnect a server that is only on Wi-Fi, and is then reversible only by
+        somebody who can still reach it.
+      operationId: forgetWifi
+      responses:
+        "200":
+          description: Wireless is no longer configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WifiStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /system/diagnostics:
+    post:
+      tags: [system]
+      summary: Collect what somebody would need to work out why this server is unwell
+      description: |
+        Requires `system.manage`.
+
+        Writes a plain-text file on the server and reports what is in it. Download it with
+        `/system/diagnostics/download`.
+
+        **`excludes` is part of the answer, not documentation.** It is the list somebody
+        checks before sending the file to a stranger, so it travels with the result: the
+        failure mode of a support bundle is not being unhelpful, it is quietly containing the
+        password database.
+
+        What is collected is a fixed list — versions, service states, failed units, a day of
+        the journal, disks, free space, memory, addresses, apt's view of the update source,
+        and whether dpkg left a transaction unfinished. Nothing in it comes from the request:
+        a bundle that could be told what to run would be the generic execution path
+        [ADR-0006](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0006-privilege-separation.md)
+        exists to prevent, wearing a support tool's clothes.
+
+        A command that is missing or fails does not fail the bundle. Half a bundle from a
+        badly broken machine is what somebody needs.
+      operationId: collectDiagnostics
+      responses:
+        "200":
+          description: The diagnostic file, and what it does and does not contain
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Diagnostics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /system/diagnostics/download:
+    get:
+      tags: [system]
+      summary: Download the most recent diagnostic file
+      description: |
+        Requires `system.manage`.
+
+        The newest file, rather than one named by the caller. A filename in a request is a
+        path to be validated, and the validation is the part that gets subtly wrong; there is
+        nothing to get wrong if there is no filename.
+      operationId: downloadDiagnostics
+      responses:
+        "200":
+          description: The file
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No diagnostic file has been made yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /system/repair:
+    post:
+      tags: [system]
+      summary: Put back the things a broken or interrupted install leaves wrong
+      description: |
+        Requires `system.manage`.
+
+        A fixed list of checks, each of which makes something true if it is not: finish a
+        package transaction dpkg left unfinished, recreate Homebase's directories and give
+        them back to the service account, start and enable the services.
+
+        **It is not a diagnosis.** There is no branching on what a previous step found,
+        because a repair tool that reasons about the state of a broken machine is a program
+        written against inputs nobody has seen. Every step reports what it did, and doing
+        nothing is a result — `changed: 0` means whatever is wrong is not something this knows
+        how to fix, which is more use than a list of ticks.
+
+        Nothing here deletes anything, which is what makes it safe to offer to somebody who
+        does not know what is wrong.
+      operationId: repairSystem
+      responses:
+        "200":
+          description: What was checked and what was changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepairResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /system/factory-reset:
+    post:
+      tags: [system]
+      summary: Return this server to how it was before anybody set it up
+      description: |
+        Requires `system.manage`. **The most destructive operation in Homebase.**
+
+        It removes every account and every setting, so the person running it can lock
+        themselves out of their own server. `confirm` must be the server's hostname — the one
+        string specific to this machine, which is what stops a reset meant for one server
+        landing on another.
+
+        `keep_data` defaults to **true**, and its absence means true rather than false. A
+        caller that forgets the field keeps the photographs.
+
+        The update channel is deliberately kept. A machine that forgets where its security
+        updates come from is worse than one that remembers, and it is not personal data.
+
+        Afterwards the server asks to be set up again, like a new one.
+      operationId: factoryReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+                  description: This server's hostname, typed exactly.
+                keep_data:
+                  type: boolean
+                  default: true
+                  description: |
+                    Leave everything in `/srv/homebase` — your files and your applications'
+                    data — alone. Absent means true.
+      responses:
+        "200":
+          description: What was removed and what was left
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FactoryResetResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "428":
+          description: The server's name was not typed correctly
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /system/update:
+    get:
+      tags: [update]
+      summary: What version this server is running
+      description: |
+        Requires `update.read`.
+
+        Reports the four packages an installation is made of rather than a single version
+        string, because the interesting failure is that they disagree. They depend on each
+        other with `(= version)`, so apt cannot produce a mixed set deliberately — only an
+        interrupted update or a manual `dpkg` can, and a machine in that state usually still
+        works, which is exactly why nothing else would notice.
+
+        `interrupted` is separate from `consistent` and is found differently: a package
+        dpkg left `half-configured` or `unpacked`, or a journal it did not replay. A machine
+        can be either without being the other, and both need `dpkg --configure -a` before
+        anything else will install.
+
+        `channel` is read from apt's own source file rather than from a Homebase setting,
+        because apt's file is what actually decides where packages come from. It is empty on
+        a machine installed from media, which has no update source until one is configured.
+
+        See [ADR-0018](../docs/decisions/0018-updates-are-a-signed-apt-repository.md).
+      operationId: getUpdateStatus
+      responses:
+        "200":
+          description: What this machine is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /system/update/progress:
+    get:
+      tags: [update]
+      summary: How far an update has got
+      description: |
+        Requires `update.read`.
+
+        `result` is empty while the update is still running, and that emptiness is how a
+        client tells "in progress" from "finished" — `core` cannot remember anything across
+        an update, because the update restarts it.
+
+        `running` is asked of systemd rather than inferred from the file. A machine that lost
+        power mid-update comes back with a stage recorded and nothing running, which must not
+        read as an update still in progress for ever.
+      operationId: getUpdateProgress
+      responses:
+        "200":
+          description: Where the update got to
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateProgress"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /system/update/check:
+    post:
+      tags: [update]
+      summary: Ask whether a newer version has been published
+      description: |
+        Requires `update.read`.
+
+        A POST rather than a GET because it reaches the network and refreshes apt's index —
+        it changes nothing this server runs, but it is not a cheap repeatable read either.
+
+        `reachable` is reported separately from `update_available`. They are the same
+        silence and very different facts: one means you are up to date, the other means you
+        cannot find out.
+      operationId: checkForUpdate
+      responses:
+        "200":
+          description: What the channel offers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateCheck"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /system/update/channel:
+    post:
+      tags: [update]
+      summary: Choose which channel this server updates from
+      description: |
+        Requires `update.manage`.
+
+        The channel is validated against four literal words before it reaches apt's
+        configuration, because that file decides which code this machine will run as root.
+
+        `reachable` says whether the newly configured channel actually answered with an index
+        that verified. A failure there is reported rather than fatal: a machine that was
+        offline when its channel changed has still had its channel changed, and refusing to
+        record that would leave the file and the report disagreeing.
+      operationId: setUpdateChannel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [channel]
+              properties:
+                channel:
+                  type: string
+                  enum: [development, alpha, beta, stable]
+      responses:
+        "200":
+          description: The channel this server now updates from
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateChannel"
+        "400":
+          description: Not a channel Homebase publishes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /system/update/apply:
+    post:
+      tags: [update]
+      summary: Install the version this server's channel offers
+      description: |
+        Requires `update.manage`.
+
+        **Returns `202` and does not wait**, and unlike the rest of the API that is
+        structural rather than convention. The update replaces `homebase-hostd` and
+        `homebase-core` and restarts them, so the process holding this request open is the
+        process being replaced. There is no arrangement in which a response could describe
+        the outcome. Poll `/system/update/progress`.
+
+        Everything is downloaded and verified before anything is applied, so a failure while
+        fetching changes nothing. The database and `/etc/homebase` are snapshotted first, the
+        server is health-checked afterwards, and a failed check puts the previous version and
+        the snapshot back.
+
+        Refused with `409` if an earlier update did not finish: starting a new transaction on
+        a machine with an unfinished one is how a recoverable state becomes an unrecoverable
+        one.
+
+        See [ADR-0018](../docs/decisions/0018-updates-are-a-signed-apt-repository.md).
+      operationId: applyUpdate
+      responses:
+        "202":
+          description: The update was started. It has not finished.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [started]
+                properties:
+                  started:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: This server is not in a state where an update can be started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Unavailable"
 
   /auth/recover:
     post:
@@ -1515,6 +2168,268 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    WifiStatus:
+      type: object
+      additionalProperties: false
+      required: [available, connected, configured, has_wired_connection]
+      properties:
+        available:
+          type: boolean
+          description: Whether this machine has a wireless card at all.
+        interface:
+          type: string
+        connected:
+          type: boolean
+          description: |
+            Asked of the kernel rather than inferred from having an address: an interface can
+            hold a stale address after the network has gone.
+        ssid:
+          type: string
+        addresses:
+          type: array
+          items:
+            type: string
+        signal:
+          type: integer
+          description: Strength in dBm — negative, closer to zero is better.
+        bars:
+          type: integer
+          minimum: 0
+          maximum: 4
+        configured:
+          type: boolean
+          description: |
+            Whether Homebase has written a wireless configuration. Separate from `connected`:
+            a configured network that is not joined is a state somebody needs to see, and it
+            looks like nothing at all otherwise.
+        has_wired_connection:
+          type: boolean
+          description: |
+            Whether a cable is also carrying an address. What decides how frightening the
+            screen has to be.
+
+    WifiNetwork:
+      type: object
+      additionalProperties: false
+      required: [ssid, signal, bars, security, current]
+      properties:
+        ssid:
+          type: string
+        signal:
+          type: integer
+        bars:
+          type: integer
+          minimum: 0
+          maximum: 4
+        security:
+          type: string
+          enum: [open, wep, wpa, wpa3]
+          description: In the words needed to warn somebody, not to configure anything.
+        current:
+          type: boolean
+
+    NetworkStatus:
+      type: object
+      additionalProperties: false
+      required: [hostname, mdns_name, mdns_works, interfaces, online, reachable]
+      properties:
+        hostname:
+          type: string
+        mdns_name:
+          type: string
+          description: The `.local` name this server answers to.
+          example: attic.local
+        mdns_works:
+          type: boolean
+          description: |
+            Whether anything is actually publishing that name. Claimed only when a
+            responder is running: reporting a name the network cannot resolve is worse
+            than reporting none, because it sends somebody to type an address that will
+            never load.
+        reachable:
+          type: boolean
+          description: |
+            Whether this server has an address on something other than loopback — that is,
+            whether it can be reached from another room at all.
+        online:
+          type: boolean
+          description: |
+            Whether anything outside this network answered. Deliberately separate from
+            `reachable`: a server with a perfectly good address on a network whose
+            broadband is down is a different problem from a server with no address, and
+            telling somebody "not connected" when their server is fine sends them to the
+            wrong place entirely.
+        gateway:
+          type: string
+          description: The router everything else goes through. Absent means there is no
+            route off this machine, which is not the same as a route that does not work.
+        nameservers:
+          type: array
+          items:
+            type: string
+        interfaces:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetworkInterface"
+
+    NetworkInterface:
+      type: object
+      additionalProperties: false
+      required: [name, kind, up]
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [ethernet, wireless, loopback, container]
+          description: What a person would call it, rather than what the kernel does.
+        up:
+          type: boolean
+          description: |
+            The kernel's operational state, which is the honest answer to "is there a cable
+            in it": a socket with nothing plugged in reports down even when the interface
+            is configured.
+        addresses:
+          type: array
+          items:
+            type: string
+          description: |
+            Link-local addresses are deliberately excluded. A machine that has only handed
+            itself one has not been given an address by anybody, and listing 169.254.x.x
+            would read as a working network to somebody with no way to know otherwise.
+        mac:
+          type: string
+          description: What the router's list of connected devices matches against, which
+            is a real thing people have to do.
+
+    UpdateStatus:
+      type: object
+      additionalProperties: false
+      required: [version, consistent, interrupted, components, channel, origin]
+      properties:
+        version:
+          type: string
+          description: |
+            The version of `homebase-core`, because that is the component somebody is
+            actually running. Empty if it is not installed, which on a working machine
+            cannot happen.
+        consistent:
+          type: boolean
+          description: |
+            Whether every installed component reports the same version. False means an
+            update stopped part way: every package can read as fully installed and still
+            disagree, which is the failure a single version string would hide.
+        interrupted:
+          type: boolean
+          description: |
+            Whether dpkg has work it did not finish — a package left `half-configured` or
+            `unpacked`, or a journal it never replayed. Needs `dpkg --configure -a` before
+            anything else can be installed.
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/Component"
+        channel:
+          type: string
+          description: |
+            The suite this machine subscribes to. Empty when no update source is configured,
+            which is where every machine installed from media starts.
+          enum: ["", development, alpha, beta, stable]
+        origin:
+          type: string
+          description: Where updates would come from. Reported so a machine pointed at the
+            wrong repository is visible rather than merely quiet.
+
+    Component:
+      type: object
+      additionalProperties: false
+      required: [package, version, state]
+      properties:
+        package:
+          type: string
+          enum: [homebase-hostd, homebase-core, homebase-apps, homebase-dashboard]
+        version:
+          type: string
+          description: Empty when the package is not installed.
+        state:
+          type: string
+          description: |
+            dpkg's own word, passed through rather than reduced to a boolean. The difference
+            between `not-installed` and `half-configured` is the difference between a
+            machine that needs an install and one that needs finishing.
+
+    UpdateCheck:
+      type: object
+      additionalProperties: false
+      required: [current, available, update_available, channel, reachable]
+      properties:
+        current:
+          type: string
+          description: The version installed now.
+        available:
+          type: string
+          description: What the channel offers. Empty when the archive did not answer.
+        update_available:
+          type: boolean
+          description: |
+            Computed by `dpkg --compare-versions` rather than by comparing strings. Debian
+            ordering has epochs and tildes that sort before the empty string, and getting it
+            wrong means either hiding a real update or accepting a downgrade.
+        channel:
+          type: string
+        reachable:
+          type: boolean
+          description: Whether the archive answered with an index that verified.
+        detail:
+          type: string
+          description: What went wrong, in apt's words, when it did not.
+
+    UpdateChannel:
+      type: object
+      additionalProperties: false
+      required: [channel, origin, reachable]
+      properties:
+        channel:
+          type: string
+          enum: [development, alpha, beta, stable]
+        origin:
+          type: string
+        reachable:
+          type: boolean
+        detail:
+          type: string
+
+    UpdateProgress:
+      type: object
+      additionalProperties: false
+      required: [stage, running]
+      properties:
+        stage:
+          type: string
+          description: |
+            Where the update got to. Empty if none has ever been started on this server.
+          enum: ["", refreshing, downloading, snapshot, applying, health,
+                 rolling-back, rolled-back, rolled-back-failed, done]
+        result:
+          type: string
+          description: |
+            Empty while the update is still running. That emptiness is the signal: `core`
+            cannot remember anything across an update, because the update restarts it.
+          enum: [ok, failed]
+        from:
+          type: string
+        to:
+          type: string
+        detail:
+          type: string
+          description: What went wrong, and what was done about it.
+        running:
+          type: boolean
+          description: |
+            Whether systemd still has the update unit active. Asked as well as reading the
+            stage, because a machine that lost power mid-update comes back with a stage
+            recorded and nothing running.
+
     RecoveryStatus:
       type: object
       additionalProperties: false
@@ -1666,6 +2581,38 @@ components:
               maximum: 100
             lid_closed:
               type: [boolean, "null"]
+        temperature:
+          type: object
+          additionalProperties: false
+          description: |
+            How hot the machine is. Homebase runs on old laptops in cupboards, and one
+            cooking itself looks from the outside exactly like one that is broken.
+
+            `celsius` is `null` when the machine has no thermal sensors — every VM, and some
+            real hardware. **Never zero**, which would look wonderfully cool. Same rule as
+            `battery_percent`: "cannot tell" and "fine" are different answers.
+          properties:
+            celsius:
+              type: [integer, "null"]
+              description: The hottest zone, not an average — one component at 95 °C is a
+                problem an average would hide.
+            sensor:
+              type: string
+              description: |
+                Which zone the reading came from, in the kernel's words. On a machine with
+                several it is what says whether it is the processor or the case.
+            state:
+              type: string
+              enum: [ok, warm, hot]
+              description: |
+                Thresholds are deliberately high — processors are designed to run at 80 °C,
+                and warning at 60 would teach people to ignore the warning.
+            message:
+              type: string
+              description: |
+                Only set when something is worth telling somebody. A machine at an ordinary
+                temperature says nothing: an indicator that is always lit is one people stop
+                seeing.
 
     JobState:
       type: string
@@ -1979,6 +2926,114 @@ components:
             reason everywhere else in Homebase: a `true` a client can send by default is not a
             confirmation, and one that names its target cannot be replayed against a different
             disk.
+
+    Diagnostics:
+      type: object
+      additionalProperties: false
+      required: [path, created_at, includes, excludes, message]
+      properties:
+        path:
+          type: string
+          description: Where the file is on the server. Download it rather than reading it.
+        bytes:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        includes:
+          type: array
+          items:
+            type: string
+          description: What is in it, in words.
+        excludes:
+          type: array
+          items:
+            type: string
+          description: |
+            What is deliberately not in it. The list somebody checks before sending the file
+            to a stranger.
+        message:
+          type: string
+
+    RepairResult:
+      type: object
+      additionalProperties: false
+      required: [steps, changed, healthy, message]
+      properties:
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [what]
+            properties:
+              what:
+                type: string
+                description: The check, in words somebody can read.
+              done:
+                type: string
+                description: What was actually done. Absent when nothing needed doing.
+              problem:
+                type: string
+                description: Why the step could not be completed.
+        changed:
+          type: integer
+          description: |
+            How many steps had something to do. Zero means whatever is wrong is not one of
+            the things repair knows how to fix, which is worth saying plainly.
+        healthy:
+          type: boolean
+          description: Whether every step completed without a problem.
+        message:
+          type: string
+
+    FactoryResetResult:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        removed:
+          type: array
+          items:
+            type: string
+        kept:
+          type: array
+          items:
+            type: string
+        message:
+          type: string
+
+    BackupSchedule:
+      type: object
+      additionalProperties: false
+      required: [every, description, enabled]
+      properties:
+        every:
+          type: string
+          enum: [daily, weekly, off]
+        location:
+          type: string
+          description: Where scheduled backups are written. Empty when nothing is scheduled.
+        description:
+          type: string
+          description: The schedule in words, for a screen — not a calendar expression.
+        enabled:
+          type: boolean
+          description: |
+            Whether systemd will actually run it. Read from systemd, not inferred from the
+            configuration file: a schedule recorded and not enabled is the failure worth
+            seeing.
+        next_run:
+          type: string
+          format: date-time
+          description: |
+            When systemd says it will next fire. systemd's own answer rather than one computed
+            here, because it accounts for the randomised delay, for a missed run being caught
+            up, and for the machine's timezone.
+        last_result:
+          type: string
+          enum: [ok, failed]
+          description: How the last scheduled run ended. Absent if it has never run.
 
     BackupSummary:
       type: object

@@ -9,7 +9,7 @@ import { defineConfig, devices } from "@playwright/test";
  * that pass while the real thing was broken. `make vm-test-dashboard` starts the
  * VM and points these tests at its forwarded port.
  */
-const baseURL = process.env["HOMEBASE_URL"] ?? "http://127.0.0.1:8080";
+const baseURL = process.env["HOMEBASE_URL"] ?? "https://127.0.0.1:8443";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -31,6 +31,16 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   use: {
     baseURL,
+    // The server signs its own certificate (ADR-0017), so a browser that has
+    // not been told to trust it will refuse the connection. This is the
+    // "proceed once" a person clicks, and it has to be granted here or every
+    // test fails before it reaches the dashboard.
+    //
+    // Reaching the server over HTTPS is not incidental to these tests. The
+    // session cookie is `Secure`, and browsers accept a `Secure` cookie over
+    // plain HTTP on localhost alone — which is what let sign-in be broken on
+    // every real installation while this suite stayed green.
+    ignoreHTTPSErrors: true,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     // A home server's dashboard is used on a laptop and a phone. The phone case

@@ -84,6 +84,21 @@ type Operation struct {
 	// reported to callers so they can warn before acting.
 	Rollback string `json:"rollback,omitempty"`
 
+	// Secret names request fields that must never reach the audit log.
+	//
+	// The audit log records the parameters of every privileged call, and that
+	// was safe for a long time on the strength of an invariant: hostd deals in
+	// references — an application id, a disk id, a location — never in values
+	// anybody would mind seeing. `network.wifi_connect` is the first genuine
+	// exception, because netplan needs the passphrase itself and there is no
+	// reference form of it.
+	//
+	// So the exception is declared rather than special-cased. It is part of the
+	// operation, next to the handler, and it appears in `--describe`, which
+	// means the set of operations that handle secrets is reviewable in the same
+	// place as the set that require confirmation.
+	Secret []string `json:"secret,omitempty"`
+
 	Handler Handler `json:"-"`
 }
 
@@ -105,6 +120,7 @@ func (o Operation) MarshalJSON() ([]byte, error) {
 		Confirmation   Confirm  `json:"confirmation"`
 		TimeoutSeconds float64  `json:"timeout_seconds"`
 		Rollback       *string  `json:"rollback"`
+		Secret         []string `json:"secret"`
 	}
 	e := exported{
 		Name:           o.Name,
@@ -120,6 +136,10 @@ func (o Operation) MarshalJSON() ([]byte, error) {
 	}
 	if e.Permissions == nil {
 		e.Permissions = []string{}
+	}
+	e.Secret = o.Secret
+	if e.Secret == nil {
+		e.Secret = []string{}
 	}
 	return json.Marshal(e)
 }

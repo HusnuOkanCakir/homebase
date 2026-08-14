@@ -186,10 +186,21 @@ func (s scanner) disks() ([]Disk, error) {
 			continue
 		}
 
+		size := readSize(filepath.Join(s.sysBlock, name))
+		if size > 0 && size < smallestUsefulDisk {
+			// Too small to be storage, and offering it is worse than useless:
+			// the installation media a machine booted from shows up here, and
+			// "Erase and prepare" next to the volume carrying the machine's own
+			// cloud-init seed is an invitation to break the thing you are
+			// looking at. No disk anybody would keep photographs on is this
+			// small, so nothing legitimate is hidden by refusing to list it.
+			continue
+		}
+
 		disk := Disk{
 			Device:    name,
 			Path:      s.devPrefix + name,
-			SizeBytes: readSize(filepath.Join(s.sysBlock, name)),
+			SizeBytes: size,
 			Removable: readFlag(filepath.Join(s.sysBlock, name, "removable")),
 			Model:     readTrimmed(filepath.Join(s.sysBlock, name, "device", "model")),
 			Vendor:    readTrimmed(filepath.Join(s.sysBlock, name, "device", "vendor")),
@@ -240,6 +251,16 @@ func FindVolume(uuid string) (Volume, bool) {
 // --- /sys/block --------------------------------------------------------------
 
 // interestingDisk filters out the devices a person has no use for.
+// smallestUsefulDisk is the floor below which a block device is not storage.
+//
+// One gigabyte, chosen to be obviously below any disk somebody would actually
+// use and obviously above the artefacts that are not disks at heart: a
+// cloud-init seed is under a megabyte, and EFI and recovery volumes are tens or
+// hundreds. The cost of getting this wrong in one direction is a confusing
+// entry in a list; in the other it is refusing somebody their own hardware, so
+// it is set low.
+const smallestUsefulDisk = 1 << 30
+
 func interestingDisk(name string) bool {
 	for _, prefix := range []string{
 		"loop", // snap packages, mostly

@@ -69,6 +69,7 @@ APP = "hello-homebase"
 APP_NAME = "Hello Homebase"
 CONTAINER = "homebase-hello-homebase"
 DATA_DIR = f"/srv/homebase/apps/{APP}"
+APP_ROOT = "/srv/homebase/apps"
 
 
 class TestFailure(Exception):
@@ -94,12 +95,15 @@ COOKIE_JAR = ".homebase-test-cookies"
 
 def api(vm: VM, path: str, method: str = "GET", body: str | None = None) -> tuple[int, str]:
     """Call core's API from inside the VM, keeping the session cookie."""
-    cmd = ["curl", "--silent", "--show-error",
+    # HTTPS on the ordinary port, the way a browser reaches it. --insecure is
+    # the "proceed once" over the server's own certificate; plain HTTP answers
+    # a redirect rather than the request.
+    cmd = ["curl", "--silent", "--show-error", "--insecure",
            "-c", COOKIE_JAR, "-b", COOKIE_JAR,
            "-o", "/dev/stdout", "-w", "\\n%{http_code}", "-X", method]
     if body is not None:
         cmd += ["-H", "Content-Type: application/json", "-d", body]
-    cmd.append(f"http://127.0.0.1:8080/api/v1{path}")
+    cmd.append(f"https://127.0.0.1/api/v1{path}")
 
     result = ssh(vm, cmd, check=False)
     output = result.stdout.strip()
@@ -245,6 +249,43 @@ def verify_catalogue(vm: VM) -> None:
           "The runtime was asked and answered; installed must be false, not null.")
 
 
+def refuse_before_downloading(vm: VM) -> None:
+    """An application that needs a disk is refused before anything is fetched.
+
+    Jellyfin is about a gigabyte. Asking to install it without choosing a disk
+    used to download the whole image and *then* refuse with "Jellyfin needs
+    somewhere to keep its files" — a fact that was true before the first byte.
+    On a home connection that is ten minutes and a chunk of somebody's monthly
+    allowance, spent to be told no.
+
+    The assertion is that nothing was downloaded, rather than that it was quick:
+    a timing test on somebody else's broadband is a test that fails for reasons
+    unrelated to the change.
+    """
+    step("An application that needs a disk says so before downloading it")
+
+    before = ssh(vm, ["sudo", "docker", "images", "--format", "{{.Repository}}"],
+                 check=False).stdout
+
+    job = run_job(vm, "/apps/jellyfin/install", timeout=300)
+    check(job["state"] == "failed",
+          f"installing without a disk is refused (state={job['state']})")
+
+    failure = job.get("error") or {}
+    check(failure.get("code") == "app.storage_not_assigned",
+          f"and says why ({failure.get('code')})",
+          json.dumps(failure))
+    check(bool(failure.get("recovery")),
+          "and what to do about it",
+          "A refusal a user cannot act on is a dead end.")
+
+    after = ssh(vm, ["sudo", "docker", "images", "--format", "{{.Repository}}"],
+                check=False).stdout
+    check("jellyfin" not in after or "jellyfin" in before,
+          "and nothing was downloaded first",
+          f"images before: {before.split()}\n    images after:  {after.split()}")
+
+
 def install_app(vm: VM) -> None:
     step(f"Installing {APP_NAME}")
 
@@ -289,11 +330,33 @@ def verify_container_hardening(vm: VM) -> None:
         check(host_path.startswith(DATA_DIR + "/"),
               f"mount {host_path} is inside its own data directory")
 
-    owner = ssh(vm, ["sudo", "stat", "-c", "%a %U %G", DATA_DIR]).stdout.strip()
-    check(owner == "750 homebase homebase",
-          f"its data directory is {owner}",
-          "Owned by the service account so core can back it up, and unreadable "
-          "by anybody else on the machine.")
+    # The application's own data belongs to the application's own identifier.
+    #
+    # It used to belong to the shared service account, which is what stopped
+    # every application that writes to disk from running: the container drops
+    # every capability, so root inside it has no CAP_DAC_OVERRIDE and cannot
+    # write a directory somebody else owns.
+    # Every directory the container actually writes to belongs to the
+    # application's own identifier.
+    for bind in json.loads(binds) or []:
+        host_path = bind.split(":")[0]
+        mode, uid, gid = ssh(
+            vm, ["sudo", "stat", "-c", "%a %u %g", host_path]).stdout.strip().split()
+        check(mode == "750", f"{host_path} is {mode}",
+              "Unreadable by anybody else on the machine.")
+        check(int(uid) >= 61000 and uid == gid,
+              f"and belongs to the application's own identifier ({uid}:{gid})",
+              "Applications must not share an identifier: one that is "
+              "compromised would be able to read the others' files.")
+
+    # The directories above stay with the service account. They are shared —
+    # /srv/homebase/apps holds every application — and core has to traverse them
+    # to make a backup.
+    for shared in (APP_ROOT, DATA_DIR):
+        held = ssh(vm, ["sudo", "stat", "-c", "%U %G", shared]).stdout.strip()
+        check(held == "homebase homebase",
+              f"{shared} is still {held}, so core can traverse it",
+              "core is unprivileged and reads through here when backing up.")
 
 
 def use_app(vm: VM) -> str:
@@ -311,10 +374,21 @@ def use_app(vm: VM) -> str:
           f"got: {result.stdout[:200]!r} {result.stderr[:200]!r}")
 
     # A file where the application's own data lives, standing in for somebody's
-    # media library. Written as the service account, which is what owns it.
+    # media library.
+    #
+    # Written as the application's own identifier, because that is what owns the
+    # directory now — the service account deliberately cannot write here any
+    # more, which is the isolation this exists for.
     marker = "a file the user would be upset to lose"
-    ssh(vm, ["sudo", "-u", "homebase", "sh", "-c",
-             f"echo '{marker}' > {DATA_DIR}/config/mine.txt"])
+    # Written as root and then handed to the application, because nothing on the
+    # host can reach this directory as the application itself: the directory
+    # above it is 0750 and owned by the service account. That does not affect the
+    # container, whose bind mount is resolved as root when it is set up — which
+    # is exactly why the container can write here and a host process cannot.
+    uid = ssh(vm, ["sudo", "stat", "-c", "%u", f"{DATA_DIR}/config"]).stdout.strip()
+    ssh(vm, ["sudo", "sh", "-c",
+             f"echo '{marker}' > {DATA_DIR}/config/mine.txt && "
+             f"chown {uid}:{uid} {DATA_DIR}/config/mine.txt"])
     ok("a file in its data directory")
 
     return marker
@@ -534,6 +608,7 @@ def main() -> int:
         install_homebase(vm, packages)
 
         verify_catalogue(vm)
+        refuse_before_downloading(vm)
         install_app(vm)
         verify_container_hardening(vm)
         marker = use_app(vm)

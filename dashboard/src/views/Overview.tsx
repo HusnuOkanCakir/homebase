@@ -97,7 +97,39 @@ function SystemCard({ system, renaming, onRename }: SystemCardProps) {
             </dd>
           </>
         ) : null}
+
+        {/* Same rule as the battery: a machine with no sensors reports null, and
+            showing 0 °C would look wonderfully cool. */}
+        {system.temperature.celsius !== null ? (
+          <>
+            <dt>Temperature</dt>
+            <dd>
+              {system.temperature.celsius}&nbsp;&deg;C
+              {system.temperature.state === "hot" ? (
+                <span className="badge badge-error"> Too hot</span>
+              ) : system.temperature.state === "warm" ? (
+                <span className="badge badge-warning"> Warm</span>
+              ) : null}
+            </dd>
+          </>
+        ) : null}
       </dl>
+
+      {/* Only when it is worth saying. A machine at an ordinary temperature says
+          nothing at all — an indicator that is always lit is one people stop
+          seeing, which is how every temperature warning ever shipped failed. */}
+      {system.temperature.message ? (
+        <Message
+          tone={system.temperature.state === "hot" ? "error" : "warning"}
+          title={
+            system.temperature.state === "hot"
+              ? "This server is getting too hot."
+              : "This server is running warm."
+          }
+          detail={`${system.temperature.celsius} °C`}
+          recovery={system.temperature.message}
+        />
+      ) : null}
 
       <details className="details">
         <summary>Technical details</summary>

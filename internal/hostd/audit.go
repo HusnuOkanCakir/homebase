@@ -34,10 +34,18 @@ type AuditEvent struct {
 	ErrorCode  string  `json:"error_code,omitempty"`
 	DurationMS float64 `json:"duration_ms,omitempty"`
 
-	// Params is the request body. Operations that take secrets must not exist —
-	// hostd deals in credential references, never values — so this is safe to
-	// record in full, and being able to see exactly what was asked for is worth
-	// a great deal when reconstructing an incident.
+	// Params is the request body, with any field the operation declared as
+	// `Secret` replaced by "[redacted]".
+	//
+	// This used to be recorded in full, on the strength of an invariant: hostd
+	// deals in references — an application id, a disk id — never in values
+	// anybody would mind seeing. `network.wifi_connect` broke it, because
+	// netplan needs the passphrase itself and there is no reference form of it,
+	// and the passphrase went straight into an append-only file kept for ever.
+	// Caught by a test that looked for it there.
+	//
+	// Redaction is by declaration rather than by inspection: see
+	// Operation.Secret.
 	Params json.RawMessage `json:"params,omitempty"`
 }
 
@@ -84,4 +92,45 @@ func (a *Auditor) Write(e AuditEvent) error {
 		_ = f.Sync()
 	}
 	return nil
+}
+
+// redactSecrets removes declared secret fields from a request body before it is
+// audited.
+//
+// The audit log records what was asked for, which is worth a great deal when
+// reconstructing an incident, and it is append-only and kept indefinitely. So
+// anything written into it is written into it for good — which is exactly the
+// wrong place for somebody's Wi-Fi password.
+//
+// The fields come from the operation's own declaration rather than from a list
+// of names that look sensitive. A heuristic here would be a guess, and the thing
+// being guessed about is whether a secret is about to be written to a permanent
+// file.
+//
+// A body that is not a JSON object is dropped entirely rather than recorded. If
+// the shape is not what it should be, nothing here knows what is in it.
+func redactSecrets(body []byte, secret []string) json.RawMessage {
+	if len(secret) == 0 {
+		return json.RawMessage(body)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return json.RawMessage(`{"redacted":"the request could not be read to remove secrets"}`)
+	}
+
+	for _, name := range secret {
+		if _, present := fields[name]; present {
+			// Present-but-hidden rather than absent. "There was a passphrase and
+			// it is not recorded" and "there was no passphrase" are different
+			// facts, and somebody reconstructing an incident needs the first.
+			fields[name] = json.RawMessage(`"[redacted]"`)
+		}
+	}
+
+	rewritten, err := json.Marshal(fields)
+	if err != nil {
+		return json.RawMessage(`{"redacted":"the request could not be rewritten to remove secrets"}`)
+	}
+	return rewritten
 }

@@ -324,3 +324,60 @@ func TestRecoveryCodeEndpointsNeedASession(t *testing.T) {
 		}
 	}
 }
+
+// The bug that made Homebase unusable on a real network.
+//
+// The session cookie was hard-coded Secure. Browsers refuse a Secure cookie
+// from a non-secure origin — but exempt localhost, which is the one origin
+// every test in this repository reached the server on. So on a real
+// installation at http://192.168.1.50:8080 the browser silently discarded the
+// session and /auth/me answered 401 straight after a correct password, and
+// nothing here noticed for four milestones.
+func TestTheSessionCookieMatchesTheConnectionItWasIssuedOn(t *testing.T) {
+	h := newHarness(t)
+
+	rec := h.do(http.MethodPost, "/api/v1/setup",
+		`{"username":"okan","password":"`+goodPassword+`"}`, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("setup returned %d", rec.Code)
+	}
+
+	// httptest requests carry no TLS, which is the plain-HTTP case.
+	var found bool
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name != SessionCookie {
+			continue
+		}
+		found = true
+		if cookie.Secure {
+			t.Error("a Secure cookie was issued over plain HTTP; a browser would " +
+				"discard it and the user could never sign in")
+		}
+		if !cookie.HttpOnly {
+			t.Error("the session cookie is readable from JavaScript")
+		}
+	}
+	if !found {
+		t.Fatal("no session cookie at all")
+	}
+
+	// And signing out has to clear the cookie it actually set: a browser will
+	// not replace a non-Secure cookie with a Secure one.
+	token := ""
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == SessionCookie {
+			token = cookie.Value
+		}
+	}
+	out := h.do(http.MethodPost, "/api/v1/auth/logout", "",
+		map[string]string{"Cookie": SessionCookie + "=" + token})
+	if out.Code != http.StatusNoContent {
+		t.Fatalf("logout returned %d", out.Code)
+	}
+	for _, cookie := range out.Result().Cookies() {
+		if cookie.Name == SessionCookie && cookie.Secure {
+			t.Error("signing out sent a Secure clearing cookie over plain HTTP, " +
+				"which the browser ignores — leaving the session in place")
+		}
+	}
+}

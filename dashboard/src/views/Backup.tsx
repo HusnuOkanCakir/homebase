@@ -3,6 +3,7 @@ import {
   api,
   isTerminal,
   watchJob,
+  type BackupSchedule,
   type BackupSummary,
   type Job,
   type RestorePreview,
@@ -40,6 +41,8 @@ export function Backup({ canManage }: Props) {
   const [job, setJob] = useState<Job | null>(null);
   const [preview, setPreview] = useState<RestorePreview | null>(null);
   const [deleting, setDeleting] = useState<BackupSummary | null>(null);
+  const [schedule, setSchedule] = useState<BackupSchedule | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const stopWatching = useRef<(() => void) | null>(null);
   useEffect(() => () => stopWatching.current?.(), []);
@@ -58,11 +61,32 @@ export function Backup({ canManage }: Props) {
       if (place) {
         setBackups((await api.backups(place)).items);
       }
+      setSchedule(await api.backupSchedule());
       setError(null);
     } catch (caught) {
       setError(describeError(caught));
     }
   }, [chosen]);
+
+  const setEvery = useCallback(
+    (every: BackupSchedule["every"], location?: string) => {
+      setError(null);
+      setSaving(true);
+      void (async () => {
+        try {
+          // The answer is the schedule as the server now reports it, read back
+          // from systemd — not the request echoed. A screen that showed the
+          // request would show a schedule that was accepted and never ran.
+          setSchedule(await api.setBackupSchedule(every, location));
+        } catch (caught) {
+          setError(describeError(caught));
+        } finally {
+          setSaving(false);
+        }
+      })();
+    },
+    [],
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -168,6 +192,18 @@ export function Backup({ canManage }: Props) {
         </p>
       </section>
 
+      {schedule ? (
+        <Schedule
+          schedule={schedule}
+          canManage={canManage}
+          chosen={chosen}
+          destination={locations.find((place) => place.id === schedule.location)}
+          haveSomewhere={usable.length > 0}
+          saving={saving}
+          onChange={setEvery}
+        />
+      ) : null}
+
       {chosen ? (
         <section className="card">
           <h2>Backups on this disk</h2>
@@ -223,6 +259,149 @@ export function Backup({ canManage }: Props) {
         />
       ) : null}
     </>
+  );
+}
+
+// --- Backups that happen on their own ----------------------------------------------
+
+/**
+ * The schedule.
+ *
+ * A backup you have to remember is a backup that exists until the week you are
+ * busy, which is reliably the week the disk fails. So this section is not a
+ * setting tucked into a menu — it sits on the backup screen, and it says what
+ * will happen, when, and whether the last one worked.
+ *
+ * Three things are deliberate here.
+ *
+ * The schedule is shown in words, not as a time to be picked. Nobody has an
+ * opinion about which minute past three their backup starts, and offering the
+ * choice would mean writing a calendar expression somebody typed into a file
+ * that decides what runs as root.
+ *
+ * `enabled` comes from systemd, so the case that reads "every night" while
+ * nothing is scheduled is visible rather than reassuring.
+ *
+ * A failed run is loud and stays loud. The whole failure mode of an automatic
+ * backup is that it stops and nobody notices for eight months.
+ */
+function Schedule({
+  schedule,
+  canManage,
+  chosen,
+  destination,
+  haveSomewhere,
+  saving,
+  onChange,
+}: {
+  schedule: BackupSchedule;
+  canManage: boolean;
+  chosen: string | null;
+  destination: StorageLocation | undefined;
+  haveSomewhere: boolean;
+  saving: boolean;
+  onChange: (every: BackupSchedule["every"], location?: string) => void;
+}) {
+  const on = schedule.every !== "off";
+
+  return (
+    <section className="card">
+      <h2>Automatic backups</h2>
+
+      {schedule.last_result === "failed" ? (
+        <Message
+          tone="error"
+          title="The last automatic backup did not work."
+          detail="Nothing has been backed up since then."
+          recovery="Check that the backup disk is plugged in and switched on, then make a backup by hand to see the error."
+        />
+      ) : null}
+
+      {/* Configured but not running. Worth its own message: everything else on
+          this card would otherwise read as a working schedule. */}
+      {on && !schedule.enabled ? (
+        <Message
+          tone="error"
+          title="Backups are set to run automatically, but they are not scheduled."
+          detail="Homebase has the setting recorded, and the system timer that would act on it is not running."
+          recovery="Choose a schedule again below. If that does not fix it, restart the server."
+        />
+      ) : null}
+
+      {/* A schedule pointing at a disk that is not plugged in is the failure this
+          whole section exists to prevent, and it is invisible until the night it
+          matters. Named here, by the disk's own name. */}
+      {on && destination && !destination.mounted ? (
+        <Message
+          tone="error"
+          title={`${destination.name} is not connected.`}
+          detail="Backups are scheduled onto that disk, and it is not there."
+          recovery="Plug it back in, or choose a different disk for backups."
+        />
+      ) : null}
+
+      <p>
+        {on ? (
+          <>
+            Backups run <strong>{schedule.description}</strong>
+            {destination ? (
+              <>
+                , onto <strong>{destination.name}</strong>
+              </>
+            ) : null}
+            .
+          </>
+        ) : (
+          <>Backups only happen when you ask for one.</>
+        )}
+      </p>
+
+      {on && schedule.enabled && schedule.next_run ? (
+        <p className="muted">Next one: {when(schedule.next_run)}.</p>
+      ) : null}
+
+      {on && schedule.last_result === "ok" ? (
+        <p className="muted">The last automatic backup worked.</p>
+      ) : null}
+
+      {!haveSomewhere ? (
+        <p className="muted">
+          Automatic backups need a disk to write to. Set one up under Storage.
+        </p>
+      ) : null}
+
+      {canManage && haveSomewhere ? (
+        <div className="row">
+          <button
+            className={schedule.every === "daily" ? "quiet tab-current" : "quiet"}
+            disabled={saving || !chosen}
+            onClick={() => onChange("daily", chosen ?? undefined)}
+          >
+            Every night
+          </button>
+          <button
+            className={schedule.every === "weekly" ? "quiet tab-current" : "quiet"}
+            disabled={saving || !chosen}
+            onClick={() => onChange("weekly", chosen ?? undefined)}
+          >
+            Every week
+          </button>
+          <button
+            className={schedule.every === "off" ? "quiet tab-current" : "quiet"}
+            disabled={saving}
+            onClick={() => onChange("off")}
+          >
+            Off
+          </button>
+        </div>
+      ) : null}
+
+      <p className="muted">
+        Automatic backups copy your settings and your files, onto the disk chosen above, at
+        about three in the morning. If the server is switched off at the time, it backs up the
+        next time it is switched on.
+      </p>
+    </section>
   );
 }
 

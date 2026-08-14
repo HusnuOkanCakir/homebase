@@ -111,6 +111,13 @@ if [ "$1" = "configure" ]; then
     # the first connection and is not running the rest of the time.
     if [ -d /run/systemd/system ]; then
         systemctl enable --now homebase-hostd.socket >/dev/null 2>&1 || true
+
+        # Looking for updates on its own. The unit it starts does nothing at
+        # all until an update source is configured, so enabling it here is
+        # safe on a machine that has never been pointed at a channel — and it
+        # means a server that is never touched again still finds out that a
+        # security fix exists.
+        systemctl enable --now homebase-update-check.timer >/dev/null 2>&1 || true
     fi
 fi
 
@@ -304,7 +311,19 @@ def build_hostd(version: str, binaries: Path) -> Path:
     reset(root)
 
     install_file(binaries / "hostd", root / "usr/libexec/homebase/hostd", 0o755)
-    for unit in ("homebase-hostd.service", "homebase-hostd.socket"):
+
+    # The part of updating that has to reach the network.
+    #
+    # hostd cannot: its unit sets RestrictAddressFamilies=AF_UNIX AF_NETLINK, so
+    # the root service that manages this machine cannot open a network socket at
+    # all. It starts this unit instead — a fixed command in a package-installed
+    # file, never anything composed from a request.
+    install_file(REPO_ROOT / "packaging/update-run",
+                 root / "usr/libexec/homebase/update-run", 0o755)
+
+    for unit in ("homebase-hostd.service", "homebase-hostd.socket",
+                 "homebase-update-check.service", "homebase-update-apply.service",
+                 "homebase-update-check.timer", "homebase-repair.service"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,
@@ -316,7 +335,13 @@ def build_hostd(version: str, binaries: Path) -> Path:
         package="homebase-hostd",
         version=version,
         architecture="amd64",
-        depends="systemd, adduser",
+        # sqlite3 is not optional. hostd exports core's database with
+        # `VACUUM INTO` when it backs up, and it shells out to do it because
+        # hostd carries no third-party Go dependencies (ADR-0002). Without the
+        # binary, every backup fails at the point of writing the settings —
+        # which is what happened on every machine not installed from the ISO,
+        # since only the installer's autoinstall happened to pull it in.
+        depends="systemd, adduser, sqlite3, iw, wpasupplicant",
         description=(
             "Homebase privileged host service\n"
             " The only component of Homebase that runs as root. It accepts a fixed,\n"
@@ -348,18 +373,32 @@ def build_core(version: str, binaries: Path) -> Path:
     # instead of "command not found". See ADR-0015.
     install_file(binaries / "homebasectl", root / "usr/bin/homebasectl", 0o755)
 
-    install_file(
-        REPO_ROOT / "packaging/systemd/homebase-core.service",
-        root / "lib/systemd/system/homebase-core.service",
-        0o644,
-    )
+    # The scheduled backup: a timer, the oneshot it starts, and the script that
+    # asks hostd to do the work. In core's package rather than hostd's because
+    # the script runs as the `homebase` user, which core's maintainer script is
+    # what creates.
+    install_file(REPO_ROOT / "packaging/backup-run",
+                 root / "usr/libexec/homebase/backup-run", 0o755)
+
+    for unit in ("homebase-core.service",
+                 "homebase-backup.service",
+                 "homebase-backup.timer"):
+        install_file(
+            REPO_ROOT / "packaging/systemd" / unit,
+            root / "lib/systemd/system" / unit,
+            0o644,
+        )
 
     control(
         root,
         package="homebase-core",
         version=version,
         architecture="amd64",
-        depends=f"systemd, adduser, homebase-hostd (= {version})",
+        # avahi-daemon publishes <hostname>.local on the local network, which is
+        # how anybody reaches this server without being told an address that
+        # changes whenever the router feels like it. Without it the dashboard is
+        # only findable by a number somebody has to be given.
+        depends=f"systemd, adduser, avahi-daemon, homebase-hostd (= {version})",
         description=(
             "Homebase core service\n"
             " The unprivileged service: HTTP API, authentication, jobs and state. Runs as\n"

@@ -43,7 +43,14 @@ from vmctl import (  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VM_NAME = "homebase-core"
-API = "http://127.0.0.1:8080/api/v1"
+# HTTPS on the ordinary port, exactly as a browser reaches it.
+#
+# This said `http://127.0.0.1:8080` for five milestones and stopped being true in
+# Milestone 7, when core moved to 443 with a self-signed certificate — and nobody
+# noticed, because this suite was not re-run. The rule that came out of that is
+# in docs/development/testing.md: a change to how the server is reached is a
+# change to every suite that reaches it.
+API = "https://127.0.0.1/api/v1"
 PASSWORD = "a-sufficiently-long-password"
 
 
@@ -81,8 +88,14 @@ def build() -> dict[str, Path]:
 
 def api(vm: VM, path: str, method: str = "GET", body: str | None = None,
         cookie_jar: str = "/tmp/homebase-cookies") -> tuple[int, str]:
-    """Call core's API from inside the guest, keeping cookies between calls."""
-    cmd = ["curl", "--silent", "--show-error",
+    """Call core's API from inside the guest, keeping cookies between calls.
+
+    --insecure stands in for the "proceed once" a person clicks over the
+    server's own certificate. It is the right thing here and would be the wrong
+    thing in a test about the certificate — see test_network.py, which checks the
+    fingerprint rather than skipping it.
+    """
+    cmd = ["curl", "--silent", "--show-error", "--insecure",
            "-c", cookie_jar, "-b", cookie_jar,
            "-o", "/dev/stdout", "-w", "\\n%{http_code}",
            "-X", method]

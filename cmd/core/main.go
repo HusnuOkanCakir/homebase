@@ -54,7 +54,17 @@ func main() {
 		// has to restate the whole command line silently drops any flag added
 		// to it later — which is how the address ended up wrong in two places
 		// at once, each for its own good reason.
-		addr        = flag.String("listen", envOr("HOMEBASE_LISTEN", "127.0.0.1:8080"), "address to listen on")
+		addr = flag.String("listen", envOr("HOMEBASE_LISTEN", "127.0.0.1:8080"), "address to listen on")
+		// Where the dashboard is actually used from. A password crossing a home
+		// network in the clear crosses a network the threat model says contains
+		// a smart television with unpatched firmware; the plain port redirects
+		// here rather than serving anything of its own.
+		//
+		// Empty switches TLS off, which is how `make run` and the unit tests
+		// work — a developer running this on their own machine reaches it over
+		// loopback, which browsers already treat as a secure origin.
+		tlsAddr     = flag.String("listen-tls", envOr("HOMEBASE_LISTEN_TLS", ""), "address to serve HTTPS on")
+		stateDir    = flag.String("state-dir", envOr("HOMEBASE_STATE_DIR", "/var/lib/homebase"), "where the certificate is kept")
 		dbPath      = flag.String("db", "/var/lib/homebase/homebase.db", "SQLite database")
 		socket      = flag.String("hostd-socket", hostclient.DefaultSocket, "hostd socket")
 		staticDir   = flag.String("dashboard", "/usr/share/homebase/dashboard", "built dashboard assets")
@@ -69,13 +79,35 @@ func main() {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	if err := run(log, *addr, *dbPath, *socket, *staticDir); err != nil {
+	if err := run(log, runOptions{
+		addr:      *addr,
+		tlsAddr:   *tlsAddr,
+		stateDir:  *stateDir,
+		dbPath:    *dbPath,
+		socket:    *socket,
+		staticDir: *staticDir,
+	}); err != nil {
 		log.Error("core failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(log *slog.Logger, addr, dbPath, socket, staticDir string) error {
+// runOptions is a struct rather than six string arguments, because six strings
+// of the same type in a row is a call nobody can read and an argument order
+// somebody eventually gets wrong.
+type runOptions struct {
+	addr      string
+	tlsAddr   string
+	stateDir  string
+	dbPath    string
+	socket    string
+	staticDir string
+}
+
+func run(log *slog.Logger, opts runOptions) error {
+	addr, tlsAddr, stateDir := opts.addr, opts.tlsAddr, opts.stateDir
+	dbPath, socket, staticDir := opts.dbPath, opts.socket, opts.staticDir
+
 	if os.Geteuid() == 0 {
 		// Not fatal — it is convenient during development — but worth saying
 		// loudly, because the whole design rests on this process not being root
@@ -165,13 +197,60 @@ func run(log *slog.Logger, addr, dbPath, socket, staticDir string) error {
 		log.Info("serving the dashboard", "path", staticDir)
 	}
 
+	errCh := make(chan error, 1)
+
+	// HTTPS, when this is an installation rather than somebody's laptop.
+	//
+	// Set up before the plain listener, because what the plain port serves
+	// depends on whether this exists: a redirect when it does, the dashboard
+	// itself when it does not.
+	var tlsServer *http.Server
+	if tlsAddr != "" {
+		identity, err := api.EnsureCertificate(stateDir, serverNames(log))
+		if err != nil {
+			return fmt.Errorf("preparing the certificate: %w", err)
+		}
+
+		tlsListener, err := net.Listen("tcp", tlsAddr)
+		if err != nil {
+			return fmt.Errorf("listening on %s: %w", tlsAddr, err)
+		}
+
+		tlsServer = &http.Server{
+			Handler:           server.Handler(),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      60 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+		}
+
+		// Logged so the fingerprint is in the journal as well as on the screen:
+		// somebody helping over the phone needs to be able to read it out.
+		log.Info("serving HTTPS",
+			"addr", tlsListener.Addr().String(),
+			"names", strings.Join(identity.Names, ", "),
+			"fingerprint", identity.Fingerprint)
+
+		go func() {
+			if err := tlsServer.ServeTLS(tlsListener, identity.CertPath, identity.KeyPath); err != nil &&
+				!errors.Is(err, http.ErrServerClosed) {
+				errCh <- err
+			}
+		}()
+	}
+
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listening on %s: %w", addr, err)
 	}
 
+	plainHandler := server.Handler()
+	if tlsServer != nil {
+		plainHandler = api.RedirectToTLS(tlsAddr)
+	}
+
 	httpServer := &http.Server{
-		Handler:           server.Handler(),
+		Handler:           plainHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -180,7 +259,6 @@ func run(log *slog.Logger, addr, dbPath, socket, staticDir string) error {
 
 	log.Info("core listening", "addr", listener.Addr().String(), "version", version)
 
-	errCh := make(chan error, 1)
 	go func() {
 		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
@@ -200,4 +278,22 @@ func run(log *slog.Logger, addr, dbPath, socket, staticDir string) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return httpServer.Shutdown(shutdownCtx)
+}
+
+// serverNames is what the certificate should be valid for.
+//
+// The hostname and its mDNS form. Addresses are added by the certificate code
+// itself, because they are a property of the machine rather than a choice —
+// and because they change with DHCP while the name does not.
+func serverNames(log *slog.Logger) []string {
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		// A machine with no hostname still needs a certificate, and "homebase"
+		// is what the installer would have called it.
+		log.Warn("could not read the hostname; the certificate will use a default", "error", err)
+		hostname = "homebase"
+	}
+	hostname = strings.TrimSuffix(strings.ToLower(hostname), ".local")
+
+	return []string{hostname, hostname + ".local"}
 }

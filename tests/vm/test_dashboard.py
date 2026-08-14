@@ -112,8 +112,19 @@ def install(vm: VM, built: dict[str, Path]) -> None:
              "/var/lib/homebase", "/srv/homebase", "/srv/homebase/apps",
              "/var/log/homebase"])
 
-    # sqlite3, because a backup exports the database with VACUUM INTO rather
-    # than copying it.
+    # sqlite3, because hostd exports the database with VACUUM INTO rather than
+    # copying it.
+    #
+    # Installed by hand *only* because this test copies binaries into place
+    # rather than installing the packages — the homebase-hostd package declares
+    # the dependency, and test_packages.py is what checks that it does.
+    #
+    # This line is also how the missing dependency went unnoticed: it was added
+    # here to make a Milestone 5 test pass, which made the symptom go away on
+    # the one machine anybody looked at while backup stayed broken on every
+    # machine installed from packages. Making a test pass and fixing the product
+    # are different things, and the difference is invisible from inside the
+    # test.
     result = apt(vm, "install -y -qq sqlite3")
     if result.returncode != 0:
         raise TestFailure("installing sqlite3 failed\n" + result.stdout[-400:])
@@ -175,12 +186,12 @@ def install(vm: VM, built: dict[str, Path]) -> None:
 def verify_reachable(vm: VM) -> None:
     step("The dashboard is reachable from outside the VM")
 
-    url = f"http://127.0.0.1:{vm.api_port}"
+    url = f"https://127.0.0.1:{vm.dashboard_port}"
     deadline = time.time() + 60
     last = ""
     while time.time() < deadline:
         result = subprocess.run(
-            ["curl", "--silent", "--show-error", "--max-time", "5", url],
+            ["curl", "--silent", "--show-error", "--insecure", "--max-time", "5", url],
             capture_output=True, text=True,
         )
         if result.returncode == 0 and "<title>Homebase</title>" in result.stdout:
@@ -205,7 +216,7 @@ def run_browser_tests(vm: VM) -> None:
 
     env = {
         **os.environ,
-        "HOMEBASE_URL": f"http://127.0.0.1:{vm.api_port}",
+        "HOMEBASE_URL": f"https://127.0.0.1:{vm.dashboard_port}",
         "HOMEBASE_HOSTNAME": VM_NAME,
     }
 
@@ -256,7 +267,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
     # The claim worth testing: this code, typed into the browser, opens the
     # server. Anything less proves only that a string was printed.
     recovered = subprocess.run(
-        ["curl", "--silent", "--show-error", "--max-time", "30",
+        ["curl", "--silent", "--show-error", "--insecure", "--max-time", "30",
          "-o", "/dev/null", "-w", "%{http_code}",
          "-X", "POST", "-H", "Content-Type: application/json",
          "-d", json.dumps({
@@ -264,7 +275,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
              "recovery_code": code,
              "new_password": "a-password-set-from-the-console-code",
          }),
-         f"http://127.0.0.1:{vm.api_port}/api/v1/auth/recover"],
+         f"https://127.0.0.1:{vm.dashboard_port}/api/v1/auth/recover"],
         capture_output=True, text=True,
     )
     check(recovered.stdout.strip() == "200",
@@ -273,7 +284,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
 
     # Spent. A code that keeps working is a permanent key printed on a screen.
     again = subprocess.run(
-        ["curl", "--silent", "--max-time", "30",
+        ["curl", "--silent", "--insecure", "--max-time", "30",
          "-o", "/dev/null", "-w", "%{http_code}",
          "-X", "POST", "-H", "Content-Type: application/json",
          "-d", json.dumps({
@@ -281,7 +292,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
              "recovery_code": code,
              "new_password": "another-password-entirely-here",
          }),
-         f"http://127.0.0.1:{vm.api_port}/api/v1/auth/recover"],
+         f"https://127.0.0.1:{vm.dashboard_port}/api/v1/auth/recover"],
         capture_output=True, text=True,
     )
     check(again.stdout.strip() == "401", "and stops working once it is used",
