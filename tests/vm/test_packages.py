@@ -664,6 +664,61 @@ def verify_temperature_reporting(vm: VM) -> None:
               "An indicator that is always lit is one people stop seeing.")
 
 
+def verify_destructive_commands_refuse_first(vm: VM) -> None:
+    """The commands that destroy things, and what stops them by accident.
+
+    In a browser, "type the backup id to confirm" works: the id is on the screen
+    and the field is empty. At a shell it means much less — the id is already in
+    the command that listed it, the up arrow re-runs whatever was done last, and
+    a `--yes` flag becomes muscle memory within a week.
+
+    So what is checked here is the three things that replace it: nothing
+    irreversible runs without a terminal, `--confirm` has to name the thing
+    itself, and a word like "yes" is refused.
+    """
+    step("What stops a destructive command by accident")
+
+    hostname = ssh(vm, ["hostname"]).stdout.strip()
+
+    # No terminal, no --confirm: it must refuse rather than prompt into a void.
+    result = ssh(vm, ["sudo", "homebasectl", "factory-reset"], check=False, timeout=90)
+    check(result.returncode == 2,
+          f"a factory reset with no terminal is a usage error ({result.returncode})",
+          (result.stdout + result.stderr)[-400:])
+    check("--confirm" in (result.stdout + result.stderr),
+          "and it says what a script has to pass instead",
+          (result.stdout + result.stderr)[-300:])
+    check("no --yes" in (result.stdout + result.stderr),
+          "and why there is no --yes",
+          "Somebody will look for one, and the answer should be in the message "
+          "rather than in the source.")
+
+    # A word instead of the name.
+    for word in ("yes", "y", "true", "confirm"):
+        result = ssh(vm, ["sudo", "homebasectl", "factory-reset", "--confirm", word],
+                     check=False, timeout=90)
+        check(result.returncode == 2,
+              f"--confirm {word} is refused ({result.returncode})",
+              (result.stdout + result.stderr)[-200:])
+
+    # The server's own name is the only thing that works, and it is still there.
+    status, body = api(vm, "/setup")
+    check(json.loads(body)["needs_setup"] is False,
+          "and after all of that the server is untouched", body)
+
+    # Formatting names a disk that does not exist: it has to say so rather than
+    # asking for confirmation of something imaginary.
+    result = ssh(vm, ["sudo", "homebasectl", "storage", "format", "/dev/nonexistent"],
+                 check=False, timeout=90)
+    check(result.returncode != 0,
+          f"formatting a disk that is not there is refused ({result.returncode})")
+    check("cannot see" in (result.stdout + result.stderr),
+          "and says the server cannot see it",
+          (result.stdout + result.stderr)[-300:])
+
+    info(f"(the confirmation for this machine would be {hostname!r})")
+
+
 def verify_factory_reset(vm: VM) -> None:
     """Starting again without losing the photographs.
 
@@ -857,6 +912,7 @@ def main() -> int:
         verify_scheduled_backups(vm)
         verify_temperature_reporting(vm)
         verify_the_cli_can_drive_the_server(vm)
+        verify_destructive_commands_refuse_first(vm)
         verify_factory_reset(vm)
         verify_reboot(vm)
         verify_removal_keeps_data(vm)

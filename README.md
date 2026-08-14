@@ -92,9 +92,14 @@ Plug in the drive your files will live on:
 sudo homebasectl storage disks         # what is plugged in
 ```
 
-Formatting and attaching still needs the dashboard at `https://homebase.local` — those
-commands are the part of Milestone 10 not yet written, because "which disk do I erase" needs
-a confirmation designed for a shell rather than copied from a form.
+```sh
+sudo homebasectl storage format /dev/sdb --name backups
+sudo homebasectl storage attach UUID backups
+```
+
+`format` prints what is on the disk *before* asking, and the confirmation is the device's own
+name — never "yes". There is no `--yes`: a flag meaning "do it anyway" ends up in every
+invocation within a week.
 
 ### 6. Install what you want to run
 

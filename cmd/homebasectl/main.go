@@ -103,6 +103,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return networkCommand(args[1:], stdout)
 	case "vpn":
 		return vpnCommand(args[1:], stdout)
+	case "factory-reset":
+		return factoryResetCommand(args[1:], stdout)
 	case "wake":
 		return wakeCommand(args[1:], stdout)
 	case "repair":
@@ -137,10 +139,19 @@ func usage(w io.Writer) {
 
   homebasectl storage [list]
   homebasectl storage disks
-        The disks Homebase manages, and every disk it can see.
+  homebasectl storage format /dev/sdX [--name NAME]
+  homebasectl storage attach UUID NAME
+  homebasectl storage detach NAME
+        The disks Homebase manages, and every disk it can see. Formatting
+        shows what is on the disk first and then asks; it destroys
+        everything on it.
+
+  homebasectl factory-reset
+        Remove every account and every setting. Your files are kept.
 
   homebasectl backup list DISK
   homebasectl backup now DISK
+  homebasectl backup restore ID --from DISK
   homebasectl backup schedule [daily|weekly|off [DISK]]
         Backups. With no arguments, "schedule" reports the one in force —
         including whether systemd is actually running it, and how the last
@@ -191,6 +202,9 @@ func usage(w io.Writer) {
         Run "homebasectl installer help" for what it can do.
 
 Options:
+  --confirm VALUE   Agree to something irreversible without being asked. It
+                    must name the thing itself — the backup\'s id, the
+                    disk\'s device, the server\'s name. There is no --yes.
   --json            Print the server\'s answer as JSON, unmodified. This is
                     the interface to build on; the readable form is not.
   --address URL     The server to talk to (default `+defaultAddress+`)

@@ -356,3 +356,16 @@ func hideInput() (restore func(), hidden bool) {
 		_ = exec.Command(stty, "-F", "/dev/tty", strings.TrimSpace(string(saved))).Run()
 	}, true
 }
+
+// readLine reads one line from the terminal, visibly.
+//
+// Visibly, unlike askForSecret, and that is the point: a confirmation is
+// something to be read back and checked, not hidden.
+func readLine() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}

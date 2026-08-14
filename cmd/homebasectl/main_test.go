@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -406,5 +407,84 @@ func TestJSONOutputFallsBackWhenThereWasNoRequest(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "local") {
 		t.Errorf("nothing was printed:\n%s", out.String())
+	}
+}
+
+// The confirmation for something irreversible is the thing's own name.
+//
+// Never a word like "yes": a confirmation that is the same on every machine is
+// one that can be typed without looking, and one that a script can carry from a
+// safe context into a dangerous one.
+func TestScriptedConfirmationHasToNameTheThing(t *testing.T) {
+	var out bytes.Buffer
+
+	for _, given := range []string{"yes", "y", "YES", "true", "confirm", "backup", ""} {
+		if given == "" {
+			continue // empty means "ask me", tested separately
+		}
+		agreed, err := confirmDestruction(&out, "2026-08-09-120000-abcdef01",
+			"this destroys things", given)
+		if agreed {
+			t.Errorf("%q was accepted as confirmation", given)
+		}
+		var usage usageError
+		if err == nil || !errors.As(err, &usage) {
+			t.Errorf("%q gave %v, which does not exit 2", given, err)
+		}
+	}
+
+	agreed, err := confirmDestruction(&out, "2026-08-09-120000-abcdef01",
+		"this destroys things", "2026-08-09-120000-abcdef01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !agreed {
+		t.Error("the correct value was refused")
+	}
+}
+
+// Nothing irreversible happens with nobody there to agree to it.
+//
+// There are two ways for that to be true and both have to be, because which one
+// applies depends on how the command was invoked. With stdin on a pipe there is
+// no terminal at all and it refuses outright. With stdin on /dev/null — which is
+// a character device, and is what `go test` and many scripts provide — it
+// prompts, reads nothing, and stops. Neither agrees.
+func TestNothingIrreversibleHappensWithNobodyThere(t *testing.T) {
+	var out bytes.Buffer
+
+	// Stdin as /dev/null: a character device, so it prompts and gets EOF.
+	agreed, err := confirmDestruction(&out, "the-server", "this destroys things", "")
+	if agreed {
+		t.Error("agreed to something irreversible after reading nothing")
+	}
+	_ = err
+
+	// Stdin as a pipe: not a terminal, so it says so and says what to pass.
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close(); _ = writer.Close() }()
+
+	original := os.Stdin
+	os.Stdin = reader
+	defer func() { os.Stdin = original }()
+
+	agreed, err = confirmDestruction(&out, "the-server", "this destroys things", "")
+	if agreed {
+		t.Fatal("agreed to something irreversible with no terminal to agree on")
+	}
+
+	var usage usageError
+	if err == nil || !errors.As(err, &usage) {
+		t.Fatalf("gave %v, which does not exit 2", err)
+	}
+	if !strings.Contains(err.Error(), "--confirm the-server") {
+		t.Errorf("it does not say what to pass instead: %v", err)
+	}
+	// And it says why there is no --yes, because somebody will look for one.
+	if !strings.Contains(err.Error(), "no --yes") {
+		t.Errorf("it does not explain the absence of --yes: %v", err)
 	}
 }

@@ -620,9 +620,10 @@ wrong way round.
       to expose
 - [x] Exit codes that distinguish failure (1) from misuse (2) from the server not answering
       at all (3)
-- [ ] The operations still missing: restoring a backup, formatting and attaching a disk,
-      changing the update channel, factory reset — the destructive ones, which need their
-      confirmations thought about at a terminal rather than copied from the browser
+- [x] **The destructive ones**: restoring a backup, formatting, attaching and detaching a
+      disk, factory reset — with a confirmation designed for a shell rather than copied from
+      the browser
+- [ ] Changing the update channel, and removing an application's data
 
 **Done when:** every operation the dashboard can perform can be performed from a terminal,
 over SSH, on the machine itself — and a shell script can drive an install end to end.
@@ -640,6 +641,22 @@ can sign in to, which is the whole point of them (ADR-0015).
 prompt with echo off. An argument is in the shell history and in `ps` output for every user
 on the machine for as long as the command runs, which for joining a network is up to a
 minute.
+
+**The confirmation the dashboard uses does not survive the move to a terminal.** In a form
+field, "type the backup id to confirm" works: the id is on the screen and the field is empty,
+so typing it means having read it. At a shell it means almost nothing — the id is already in
+the command that listed it, one press of the up arrow re-runs whatever was done last, and a
+`--yes` flag becomes muscle memory within a week. Copying the browser's confirmation across
+would have looked like safety without being any.
+
+Three things replace it. **The preview**, which is the part that actually stops a mistake: the
+server is asked what would happen and the answer is printed, specifically — this many files
+replaced, from this machine, or this is what is on the disk now. A wrong choice usually looks
+wrong once described. **A terminal is required**, because a script can run a command by
+accident in a way nobody can click a button by accident, so the unattended path has to be
+asked for. And **the confirmation is a value rather than a word** — the backup's id, the
+disk's device, the server's name, which cannot be replayed against a different one. There is
+no `--yes`.
 
 The VM test found two things on its first two runs, both about the shape of a CLI rather
 than about Homebase. `homebasectl apps --json` was read as a subcommand called `--json` and

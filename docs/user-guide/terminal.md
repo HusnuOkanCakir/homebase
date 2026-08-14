@@ -101,6 +101,34 @@ if ! homebasectl backup now backups; then
 fi
 ```
 
+## The commands that destroy things
+
+```sh
+homebasectl backup restore ID --from DISK
+homebasectl storage format /dev/sdX
+homebasectl storage detach NAME
+homebasectl factory-reset
+```
+
+Each of these shows you what it is about to do — from the server, not from
+memory — and then asks. Restoring prints how many files would be replaced;
+formatting prints what is on the disk now.
+
+**The confirmation is the thing's own name**, never "yes". A backup's id, a
+disk's device, the server's hostname. A confirmation that reads the same on
+every machine is one you can type without looking, and one a script can carry
+from a safe context into a dangerous one.
+
+From a script, pass it explicitly:
+
+```sh
+homebasectl storage format /dev/sdb --confirm /dev/sdb
+```
+
+**There is no `--yes`.** A flag meaning "do it anyway" ends up in every
+invocation within a week, and then it is not a confirmation at all. Without a
+terminal and without `--confirm`, these refuse and tell you what to pass.
+
 ## Passwords
 
 The Wi-Fi password is read from `HOMEBASE_WIFI_PASSWORD`, or asked for. There is no flag for

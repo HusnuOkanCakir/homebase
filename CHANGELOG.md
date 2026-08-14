@@ -419,6 +419,15 @@ Milestone 0 — contracts and project machinery. No product code.
 - **The Wi-Fi password is never an argument** — `HOMEBASE_WIFI_PASSWORD`, or a prompt with
   echo off. An argument is in the shell history and in `ps` output for every user on the
   machine for as long as the command runs
+- **The destructive commands**: `backup restore`, `storage format`, `storage attach`,
+  `storage detach` and `factory-reset` — with a confirmation designed for a shell rather
+  than copied from the browser. In a form field, "type the id to confirm" works because the
+  field is empty and the id is on screen; at a shell the id is already in the command that
+  listed it and the up arrow re-runs the last thing. Three things replace it: a **preview**
+  printed from the server before anything happens, a **terminal required** unless `--confirm`
+  is passed explicitly, and a confirmation that is **the thing's own name** rather than a
+  word. There is no `--yes`, because a flag meaning "do it anyway" ends up in every
+  invocation within a week
 
 - **Remote access, over self-hosted WireGuard**
   ([ADR-0019](docs/decisions/0019-remote-access-is-self-hosted-wireguard.md)). No account, no

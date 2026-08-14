@@ -44,6 +44,14 @@ type options struct {
 	address  string
 	database string
 	asJSON   bool
+
+	// confirm is how a script agrees to something irreversible. It has to equal
+	// the thing's own name — never a word like "yes", and there is no --yes.
+	confirm string
+
+	// from names the disk a backup is on; name is what to call a disk.
+	from string
+	name string
 }
 
 // globals are the shared flags when they are given *before* the subcommand.
@@ -103,6 +111,10 @@ func bind(flags *flag.FlagSet) *options {
 	flags.StringVar(&o.address, "address", globals.address, "the server to talk to")
 	flags.StringVar(&o.database, "database", globals.database, "path to the Homebase database")
 	flags.BoolVar(&o.asJSON, "json", globals.asJSON, "print the server's answer as JSON")
+	flags.StringVar(&o.confirm, "confirm", "",
+		"agree to something irreversible from a script; must name the thing itself")
+	flags.StringVar(&o.from, "from", "", "which disk a backup is on")
+	flags.StringVar(&o.name, "name", "", "what to call it")
 	return o
 }
 
@@ -428,8 +440,15 @@ func storageCommand(args []string, stdout io.Writer) error {
 		return withClient("storage list", rest, stdout, listStorage)
 	case "disks":
 		return withClient("storage disks", rest, stdout, listDisks)
+	case "format":
+		return withClient("storage format", rest, stdout, formatCommand)
+	case "attach":
+		return withClient("storage attach", rest, stdout, attachCommand)
+	case "detach":
+		return withClient("storage detach", rest, stdout, detachCommand)
 	default:
-		return usageError{fmt.Errorf("unknown storage command %q — try list or disks", action)}
+		return usageError{fmt.Errorf("unknown storage command %q — try list, disks, "+
+			"format, attach or detach", action)}
 	}
 }
 
@@ -490,8 +509,11 @@ func backupCommand(args []string, stdout io.Writer) error {
 		return withClient("backup now", rest, stdout, makeBackup)
 	case "schedule":
 		return withClient("backup schedule", rest, stdout, backupSchedule)
+	case "restore":
+		return withClient("backup restore", rest, stdout, restoreCommand)
 	default:
-		return usageError{fmt.Errorf("unknown backup command %q — try list, now or schedule", action)}
+		return usageError{fmt.Errorf("unknown backup command %q — try list, now, "+
+			"schedule or restore", action)}
 	}
 }
 
