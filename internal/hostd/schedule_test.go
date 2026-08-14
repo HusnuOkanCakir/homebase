@@ -47,9 +47,10 @@ func TestOnlyKnownWordsHaveACalendar(t *testing.T) {
 // the numeric form left the field empty on every real machine — and an empty
 // field looks exactly like "no next run", so nothing appeared to be wrong.
 func TestNextRunIsReadInEitherFormSystemdUses(t *testing.T) {
-	t.Setenv("TZ", "UTC")
-	time.Local = time.UTC
-
+	// UTC is passed in rather than assigned to time.Local. That assignment is a
+	// write to a package-level variable every other test in the binary reads,
+	// and `go test -race` says so — which it did, in CI, after this passed
+	// locally without the race detector.
 	cases := []struct {
 		name  string
 		value string
@@ -62,7 +63,7 @@ func TestNextRunIsReadInEitherFormSystemdUses(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			when, ok := parseSystemdTime(c.value)
+			when, ok := parseSystemdTime(c.value, time.UTC)
 			if !ok {
 				t.Fatalf("%q was not understood; the next run would show as unknown", c.value)
 			}
@@ -75,7 +76,7 @@ func TestNextRunIsReadInEitherFormSystemdUses(t *testing.T) {
 
 func TestATimerThatIsNotRunningHasNoNextRun(t *testing.T) {
 	for _, value := range []string{"", "  ", "0", "n/a", "infinity", "never"} {
-		if when, ok := parseSystemdTime(value); ok {
+		if when, ok := parseSystemdTime(value, time.UTC); ok {
 			t.Errorf("%q was read as a time (%s)", value, when)
 		}
 	}

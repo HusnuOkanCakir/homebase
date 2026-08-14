@@ -106,7 +106,7 @@ func nextElapse(ctx context.Context, unit string) string {
 	if err != nil {
 		return ""
 	}
-	when, ok := parseSystemdTime(out)
+	when, ok := parseSystemdTime(out, time.Local)
 	if !ok {
 		return ""
 	}
@@ -125,10 +125,13 @@ func nextElapse(ctx context.Context, unit string) string {
 // empty — parsed, failed, and returned "" to a screen that then had nothing to
 // say. Silence is what a missing value looks like, so nothing looked wrong.
 //
-// The zone is resolved against the machine's own location: systemd prints the
+// The zone is resolved against a location passed in rather than read from
+// `time.Local` here. In production that is `time.Local` — systemd prints the
 // local abbreviation, this runs on the same machine, and Go cannot turn "CEST"
-// into an offset any other way.
-func parseSystemdTime(value string) (time.Time, bool) {
+// into an offset any other way. As a parameter, a test can ask for UTC without
+// assigning to `time.Local`, which is a package-level variable shared with every
+// other test in the binary and a genuine data race under `-race`.
+func parseSystemdTime(value string, where *time.Location) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" || value == "0" || value == "n/a" || value == "infinity" {
 		return time.Time{}, false
@@ -143,7 +146,7 @@ func parseSystemdTime(value string) (time.Time, bool) {
 		"Mon 2006-01-02 15:04:05.000000 MST",
 		"2006-01-02 15:04:05 MST",
 	} {
-		if when, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+		if when, err := time.ParseInLocation(layout, value, where); err == nil {
 			return when, true
 		}
 	}
