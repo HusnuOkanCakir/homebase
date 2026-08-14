@@ -1,35 +1,43 @@
 # Homebase
 
-Turn an old laptop into a home server you can actually manage.
+Turn an old laptop into a home server, from one command and a USB stick.
 
-Homebase installs a complete server operating system onto a spare machine, then gets out of
-the way behind a local web dashboard. You install applications, attach storage, and
-configure backups without ever opening a terminal or learning Linux.
+Homebase installs a complete server operating system onto a spare machine, unattended, and
+gives you back something you administer from a terminal — or from a local web dashboard if
+you would rather. Applications, storage, backups, signed updates with automatic rollback,
+and a way back in when it breaks.
 
-> **Status: pre-alpha. Milestones 0–7 complete.**
-> There is no installable release yet, and nothing here should be pointed at data you care
-> about. What works, all from a browser: setting up an administrator, reading live system
-> information, restarting the machine, installing and removing applications from a small
-> catalogue, attaching a disk and giving it to an application, and backing the whole thing
-> up onto another disk. A backup restores onto a different machine, and can be read without
-> Homebase. A forgotten password is recoverable with a code written down at setup — which
-> travels with the backup, so it still works on a machine rebuilt from the disk.
-> There is now an installer: `homebasectl installer create` writes a USB stick that turns a
-> Windows laptop into a working server, with no Linux commands typed on it. A newly claimed
-> server says what is worth doing next, and can be given a name of its own.
-> That server is then reachable at `https://its-name.local` from any device in the house,
-> encrypted, with no port number to remember — and it can tell the difference between having
-> no network and having no internet.
-> What does not exist yet: the graphical tool for making that stick — so making one still
-> takes a single command on a Linux machine — backups on a schedule, and Wi-Fi, so the
-> server needs a network cable.
+**Who it is for:** somebody comfortable with Linux who wants the tedious and dangerous parts
+done properly and once, rather than as a pile of shell scripts nobody has tested on a machine
+that already holds their photographs.
+
+> **Status: pre-alpha. Milestones 0–8 complete, 9 in progress.**
+> There is no release yet, and nothing here should be pointed at data you care about.
+>
+> **What works.** `homebasectl installer create` writes a USB stick that installs Ubuntu and
+> Homebase onto a laptop unattended — including over a disk with Windows on it. The server
+> is then reachable at `https://its-name.local` from anywhere in the house, encrypted, with
+> no port number and no IP address to remember, and it can tell the difference between
+> having no network and having no internet. It joins a Wi-Fi network and refuses a wrong
+> password without changing anything. It boots with Secure Boot enforcing, as laptops ship.
+>
+> Applications install from a small catalogue and keep their data on a disk you choose.
+> Backups run every night onto a second disk, restore onto a *different* machine, and can be
+> read without Homebase installed. Updates are signed, check themselves daily, health-check
+> after applying and put the previous version back if it fails — and survive having the
+> power cut mid-`dpkg`. When something breaks it can produce a diagnostic file safe to send
+> to a stranger, repair itself, or start again without deleting anybody's photographs.
+>
+> **What does not exist yet.** Reaching the server from *outside* the house, and sharing
+> files onto the network — the two halves a home server is most used for. And `homebasectl`
+> covers only a fraction of what the dashboard can do, which for this audience is the wrong
+> way round. Those are Milestones 10, 11 and 12.
+>
 > See the [roadmap](ROADMAP.md).
 
 ## Try it
 
-There is an installer, but making the stick still needs one command on a Linux machine —
-the graphical tool for doing that on Windows or macOS is
-[Milestone 10 in the roadmap](ROADMAP.md). See
+Making the stick is one command on a Linux machine. See
 [Installing Homebase](docs/user-guide/installing.md) for the real thing.
 
 Short of finding a spare laptop, there are two ways to see Homebase working, and they answer

@@ -1,13 +1,20 @@
 # Roadmap
 
-Homebase is built in two stages. **Stage 1** is a home server that a non-technical person
-can install and run. **Stage 2** adds a local AI operator on top of it.
+Homebase is built in two stages. **Stage 1** is a home server that installs itself onto an
+old laptop and is then run from a terminal. **Stage 2** adds a local AI operator on top of
+it, and is not yet committed to.
+
+**Who this is for:** somebody comfortable with Linux who wants the tedious and dangerous
+parts done properly — installing, backing up, updating, recovering — without doing them by
+hand on every machine, and without a stack of shell scripts nobody has tested. Not somebody
+who has never opened a terminal; that was the earlier premise and it was wrong about its own
+audience.
 
 Stage 1 must be genuinely good on its own. If the AI never ships, what remains should still
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–8 complete. Milestone 9 in progress.** A USB stick turns a Windows
+**Current position: Milestones 0–8 complete. Milestone 9 in progress; 10–12 rescoped.** A USB stick turns a Windows
 laptop into a working server, a new server says what to do next, and it is then reachable by
 name over HTTPS from any device in the house. It backs itself up every night, looks for
 updates on its own, applies one and puts the previous version back if it does not work, and
@@ -26,6 +33,11 @@ finishes on real laptops, which is where driver quirks, lid-close behaviour, the
 throttling and USB disks that misbehave all arrive at once. Making the installer stick also
 still takes one command on a Linux machine; the graphical tool for Windows and macOS is
 Milestone 10, and it is what Stage 1 is still missing.
+
+What it cannot do yet is the half a home server is actually for: **be reached from outside
+the house**, and **share files onto the network**. Both are now milestones rather than
+deferrals. And the whole of it is still driven through a browser or the HTTP API —
+`homebasectl` has three commands, which for this audience is the wrong way round.
 
 Nothing has been released. The release machinery exists and has never been run for real, and
 there is no host for the update archive yet.
@@ -239,7 +251,8 @@ without credentials — an unbounded one is memory exhaustion that needs no acco
 - [x] First-use flow: a getting-started list that says what is worth doing and why, and
       naming the server (the administrator and the recovery code arrived early, in
       Milestone 5)
-- [→] A graphical controller — **split out to Milestone 10**
+- [→] A graphical controller — split out to Milestone 10, and **since dropped**: it
+      existed for an audience this project turned out not to have
 
 **Done when:** starting from a Windows-occupied disk, the installer produces a working
 server that reaches the dashboard and installs an application — with no Linux commands. ✅
@@ -293,7 +306,7 @@ is why Stage 1 is not done.
 - [x] Network diagnostics and an honest offline state
 - [→] Wi-Fi setup — **moved to Milestone 9**, where wireless hardware could be tested
       against. It shipped there, against simulated radios on the real `mac80211` stack
-- [→] Optional private remote access — **deferred past Stage 1**
+- [→] Optional private remote access — **now Milestone 11**, as self-hosted Wireguard
 
 Public internet exposure stays out of scope.
 
@@ -345,11 +358,13 @@ enough to test drivers, firmware or roaming, which still need laptops — so the
 right about *what* needed hardware and wrong about *all of it* needing hardware. Shipped in
 Milestone 9.
 
-**Private remote access is deferred past Stage 1.** It is not in the Stage 1 definition of
-done, it cannot be tested without an account on somebody else's service, and depending on a
-third-party coordination network needs a decision record of its own rather than a checkbox
-here — the first principle in the README is that nobody can switch Homebase off or start
-charging for it.
+**Private remote access was deferred past Stage 1 here, and that was reversed after
+Milestone 9.** The reasoning was that it "cannot be tested without an account on somebody
+else's service, and depending on a third-party coordination network needs a decision record
+of its own" — and every word of that is about Tailscale-shaped designs. It is not true of
+plain Wireguard, which is self-hosted, needs no account, and can be tested with two machines
+in the VM lab. The deferral was sound reasoning about a design that was not chosen. It is
+now **Milestone 11**.
 
 ### Milestone 8 — Updates and recovery ✅
 
@@ -588,37 +603,98 @@ refused, nothing changed, no file was left behind. Every assertion held and none
 were about a password. There are now two error codes, and the test asserts the failure came
 from joining rather than from writing.
 
-### Milestone 10 — The graphical stick-maker
+### Milestone 10 — The whole product from a terminal
 
-The last thing standing between Homebase and its actual audience: a small application that
-writes the installation media, run on the computer somebody already owns.
+`homebasectl` today has three commands: `installer`, `recovery-code`, `list-accounts`.
+Everything else — applications, storage, backups, updates, wireless, repair — is reachable
+only through the HTTP API or the dashboard. For somebody who lives in a terminal that is the
+wrong way round.
 
-- [ ] A way to test on Windows and macOS — a VM lab for both, the way Milestone 1 built one
-      for Linux. This comes first, because everything else here is untestable without it
-- [ ] Device enumeration and the refusals, per platform: `\\.\PhysicalDrive` on Windows,
-      `diskutil` and `/dev/rdisk` on macOS
-- [ ] A graphical wrapper around the same media logic `homebasectl installer create` uses —
-      one implementation, not three
-- [ ] Signed and notarised builds, since an unsigned tool that asks for administrator rights
-      to erase a disk is indistinguishable from malware, and correctly so
+- [ ] A command surface over the whole API: `homebasectl apps`, `storage`, `backup`,
+      `update`, `network`, `repair`
+- [ ] Authentication that suits a shell — a token in the config file or the environment,
+      created once, rather than a browser session
+- [ ] Machine-readable output on demand (`--json`), because the point of a CLI is composing
+      it with other things
+- [ ] Sensible exit codes: a script that cannot tell "failed" from "did nothing" is a script
+      that will one day do neither and report success
 
-**Done when:** somebody who has never opened a terminal makes a working Homebase stick on
-their own Windows or macOS computer, and the tool refuses to write to the disk that computer
-runs from — proven on both, not reasoned about.
+**Done when:** every operation the dashboard can perform can be performed from a terminal,
+over SSH, on the machine itself — and a shell script can drive an install end to end.
 
-Numbered last because it cannot start until there is somewhere to run it. Ordered by
-necessity rather than by importance: it is the piece Stage 1 cannot be called done without.
+It comes first among what is left because it is the surface everything after it lands on.
+Building the VPN or file sharing before it would mean building each twice.
+
+### Milestone 11 — Reachable from anywhere
+
+The half a home server is actually for. Everything so far assumes the same house.
+
+- [ ] [ADR-0019] — remote access is **self-hosted Wireguard**, not an overlay network
+      somebody else operates
+- [ ] `homebasectl vpn setup`, `vpn add-device`, `vpn list`, `vpn remove` — with a QR code
+      for a phone, because typing a Wireguard key by hand is nobody's evening
+- [ ] Dynamic DNS, so a home connection whose address changes stays reachable
+- [ ] Wake-on-LAN: `homebasectl wake`, and the server configured to be woken
+- [ ] A clear account of what has to be done on the router, since that part cannot be
+      automated and pretending otherwise helps nobody
+
+**Done when:** a device outside the house reaches the server by name, over Wireguard, with
+no third-party account involved — proven in the VM lab with two machines on separate
+segments, one standing in for the internet.
+
+**Wireguard rather than Tailscale**, and the trade is worth stating plainly. Wireguard needs
+a forwarded UDP port and therefore a router somebody can configure, and it does not work
+behind carrier-grade NAT. What it buys is that nobody can switch it off or start charging
+for it — the first principle in the README — and that it can be tested without an account
+on anybody's service. The ADR will record what would make us revisit it, which is CGNAT
+becoming common enough to matter.
+
+**Dynamic DNS is the one outside dependency**, and it is small and replaceable: a name that
+points at a changing address. The design keeps the provider a setting rather than a
+hard-coded assumption.
+
+### Milestone 12 — Files on the network
+
+- [ ] SMB shares over Samba, so Windows, macOS and Linux can all mount them
+- [ ] Shares defined against managed storage locations, so a share cannot be pointed at the
+      system disk by accident
+- [ ] Accounts and permissions that follow Homebase's, rather than a second set nobody
+      remembers
+- [ ] A test that mounts a share from another machine and reads a file, because a share that
+      exists and cannot be mounted is not a share
+
+**Done when:** a laptop on the same network mounts a share, writes a file, and the file is
+in the backup.
 
 ### Stage 1 definition of done
 
-A non-technical person can: create the installer USB, install without a terminal, reach the
-dashboard, install and use an app, attach external storage, configure and verify a backup,
-update and restart safely, recover from a simulated failure, export understandable
-diagnostics — and never grant the dashboard root access to do any of it.
+Someone comfortable with Linux can: write the installer USB with one command, plug it into
+an old laptop and walk away, then reach the machine over SSH or a browser and — from a
+terminal — install and use an app, attach external storage, configure and verify a backup,
+update and restart safely, recover from a simulated failure, export diagnostics safe to
+send to somebody, share files onto the network, and reach the whole thing from outside the
+house over a VPN nobody else operates. Without ever granting the dashboard or the CLI root
+access to do any of it.
 
-**The first of those is the one still outstanding.** Everything after "install without a
-terminal" works today; making the stick still takes one command on a Linux machine. That is
-Milestone 10, and until it lands this list is a target rather than a description.
+**What is outstanding:** the terminal surface (Milestone 10), remote access (11) and file
+sharing (12). Everything else on that list works today.
+
+**This definition changed after Milestone 9.** It used to read "a non-technical person…
+without ever opening a terminal", and Milestone 10 used to be a graphical USB writer for
+Windows and macOS. That was written for an audience this project does not have. The
+audience is somebody who is happy in a terminal and wants the tedious parts — installing,
+backing up, updating, recovering — to be done properly and once.
+
+What survives the change is almost everything, because the hard parts were never about the
+interface: the privilege boundary, the signed updates with rollback, the backups that
+restore onto a different machine, the recovery tools. What goes is the graphical
+stick-maker, which existed only to serve the audience that has been dropped — and it was
+the largest single piece of remaining work in Stage 1.
+
+The dashboard stays. It is built, tested, and works, and deleting working code to satisfy a
+preference would be a poor trade. It is no longer what decides whether a milestone is done:
+new work lands as a `hostd` operation, an API route and a `homebasectl` command, and gets a
+screen when a screen is cheap.
 
 ---
 
