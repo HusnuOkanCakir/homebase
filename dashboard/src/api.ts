@@ -256,6 +256,19 @@ export interface SystemInfo {
     on_battery: boolean | null;
     battery_percent: number | null;
   };
+  /**
+   * How hot the machine is.
+   *
+   * `celsius: null` means it cannot tell — every VM, and some real hardware.
+   * Never zero, which would look wonderfully cool.
+   */
+  temperature: {
+    celsius: number | null;
+    sensor?: string;
+    state?: "ok" | "warm" | "hot";
+    /** Only set when something is worth telling somebody. */
+    message?: string;
+  };
 }
 
 export type JobState =

@@ -213,6 +213,15 @@ type SystemResources struct {
 		OnBattery      *bool `json:"on_battery"`
 		BatteryPercent *int  `json:"battery_percent"`
 	} `json:"power"`
+
+	// Temperature, with a nil reading meaning "this machine cannot tell" rather
+	// than "cold". Every VM is in that state and so is some real hardware.
+	Temperature struct {
+		Celsius *int   `json:"celsius"`
+		Sensor  string `json:"sensor,omitempty"`
+		State   string `json:"state,omitempty"`
+		Message string `json:"message,omitempty"`
+	} `json:"temperature"`
 }
 
 func (c *Client) SystemInfo(ctx context.Context) (*SystemInfo, error) {

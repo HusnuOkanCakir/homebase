@@ -286,6 +286,10 @@ vm-test-storage: ## Add a real USB disk, unplug it, reconnect it; nothing may co
 vm-test-update: ## Update from a signed archive, and refuse one that was tampered with
 	@python3 tests/vm/test_update.py
 
+.PHONY: vm-test-secureboot
+vm-test-secureboot: ## Boot and run with Secure Boot enforcing, as laptops ship
+	@python3 tests/vm/test_secureboot.py
+
 .PHONY: vm-test-wifi
 vm-test-wifi: ## Join a simulated wireless network; a wrong password must cost nothing
 	@python3 tests/vm/test_wifi.py

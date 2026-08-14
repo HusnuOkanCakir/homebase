@@ -410,6 +410,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.Us
 		"memory":       resources.Memory,
 		"load_average": resources.LoadAverage,
 		"power":        resources.Power,
+		"temperature":  resources.Temperature,
 	})
 }
 

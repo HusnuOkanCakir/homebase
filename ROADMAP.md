@@ -15,16 +15,17 @@ survives having its power cut mid-`dpkg` — and when something does go wrong it
 file safe to send to somebody, repair itself, or start again without losing anybody's
 photographs.
 
-It also joins a wireless network now, and refuses a wrong password without changing
-anything — proven against `mac80211_hwsim`, which is a real `mac80211` stack with a
-simulated radio, so the handshake is genuine even though the card is not.
+It also joins a wireless network now, refusing a wrong password without changing anything;
+it boots with Secure Boot enforcing, as every laptop ships; and it says how hot it is
+getting, because an old machine in a cupboard that is cooking looks from the outside exactly
+like one that is broken.
 
-What is still missing is hardware. Everything above is proven in VMs, on Intel with KVM,
-with emulated disks. Milestone 9 is the first time any of it meets a real laptop — which is
-where driver quirks, lid-close behaviour, thermal throttling and USB disks that misbehave
-all arrive at once. Making the installer stick also still takes one command on a Linux
-machine; the graphical tool for Windows and macOS is Milestone 10, and it is what Stage 1 is
-still missing.
+What is still missing is hardware. Everything above is proven in VMs — with real firmware,
+a real `mac80211` stack and a real WPA2 handshake, but emulated disks and no lid. Milestone 9
+finishes on real laptops, which is where driver quirks, lid-close behaviour, thermal
+throttling and USB disks that misbehave all arrive at once. Making the installer stick also
+still takes one command on a Linux machine; the graphical tool for Windows and macOS is
+Milestone 10, and it is what Stage 1 is still missing.
 
 Nothing has been released. The release machinery exists and has never been run for real, and
 there is no host for the update archive yet.
@@ -475,12 +476,65 @@ it is a disclosure with a download button.
 
 - [x] **Wi-Fi setup from the dashboard** — moved here from Milestone 7, and now proven
       against simulated radios rather than deferred again
+- [x] **Secure Boot** — a Homebase machine boots and runs with the firmware enforcing
+      signatures and Microsoft's keys enrolled, which is how every laptop ships
+- [x] **Thermal reporting** — the machine says how hot it is, and says nothing rather than
+      zero when it cannot tell
 - [ ] Intel and AMD laptops, with and without TPM, various Wi-Fi adapters
-- [ ] UEFI and Secure Boot, lid-close behaviour, sleep prevention, thermal reporting
-- [ ] Power-loss recovery, Wi-Fi reconnection, USB disk handling
+- [ ] Lid-close behaviour and sleep prevention, on hardware with a lid
+- [ ] Power-loss recovery on real disks, Wi-Fi reconnection, USB disk handling
 
 **Done when:** three different laptops complete install → first boot → app install → reboot
 → backup → restore, with no manual Linux commands at any point.
+
+#### Secure Boot, which is the one that would have failed silently
+
+Every laptop bought in the last decade has Secure Boot on and Microsoft's keys enrolled from
+the factory. If a Homebase installation will not boot under that, the milestone fails at step
+one on every machine it is for — and it fails *before there is anything to read a log from*,
+which is the worst way for anything to fail.
+
+`make vm-test-secureboot` boots with OVMF's Secure Boot build and the `.ms` variable store,
+which has Microsoft's PK, KEK and db already enrolled, with SMM on so the store is protected
+the way it is on real hardware. Ubuntu's `shimx64.efi` is signed by Microsoft's UEFI CA, so
+a correct installation boots and an incorrect one does not.
+
+The first assertion is that the firmware is *actually enforcing* — `mokutil`, the kernel's
+`SecureBoot` EFI variable, and `SetupMode` all checked, because a machine booted with the
+plain variable store has no keys, sits in setup mode, boots anything, and would pass every
+other assertion while proving nothing.
+
+It found nothing wrong with Homebase, which is the answer worth having: the machine boots,
+installs, runs, and boots again with signatures enforced. It did find a bug in the test —
+`/boot/efi` is mounted `0700 root`, and `2>/dev/null` hid the permission error, so the check
+failed on a machine that was perfectly fine.
+
+**SMM is not optional**, and the comment in `vmctl.py` says why. The variable store holding
+the keys has to be writable by the firmware and by nothing else; without SMM an operating
+system can write to it directly, so the firmware would enforce signatures against a key list
+anything on the machine could replace.
+
+#### The machine can say it is too hot
+
+An old laptop, lid shut, in a cupboard, with eight years of dust in its fan. It throttles,
+gets slower, and eventually shuts itself off — and from outside that is indistinguishable
+from "Homebase is broken".
+
+Nothing acts on the temperature: Homebase does not control fans and should not pretend to.
+What it can do is say so, which is the difference between somebody opening a cupboard door
+and somebody buying a new laptop.
+
+Three decisions, and the middle one is the one that usually goes wrong:
+
+- **The hottest zone, not an average.** One component at 95 °C with three at 40 °C is a
+  problem, and the average hides it
+- **The thresholds are deliberately high** — warm at 80 °C, hot at 90. Processors are
+  designed to run at 80 and throttle in the nineties, so warning at 60 would teach people to
+  ignore the warning, which is the failure mode of every temperature indicator ever shipped.
+  A machine at an ordinary temperature says nothing at all
+- **No sensors means no reading, never zero.** Every VM is in that state and so is some real
+  hardware; a machine claiming 0 °C would look wonderfully cool. The same rule as the
+  battery, and the VM test is the right place to check it because a VM genuinely has none
 
 #### Wi-Fi, and what a simulated radio does and does not prove
 

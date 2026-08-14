@@ -383,6 +383,22 @@ Milestone 0 — contracts and project machinery. No product code.
   and "there was no passphrase" are different facts, and somebody reconstructing an incident
   needs the first
 
+- **Secure Boot.** A Homebase machine boots, installs and runs with the firmware enforcing
+  signatures and Microsoft's keys enrolled — which is how every laptop bought in the last
+  decade ships, and where a failure would happen before there is anything to read a log from.
+  `make vm-test-secureboot` uses OVMF's Secure Boot build with the `.ms` variable store and
+  SMM on, so the key store is protected the way it is on real hardware. The first assertion
+  is that the firmware is *actually* enforcing — `mokutil`, the kernel's `SecureBoot`
+  variable and `SetupMode` — because a machine booted with the empty store sits in setup
+  mode, boots anything, and would pass every other assertion while proving nothing
+- **The machine can say it is too hot.** An old laptop in a cupboard with a dusty fan
+  throttles, slows, and eventually shuts off, which from outside is indistinguishable from
+  Homebase being broken. The hottest zone rather than an average, thresholds deliberately
+  high — warm at 80 °C, hot at 90, because processors are designed to run at 80 and warning
+  at 60 teaches people to ignore the warning — and **no sensors means no reading, never
+  zero**. Homebase does not control fans and does not pretend to; it says so, which is the
+  difference between opening a cupboard door and buying a new laptop
+
 ### Fixed
 
 Three bugs of the same shape, each shipped in the commit before the test that caught it, and

@@ -2581,6 +2581,38 @@ components:
               maximum: 100
             lid_closed:
               type: [boolean, "null"]
+        temperature:
+          type: object
+          additionalProperties: false
+          description: |
+            How hot the machine is. Homebase runs on old laptops in cupboards, and one
+            cooking itself looks from the outside exactly like one that is broken.
+
+            `celsius` is `null` when the machine has no thermal sensors — every VM, and some
+            real hardware. **Never zero**, which would look wonderfully cool. Same rule as
+            `battery_percent`: "cannot tell" and "fine" are different answers.
+          properties:
+            celsius:
+              type: [integer, "null"]
+              description: The hottest zone, not an average — one component at 95 °C is a
+                problem an average would hide.
+            sensor:
+              type: string
+              description: |
+                Which zone the reading came from, in the kernel's words. On a machine with
+                several it is what says whether it is the processor or the case.
+            state:
+              type: string
+              enum: [ok, warm, hot]
+              description: |
+                Thresholds are deliberately high — processors are designed to run at 80 °C,
+                and warning at 60 would teach people to ignore the warning.
+            message:
+              type: string
+              description: |
+                Only set when something is worth telling somebody. A machine at an ordinary
+                temperature says nothing: an indicator that is always lit is one people stop
+                seeing.
 
     JobState:
       type: string

@@ -547,6 +547,47 @@ def verify_scheduled_backups(vm: VM) -> None:
           "including on a server that is only switched on at weekends")
 
 
+def verify_temperature_reporting(vm: VM) -> None:
+    """A machine with no sensors must say so, not report zero.
+
+    Homebase runs on old laptops in cupboards, and one cooking itself looks from
+    the outside exactly like one that is broken — so the temperature is worth
+    reporting. A VM has no thermal zones, which makes it the right place to check
+    the half that is easy to get wrong: `null` rather than a confident 0 °C.
+    """
+    step("How hot the machine says it is")
+
+    status, body = api(vm, "/system")
+    check(status == 200, f"the system endpoint answers ({status})", body[:200])
+
+    reported = json.loads(body)
+    check("temperature" in reported,
+          "the temperature is reported at all", body[:400])
+
+    temperature = reported["temperature"]
+    celsius = temperature.get("celsius")
+
+    if celsius is None:
+        check(not temperature.get("state"),
+              f"a machine with no sensors says nothing about its state "
+              f"({temperature.get('state')!r})")
+        check(not temperature.get("message"),
+              "and gives no advice about a temperature it does not have")
+        ok("no thermal sensors here, and Homebase says so rather than reporting 0 °C")
+        return
+
+    # If the machine does have a sensor, the reading has to be plausible and the
+    # advice has to match it.
+    check(1 <= celsius <= 150, f"the reading is plausible ({celsius} °C)",
+          json.dumps(temperature, indent=4))
+    check(temperature.get("state") in ("ok", "warm", "hot"),
+          f"with a state a person can read ({temperature.get('state')!r})")
+    if temperature.get("state") == "ok":
+        check(not temperature.get("message"),
+              "and an ordinary temperature is not commented on",
+              "An indicator that is always lit is one people stop seeing.")
+
+
 def verify_factory_reset(vm: VM) -> None:
     """Starting again without losing the photographs.
 
@@ -714,6 +755,7 @@ def main() -> int:
         verify_a_half_applied_upgrade_is_visible(vm, first, second)
         verify_reinstall_is_idempotent(vm, second)
         verify_scheduled_backups(vm)
+        verify_temperature_reporting(vm)
         verify_factory_reset(vm)
         verify_reboot(vm)
         verify_removal_keeps_data(vm)
