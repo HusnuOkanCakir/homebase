@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"regexp"
 	"strings"
 	"testing"
@@ -295,5 +296,115 @@ func TestAFlagWithNoValueIsAUsageError(t *testing.T) {
 	var usage usageError
 	if err == nil || !errors.As(err, &usage) {
 		t.Errorf("a flag missing its value gave %v, which does not exit 2", err)
+	}
+}
+
+// A magic packet is six bytes of 0xFF followed by the target's hardware address
+// sixteen times. That is the entire format, which is why it is written here
+// rather than pulled in.
+func TestTheMagicPacketIsTheRightShape(t *testing.T) {
+	hardware, err := net.ParseMAC("AA:BB:CC:DD:EE:FF")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	packet := make([]byte, 0, 102)
+	for range 6 {
+		packet = append(packet, 0xFF)
+	}
+	for range 16 {
+		packet = append(packet, hardware...)
+	}
+
+	if len(packet) != 102 {
+		t.Fatalf("packet is %d bytes, want 102", len(packet))
+	}
+	for i := range 6 {
+		if packet[i] != 0xFF {
+			t.Errorf("byte %d is %#x, want 0xFF", i, packet[i])
+		}
+	}
+	// The address, sixteen times, starting right after the header.
+	for repeat := range 16 {
+		start := 6 + repeat*6
+		if !bytes.Equal(packet[start:start+6], hardware) {
+			t.Fatalf("repetition %d is not the address", repeat)
+		}
+	}
+}
+
+// A hardware address is checked before anything is sent. Not for safety — a
+// broadcast of the wrong bytes wakes nothing — but because "that is not an
+// address" is a better answer than silence from a packet nobody acknowledges.
+func TestWakeRefusesThingsThatAreNotAddresses(t *testing.T) {
+	for _, address := range []string{
+		"", "not-an-address", "AA:BB:CC:DD:EE", "AA:BB:CC:DD:EE:FF:00",
+		"GG:BB:CC:DD:EE:FF", "192.168.1.1", "AA-BB-CC-DD-EE",
+	} {
+		if macAddress.MatchString(address) {
+			t.Errorf("%q was accepted as a hardware address", address)
+		}
+	}
+
+	for _, address := range []string{
+		"AA:BB:CC:DD:EE:FF", "aa:bb:cc:dd:ee:ff", "AA-BB-CC-DD-EE-FF", "00:1a:2b:3c:4d:5e",
+	} {
+		if !macAddress.MatchString(address) {
+			t.Errorf("%q was refused, and is a hardware address", address)
+		}
+	}
+}
+
+// The address is shown back the way somebody would type it in.
+func TestHardwareAddressesAreShownConsistently(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"aa:bb:cc:dd:ee:ff", "AA:BB:CC:DD:EE:FF"},
+		{"AA-BB-CC-DD-EE-FF", "AA:BB:CC:DD:EE:FF"},
+		{"00:1a:2b:3c:4d:5e", "00:1A:2B:3C:4D:5E"},
+	} {
+		if got := normaliseMAC(c.in); got != c.want {
+			t.Errorf("normaliseMAC(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// `--json` prints what the server said, not a struct this package decoded into.
+//
+// Those differ whenever core knows a field homebasectl does not — which is every
+// time the API gains one — and the difference is silent: the field is simply
+// absent from the output, and a script relying on it breaks with nothing to
+// read. Found when `vpn status --json` stopped reporting dynamic DNS state that
+// the server was returning perfectly well.
+func TestJSONOutputIsTheServersAnswerNotOurStruct(t *testing.T) {
+	// A body with a field no struct in this package has.
+	c := &Client{lastBody: []byte(
+		`{"known":"value","something_new":{"the_cli":"has never heard of this"}}`)}
+
+	type onlyKnown struct {
+		Known string `json:"known"`
+	}
+
+	var out bytes.Buffer
+	if err := printResponse(&out, c, onlyKnown{Known: "value"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(out.String(), "something_new") {
+		t.Errorf("a field the CLI does not know was dropped:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "has never heard of this") {
+		t.Errorf("its contents were dropped too:\n%s", out.String())
+	}
+}
+
+// With nothing from the server — a command that made no request — the value is
+// printed instead, rather than nothing at all.
+func TestJSONOutputFallsBackWhenThereWasNoRequest(t *testing.T) {
+	var out bytes.Buffer
+	if err := printResponse(&out, &Client{}, map[string]string{"local": "value"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "local") {
+		t.Errorf("nothing was printed:\n%s", out.String())
 	}
 }

@@ -61,8 +61,18 @@ type NetworkInterface struct {
 
 	// MAC identifies the hardware. Shown because it is what a router's list of
 	// connected devices matches against, and finding the server in that list is
-	// a real thing people have to do.
+	// a real thing people have to do — and because it is what a wake-up packet
+	// is addressed to.
 	MAC string `json:"mac,omitempty"`
+
+	// WakeOnLAN is whether this card will start the machine when a magic packet
+	// arrives.
+	//
+	// Reported because nothing on a sleeping machine can run a command, so this
+	// is the one thing about waking the server that has to be known *before* it
+	// goes to sleep. A laptop in a cupboard that cannot be woken is one somebody
+	// has to walk to.
+	WakeOnLAN bool `json:"wake_on_lan"`
 }
 
 // Reachable reports whether this interface is carrying an address.
@@ -131,6 +141,8 @@ func (s netScanner) describe(iface net.Interface) NetworkInterface {
 		Up:  iface.Flags&net.FlagRunning != 0,
 		MAC: iface.HardwareAddr.String(),
 	}
+
+	described.WakeOnLAN = wakeOnLANEnabled(s.classNet, iface.Name)
 
 	addrs, err := s.addrsOf(iface)
 	if err != nil {
@@ -219,4 +231,23 @@ func (s netScanner) nameservers() []string {
 		}
 	}
 	return servers
+}
+
+// wakeOnLANEnabled reports whether a card will start the machine when a magic
+// packet arrives.
+//
+// Read from sysfs rather than by running `ethtool`, the same rule as everything
+// else in this file: parsing a tool's output means depending on its formatting
+// and its presence, and the kernel answers directly.
+//
+// `device/power/wakeup` is "enabled" or "disabled". It is the device's wakeup
+// capability rather than specifically the magic-packet flag — the distinction
+// matters to a kernel developer and not to somebody deciding whether their
+// server can be woken, and a card with wakeup disabled certainly cannot be.
+func wakeOnLANEnabled(classNet, name string) bool {
+	raw, err := os.ReadFile(filepath.Join(classNet, name, "device", "power", "wakeup"))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(raw)) == "enabled"
 }

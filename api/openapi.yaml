@@ -1641,6 +1641,85 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /network/vpn/dns:
+    post:
+      tags: [network]
+      summary: Keep a dynamic DNS name pointing at this house
+      description: |
+        Requires `network.modify`.
+
+        A home connection's address changes, and the name devices connect to has to follow
+        it. This is the one outside dependency in
+        [ADR-0019](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0019-remote-access-is-self-hosted-wireguard.md),
+        kept as small as it can be: a name, a token, and a URL to poll.
+
+        `provider` is a **word from a fixed table**, never a URL. A URL from the caller would
+        be a way to make the machine fetch an arbitrary address as root, which is the generic
+        execution path [ADR-0006](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0006-privilege-split.md)
+        exists to prevent, wearing a different hat.
+
+        `token` is declared secret on the underlying privileged operation, so it is redacted
+        from the audit log — which is append-only and kept indefinitely.
+      operationId: setDynamicDNS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [provider, name]
+              properties:
+                provider:
+                  type: string
+                  enum: [duckdns]
+                name:
+                  type: string
+                  maxLength: 253
+                token:
+                  type: string
+      responses:
+        "200":
+          description: The name is being kept up to date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DynamicDNS"
+        "400":
+          description: Not a provider Homebase can update, or not a name it could keep
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /network/vpn/dns/clear:
+    post:
+      tags: [network]
+      summary: Stop keeping a dynamic DNS name up to date
+      description: |
+        Requires `network.modify`. The name stops being updated, so it will point at a stale
+        address as soon as the household's changes.
+      operationId: clearDynamicDNS
+      responses:
+        "200":
+          description: Nothing is being kept up to date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DynamicDNS"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
   /system/diagnostics:
     post:
       tags: [system]
@@ -2341,6 +2420,33 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    DynamicDNS:
+      type: object
+      additionalProperties: false
+      required: [configured, enabled, working]
+      description: |
+        No token appears here. It travels one way, into a root-only file.
+      properties:
+        configured:
+          type: boolean
+        provider:
+          type: string
+        name:
+          type: string
+        enabled:
+          type: boolean
+          description: Whether systemd is actually keeping it up to date.
+        working:
+          type: boolean
+          description: |
+            Whether the last update succeeded. A name that stopped updating three weeks ago
+            is a server nobody can reach, and it looks identical to one that is fine.
+        last_checked:
+          type: string
+          format: date-time
+        detail:
+          type: string
+
     VPNStatus:
       type: object
       additionalProperties: false
@@ -2368,6 +2474,8 @@ components:
           description: |
             Whether any device has ever completed a handshake. This is the reachability
             check — evidence rather than a probe.
+        dns:
+          $ref: "#/components/schemas/DynamicDNS"
         message:
           type: string
 
@@ -2557,7 +2665,13 @@ components:
         mac:
           type: string
           description: What the router's list of connected devices matches against, which
-            is a real thing people have to do.
+            is a real thing people have to do — and what a wake-up packet is addressed to.
+        wake_on_lan:
+          type: boolean
+          description: |
+            Whether this card will start the machine when a magic packet arrives. Reported
+            because nothing on a sleeping machine can run a command, so this has to be known
+            *before* it goes to sleep.
 
     UpdateStatus:
       type: object

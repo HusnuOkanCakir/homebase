@@ -33,7 +33,21 @@ type VPNStatus struct {
 	// somebody else's service.
 	EverConnected bool `json:"ever_connected"`
 
+	// DNS is the name that has to keep pointing here.
+	DNS DDNSStatus `json:"dns"`
+
 	Message string `json:"message,omitempty"`
+}
+
+// DDNSStatus is what the dynamic DNS name is doing.
+type DDNSStatus struct {
+	Configured  bool   `json:"configured"`
+	Provider    string `json:"provider,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	Working     bool   `json:"working"`
+	LastChecked string `json:"last_checked,omitempty"`
+	Detail      string `json:"detail,omitempty"`
 }
 
 // NewDevice is a device and the configuration for it, returned once.
@@ -85,6 +99,29 @@ func (c *Client) RemoveVPNDevice(ctx context.Context, name string) (*VPNStatus, 
 
 	var status VPNStatus
 	if err := c.Call(ctx, "vpn.remove_device", params, true, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+// SetDNS keeps a name pointing at this house. The token travels one way.
+func (c *Client) SetDNS(ctx context.Context, provider, name, token string) (*DDNSStatus, error) {
+	params := struct {
+		Provider string `json:"provider"`
+		Name     string `json:"name"`
+		Token    string `json:"token,omitempty"`
+	}{Provider: provider, Name: name, Token: token}
+
+	var status DDNSStatus
+	if err := c.Call(ctx, "vpn.set_dns", params, false, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+func (c *Client) ClearDNS(ctx context.Context) (*DDNSStatus, error) {
+	var status DDNSStatus
+	if err := c.Call(ctx, "vpn.clear_dns", struct{}{}, true, &status); err != nil {
 		return nil, err
 	}
 	return &status, nil

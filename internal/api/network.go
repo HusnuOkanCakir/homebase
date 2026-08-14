@@ -34,6 +34,8 @@ func (s *Server) registerNetworkRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/network/vpn", s.require(auth.PermNetworkModify, s.handleVPNSetup))
 	mux.Handle("POST /api/v1/network/vpn/devices", s.require(auth.PermNetworkModify, s.handleAddVPNDevice))
 	mux.Handle("POST /api/v1/network/vpn/devices/remove", s.require(auth.PermNetworkModify, s.handleRemoveVPNDevice))
+	mux.Handle("POST /api/v1/network/vpn/dns", s.require(auth.PermNetworkModify, s.handleSetDNS))
+	mux.Handle("POST /api/v1/network/vpn/dns/clear", s.require(auth.PermNetworkModify, s.handleClearDNS))
 }
 
 func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request, _ *auth.User) {
@@ -255,5 +257,47 @@ func (s *Server) handleRemoveVPNDevice(w http.ResponseWriter, r *http.Request, u
 		"The device \""+body.Name+"\" can no longer reach this server from outside.")
 	s.log.Info("remote access device removed", "device", body.Name, "by", user.Username)
 
+	writeJSON(w, http.StatusOK, status)
+}
+
+// handleSetDNS records the name that has to keep pointing at the house.
+//
+// The token is a credential. It is not logged here, and hostd declares it as a
+// secret so it is redacted from the audit log too.
+func (s *Server) handleSetDNS(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var body struct {
+		Provider string `json:"provider"`
+		Name     string `json:"name"`
+		Token    string `json:"token,omitempty"`
+	}
+	if !s.decode(w, r, &body) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+
+	status, err := s.host.SetDNS(ctx, strings.TrimSpace(body.Provider),
+		strings.TrimSpace(body.Name), body.Token)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	s.log.Info("dynamic DNS configured", "provider", status.Provider,
+		"name", status.Name, "by", user.Username)
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleClearDNS(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	status, err := s.host.ClearDNS(ctx)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+	s.log.Info("dynamic DNS switched off", "by", user.Username)
 	writeJSON(w, http.StatusOK, status)
 }

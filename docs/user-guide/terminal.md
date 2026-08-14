@@ -60,6 +60,8 @@ homebasectl vpn                             # who can reach this server from out
 homebasectl vpn setup yours.duckdns.org
 homebasectl vpn add-device phone            # prints a QR code, once
 homebasectl vpn remove-device phone
+homebasectl vpn dns duckdns yourname        # keep a name pointing at the house
+homebasectl wake AA:BB:CC:DD:EE:FF          # start a sleeping machine
 homebasectl repair                          # fix what a power cut left broken
 homebasectl diagnostics                     # a file safe to send to somebody
 ```

@@ -87,6 +87,8 @@ EXPECTED = {
     "vpn.add_device": ("high", "required"),
     "vpn.remove_device": ("medium", "required"),
     "vpn.status": ("read", "none"),
+    "vpn.set_dns": ("medium", "none"),
+    "vpn.clear_dns": ("medium", "required"),
     # Backup. restore is the third operation that destroys data irreversibly,
     # and the only one where what it overwrites is usually what somebody is
     # trying to save. preview must stay read-only: it is what a user is shown
@@ -168,6 +170,10 @@ def main() -> int:
     # commit, which is the point.
     TAKES_A_SECRET = {
         "network.wifi_connect": ["passphrase"],
+        # The dynamic DNS token. A credential for changing where a name points,
+        # which for a household using it is a credential for redirecting anything
+        # that trusts that name.
+        "vpn.set_dns": ["token"],
     }
     for name, fields in TAKES_A_SECRET.items():
         operation = declared.get(name)

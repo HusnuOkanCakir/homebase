@@ -1,0 +1,87 @@
+#!/bin/sh
+#
+# Tell a dynamic DNS provider where this house is.
+#
+# A separate script for the same reason as update-run: hostd's unit sets
+#
+#     RestrictAddressFamilies=AF_UNIX AF_NETLINK
+#
+# so the privileged service cannot open a network socket, and this has to make an
+# HTTPS request. Keeping that restriction is worth more than the indirection.
+#
+# The provider is a word from a fixed table in hostd, and the URL is built here
+# from that word. Nothing a caller sent becomes part of a URL that is fetched as
+# root: the name and the token are substituted into a template chosen by the
+# word, and a word that is not in the table never reaches this script.
+
+set -eu
+
+CONFIG=/etc/homebase/ddns.conf
+RESULT=/var/lib/homebase/ddns
+
+if [ ! -r "$CONFIG" ]; then
+    echo "no dynamic DNS configured" >&2
+    exit 0
+fi
+
+provider=$(sed -n 's/^provider=//p' "$CONFIG" | head -1)
+name=$(sed -n 's/^name=//p' "$CONFIG" | head -1)
+token=$(sed -n 's/^token=//p' "$CONFIG" | head -1)
+
+[ -n "$provider" ] && [ -n "$name" ] || {
+    echo "incomplete configuration in $CONFIG" >&2
+    exit 1
+}
+
+case "$provider" in
+duckdns)
+    url="https://www.duckdns.org/update?domains=${name}&token=${token}&ip="
+    ;;
+*)
+    echo "unknown provider '$provider'" >&2
+    exit 64
+    ;;
+esac
+
+# The token goes in the URL because that is the interface DuckDNS publishes, and
+# --url-query is not available on the curl Ubuntu ships. It is therefore visible
+# in this process's arguments for the moment it runs, which is why the file it
+# comes from is root-only and why this runs as root rather than as the service
+# account.
+response=$(curl --silent --show-error --max-time 60 "$url" 2>&1) || {
+    {
+        echo "ok=false"
+        echo "detail=could not reach $provider"
+        echo "checked=$(date -u +%s)"
+    } > "$RESULT.new"
+    mv "$RESULT.new" "$RESULT"
+    echo "could not reach $provider" >&2
+    exit 1
+}
+
+# DuckDNS answers with the word "OK" or the word "KO", which is the whole
+# protocol. A body that is neither means something changed at their end.
+case "$response" in
+OK*)
+    outcome=true
+    detail=""
+    ;;
+KO*)
+    outcome=false
+    detail="the provider refused the name or the token"
+    ;;
+*)
+    outcome=false
+    detail="unexpected answer from $provider"
+    ;;
+esac
+
+{
+    echo "ok=$outcome"
+    [ -n "$detail" ] && echo "detail=$detail"
+    echo "checked=$(date -u +%s)"
+} > "$RESULT.new"
+mv "$RESULT.new" "$RESULT"
+
+[ "$outcome" = true ] || { echo "$detail" >&2; exit 1; }
+echo "the name points here"

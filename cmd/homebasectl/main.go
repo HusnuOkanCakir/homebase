@@ -103,6 +103,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return networkCommand(args[1:], stdout)
 	case "vpn":
 		return vpnCommand(args[1:], stdout)
+	case "wake":
+		return wakeCommand(args[1:], stdout)
 	case "repair":
 		return repairCommand(args[1:], stdout)
 	case "diagnostics":
@@ -163,6 +165,11 @@ func usage(w io.Writer) {
         Reaching this server from outside the house, over WireGuard. Adding
         a device prints its configuration and a QR code — once. It is stored
         nowhere, so if it is lost, remove the device and add it again.
+
+  homebasectl wake AA:BB:CC:DD:EE:FF
+        Wake a sleeping machine on this network. Useful over the VPN, to
+        start the desktop at home from somewhere else. It talks to nothing
+        and needs no privilege: a wake-up packet is an ordinary broadcast.
 
   homebasectl repair
         Check a short list of things that are often wrong and put right what

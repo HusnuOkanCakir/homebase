@@ -444,6 +444,21 @@ Milestone 0 — contracts and project machinery. No product code.
   is removed. The private key it was handed is grepped for across `/etc`, `/var/lib` and the
   audit log, and is in none of them
 
+- **Dynamic DNS**, so a home connection whose address changes stays reachable. The provider
+  is a word from a fixed table, never a URL — a URL from the caller would be a way to make
+  the machine fetch an arbitrary address as root. The token is declared secret, so it is
+  redacted from the audit log
+- **A name that stopped updating says so.** Every dynamic DNS client updates a name; the
+  failure that matters is the one where it stopped three weeks ago, because the result is a
+  server nobody can reach that looks exactly like one that is fine
+- **`homebasectl wake`**, which talks to nothing — a magic packet is a UDP broadcast any
+  process can send, so routing it through the privilege boundary would add an audit record
+  and a permission check to something with no privilege in it. Useful over the VPN: the
+  desktop at home, started from a train
+- The server now reports its own hardware address and whether its card will accept a wake-up
+  packet — the one fact about waking it that has to be known *before* it sleeps, because
+  nothing on a sleeping machine can answer
+
 ### Fixed
 
 Three bugs of the same shape, each shipped in the commit before the test that caught it, and
@@ -467,6 +482,18 @@ test that runs is root.
 - **The diagnostic file could not be downloaded.** Its directory was `root:root 0750`, so the
   file inside being readable made no difference: core could not list the directory, and the
   download answered `404` with the file sitting there
+
+**`--json` printed the CLI's struct, not the server's answer.** Those differ whenever core
+knows a field `homebasectl` does not, and the difference is silent: the field is simply
+absent, and a script relying on it breaks with nothing to read. Found when `vpn status
+--json` stopped reporting dynamic DNS state the server was returning perfectly well. The same
+shape appeared twice more in one afternoon — `hostclient.NetworkInterface` had no
+`wake_on_lan`, so the value vanished between hostd and core.
+
+**A secret prompt with no terminal blocked for ever.** `ssh host homebasectl vpn dns …` has
+no TTY, so the read never returned and the command hung until something killed it — worse
+than an error, because it looks like it is working. It now says which environment variable to
+use instead.
 
 And a fourth of the same family, plus the one that makes it interesting. `/etc/netplan` was
 read-only for `hostd` under `ProtectSystem=strict`, so joining a network could not write its

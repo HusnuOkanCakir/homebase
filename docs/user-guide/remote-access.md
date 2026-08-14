@@ -12,8 +12,20 @@ explains why that mattered enough to accept the setting-up it costs.
 
 **A name that follows your home address.** Most home connections get a new address every so
 often. A dynamic DNS name — [DuckDNS](https://www.duckdns.org) is free and takes two minutes
-— gives you a name that keeps pointing at your house. If your connection has a fixed address,
-use that instead.
+— gives you a name that keeps pointing at your house. Homebase keeps it up to date for you:
+
+```sh
+sudo homebasectl vpn dns duckdns yourname
+```
+
+It asks for the token from DuckDNS, checks it straight away, and then updates every five
+minutes. `homebasectl vpn dns` on its own says whether it is working — **a name that quietly
+stopped updating three weeks ago is a server nobody can reach, and it looks exactly like one
+that is fine.**
+
+The token is kept in a root-only file and is not written to the audit log.
+
+If your connection has a fixed address, use that instead and skip this.
 
 **Access to your router.** One port has to be forwarded. This is the only step Homebase
 cannot do for you, and it is worth knowing that up front.
@@ -102,6 +114,24 @@ otherwise remote access needs a different design from the one Homebase has.
 
 **It works away from home but not on your home Wi-Fi.** Expected, and harmless: turn the VPN
 off when you are at home. You are already on the network it connects you to.
+
+## Waking a sleeping machine
+
+Over the VPN you are on your home network, so you can wake other machines on it:
+
+```sh
+sudo homebasectl wake AA:BB:CC:DD:EE:FF
+```
+
+That is the desktop in the study, started from a train. Nothing acknowledges a wake-up
+packet — it is fire-and-forget by design — so there is no confirmation, only the machine
+appearing a minute later.
+
+**Waking the server itself is different**, because nothing on a sleeping machine can run a
+command. `homebasectl network` shows the server's own hardware address and whether its card
+will accept a wake-up packet; if it will, send one from your phone with any wake-on-LAN app.
+If it says it cannot be woken, the setting is in the machine's BIOS, and it usually has to be
+enabled there before Linux can do anything about it.
 
 ## One thing worth knowing
 

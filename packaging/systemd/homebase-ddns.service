@@ -1,0 +1,24 @@
+[Unit]
+Description=Homebase — tell the dynamic DNS provider where this house is
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/user-guide/remote-access.md
+
+# Nothing to do until a name is configured.
+ConditionPathExists=/etc/homebase/ddns.conf
+
+# The network has to be up, or the first run after a boot fails for a reason
+# that has nothing to do with the provider.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# Root, and this is the one thing worth explaining. The token is read from a
+# root-only file and passed to curl in a URL, so it is briefly in this process's
+# arguments — running as an unprivileged account would put it in `ps` output for
+# every user on the machine rather than only for root.
+User=root
+
+ExecStart=/usr/libexec/homebase/ddns-run
+
+TimeoutStartSec=120

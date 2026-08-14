@@ -2,6 +2,7 @@ package hostd
 
 import (
 	"context"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -67,6 +68,33 @@ func RegisterVPNOperations(r *Registry, services *NetworkServices) {
 		Timeout:     60 * time.Second,
 		Rollback:    "vpn.remove_device",
 		Handler:     Typed(services.vpnAddDevice),
+	})
+
+	r.MustRegister(Operation{
+		Name:    "vpn.set_dns",
+		Summary: "Keep a dynamic DNS name pointing at this house.",
+		// Medium. It changes nothing about the machine and everything about
+		// whether it can be found — a wrong name means a server nobody can
+		// reach, which looks exactly like a server that is switched off.
+		Risk:        RiskMedium,
+		Permissions: []string{"network.modify"},
+		Confirm:     ConfirmNone,
+		Timeout:     2 * time.Minute,
+		// The token is a credential and the audit log is kept for ever.
+		Secret:   []string{"token"},
+		Rollback: "vpn.set_dns, with the previous name, or vpn.clear_dns",
+		Handler:  Typed(services.vpnSetDNS),
+	})
+
+	r.MustRegister(Operation{
+		Name:        "vpn.clear_dns",
+		Summary:     "Stop keeping a dynamic DNS name up to date.",
+		Risk:        RiskMedium,
+		Permissions: []string{"network.modify"},
+		Confirm:     ConfirmRequired,
+		Timeout:     60 * time.Second,
+		Rollback:    "vpn.set_dns",
+		Handler:     Typed(services.vpnClearDNS),
 	})
 
 	r.MustRegister(Operation{
@@ -175,4 +203,89 @@ func short(value string) string {
 		return value[:60] + "…"
 	}
 	return value
+}
+
+// --- Dynamic DNS --------------------------------------------------------------------
+
+type vpnDNSRequest struct {
+	// Provider is a word from a fixed table — never a URL, which would be a way
+	// to make this machine fetch an arbitrary address as root.
+	Provider string `json:"provider"`
+
+	// Name is the name being kept up to date.
+	Name string `json:"name"`
+
+	// Token authenticates the update. Declared Secret on the operation, so it is
+	// redacted from the audit log.
+	Token string `json:"token,omitempty"`
+}
+
+func (s *NetworkServices) vpnSetDNS(ctx context.Context, req vpnDNSRequest) (any, error) {
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	if _, known := ddnsProviders[provider]; !known {
+		known := make([]string, 0, len(ddnsProviders))
+		for name := range ddnsProviders {
+			known = append(known, name)
+		}
+		return nil, &Error{
+			Code:        "vpn.unknown_dns_provider",
+			Message:     "Homebase cannot keep a name up to date with that provider.",
+			Detail:      "asked for " + short(req.Provider) + "; it knows " + strings.Join(known, ", "),
+			Recoverable: true,
+			Recovery:    "Use one Homebase knows, or give this server a fixed address.",
+			Status:      400,
+		}
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if !validEndpoint.MatchString(name) {
+		return nil, &Error{
+			Code:        "vpn.invalid_hostname",
+			Message:     "That is not a name a provider could keep up to date.",
+			Detail:      "expected a hostname, got " + short(name),
+			Recoverable: true,
+			Recovery:    "Use the name you registered — for DuckDNS, just the first part.",
+			Status:      400,
+		}
+	}
+
+	// A token is checked for shape but never for content: what a provider
+	// accepts is theirs to decide, and guessing here would refuse tokens that
+	// work.
+	if strings.ContainsAny(req.Token, " \t\n\r&?#") {
+		return nil, &Error{
+			Code:        "vpn.invalid_token",
+			Message:     "That does not look like a token.",
+			Detail:      "a token cannot contain spaces or URL punctuation",
+			Recoverable: true,
+			Recovery:    "Copy it again from the provider's page.",
+			Status:      400,
+		}
+	}
+
+	if err := configureDDNS(ctx, provider, name, req.Token); err != nil {
+		return nil, &Error{
+			Code:        "vpn.dns_failed",
+			Message:     "Homebase could not set up the name.",
+			Detail:      err.Error(),
+			Recoverable: true,
+			Recovery:    "Check the name and the token, and try again.",
+			Status:      500,
+		}
+	}
+	return readDDNSStatus(ctx), nil
+}
+
+func (s *NetworkServices) vpnClearDNS(ctx context.Context, _ struct{}) (any, error) {
+	if err := disableDDNS(ctx); err != nil && !os.IsNotExist(err) {
+		return nil, &Error{
+			Code:        "vpn.dns_failed",
+			Message:     "Homebase could not stop updating the name.",
+			Detail:      err.Error(),
+			Recoverable: true,
+			Recovery:    "Try again.",
+			Status:      500,
+		}
+	}
+	return readDDNSStatus(ctx), nil
 }

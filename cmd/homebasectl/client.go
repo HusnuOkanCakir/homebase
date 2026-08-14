@@ -57,6 +57,18 @@ type Client struct {
 	address string
 	token   string
 
+	// lastBody is the raw body of the most recent response.
+	//
+	// It exists so that `--json` can print what the server actually said rather
+	// than a struct in this package marshalled back to JSON. Those are different
+	// documents whenever core knows a field this CLI does not — which is every
+	// time the API gains one — and the difference is silent: the field simply
+	// disappears, and a script relying on it breaks with no error anywhere.
+	//
+	// Found when `vpn status --json` stopped reporting the dynamic DNS state
+	// that the server was returning perfectly well.
+	lastBody []byte
+
 	// releaseSession is called when the client is closed, for a session this
 	// process minted. A session left behind after every command would fill the
 	// table with credentials nobody is using.
@@ -240,6 +252,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, into any) er
 		return err
 	}
 
+	c.lastBody = raw
+
 	if response.StatusCode >= 400 {
 		return decodeError(response.StatusCode, raw)
 	}
@@ -288,6 +302,24 @@ func decodeError(status int, raw []byte) error {
 // because refusing to work is worse than a password on the screen of a machine
 // somebody is sitting at.
 func askForSecret(prompt string) (string, error) {
+	// Nothing to ask, and nobody to ask it of.
+	//
+	// Without this the command blocks for ever on a read that will never return:
+	// a script, a pipe, or `ssh host homebasectl ...` — which has no terminal —
+	// waits until something kills it. It is worse than an error because it looks
+	// like the command is working.
+	//
+	// os.Stdin.Stat() rather than golang.org/x/term, for the reason everything
+	// in this package avoids dependencies: it ships alongside hostd, which has
+	// none (ADR-0002).
+	info, err := os.Stdin.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return "", usageError{errors.New(
+			"there is no terminal to ask for that on.\n\n" +
+				"Put it in the environment instead — the variable is named in " +
+				"this command's\nhelp — or run the command from a terminal.")}
+	}
+
 	fmt.Fprint(os.Stderr, prompt)
 
 	restore, hidden := hideInput()

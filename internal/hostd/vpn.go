@@ -86,6 +86,11 @@ type VPNStatus struct {
 	// connected, which is what the message says.
 	EverConnected bool `json:"ever_connected"`
 
+	// DNS is the name that has to keep pointing here. Reported alongside,
+	// because they fail together: a name that stopped updating is a VPN nobody
+	// can reach, and from outside the two look identical.
+	DNS DDNSStatus `json:"dns"`
+
 	Message string `json:"message,omitempty"`
 }
 
@@ -142,6 +147,7 @@ func readVPNStatus(ctx context.Context) VPNStatus {
 
 	status.Devices = devicesFromConfig(string(raw))
 	applyLiveState(ctx, status.Devices)
+	status.DNS = readDDNSStatus(ctx)
 
 	for _, device := range status.Devices {
 		if device.LastHandshake != "" {
@@ -153,6 +159,12 @@ func readVPNStatus(ctx context.Context) VPNStatus {
 	case !status.Running:
 		status.Message = "Remote access is set up but not running. Try " +
 			"`homebasectl repair`."
+	case status.DNS.Configured && !status.DNS.Working:
+		// Before the port message, because a name that is not being updated is
+		// the more specific fault and the one that is actually known.
+		status.Message = "The name " + status.DNS.Name + " is not being kept up " +
+			"to date, so devices may be trying to reach an address this house " +
+			"no longer has. " + status.DNS.Detail
 	case len(status.Devices) == 0:
 		status.Message = "No devices yet. Add one with `homebasectl vpn add-device NAME`."
 	case !status.EverConnected:
@@ -609,4 +621,101 @@ func qrCode(config string) string {
 		return ""
 	}
 	return string(out)
+}
+
+// --- Dynamic DNS --------------------------------------------------------------------
+
+// A home connection's address changes, and the name has to follow it. Something
+// has to be told when it moves, which is inherently a service somebody else runs
+// — the one outside dependency in ADR-0019, kept as small as it can be.
+const (
+	ddnsConfigFile = "/etc/homebase/ddns.conf"
+	ddnsResultFile = "/var/lib/homebase/ddns"
+	ddnsUnit       = "homebase-ddns.timer"
+)
+
+// ddnsProviders is the set of services Homebase can update.
+//
+// A fixed table, and that is the load-bearing part. The alternative — a URL from
+// the caller — would be a way to make the machine fetch an arbitrary address as
+// root, which is the generic execution path ADR-0006 exists to prevent wearing a
+// different hat. Adding a provider is a change to this table and to
+// `packaging/ddns-run`, reviewable in a diff.
+var ddnsProviders = map[string]string{
+	"duckdns": "DuckDNS",
+}
+
+// DDNSStatus is what the name is doing.
+type DDNSStatus struct {
+	Configured bool   `json:"configured"`
+	Provider   string `json:"provider,omitempty"`
+	Name       string `json:"name,omitempty"`
+
+	// Enabled is whether systemd is actually keeping it up to date. Read from
+	// systemd, the same rule as the backup schedule.
+	Enabled bool `json:"enabled"`
+
+	// Working is whether the last update succeeded, and LastChecked when it ran.
+	// A name that stopped updating three weeks ago is a server nobody can reach,
+	// and it looks identical to one that is fine.
+	Working     bool   `json:"working"`
+	LastChecked string `json:"last_checked,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+}
+
+func readDDNSStatus(ctx context.Context) DDNSStatus {
+	status := DDNSStatus{}
+
+	values := readResultFile(ddnsConfigFile)
+	if values["name"] == "" {
+		return status
+	}
+	status.Configured = true
+	status.Provider = values["provider"]
+	status.Name = values["name"]
+	status.Enabled = unitIsActive(ctx, ddnsUnit)
+
+	result := readResultFile(ddnsResultFile)
+	status.Working = result["ok"] == "true"
+	status.Detail = result["detail"]
+	if seconds, err := strconv.ParseInt(result["checked"], 10, 64); err == nil && seconds > 0 {
+		status.LastChecked = time.Unix(seconds, 0).UTC().Format(time.RFC3339)
+	}
+	return status
+}
+
+// configureDDNS records the name and starts keeping it up to date.
+func configureDDNS(ctx context.Context, provider, name, token string) error {
+	if _, known := ddnsProviders[provider]; !known {
+		return fmt.Errorf("Homebase cannot update %q", provider)
+	}
+
+	// The token is a credential. Root-only, and not group-readable like the
+	// backup schedule — the account that reads this one is root, because the
+	// unit that uses it runs as root so the token is not in every user's `ps`.
+	config := "# Written by Homebase. Change this with `homebasectl vpn dns`\n" +
+		"# rather than by editing the file.\n" +
+		"provider=" + provider + "\nname=" + name + "\ntoken=" + token + "\n"
+	if err := writeWireguardFile(ddnsConfigFile, config); err != nil {
+		return err
+	}
+
+	if err := runSystemctl(ctx, "enable", "--now", ddnsUnit); err != nil {
+		return err
+	}
+	// Once now, rather than waiting up to five minutes to find out whether the
+	// token was even right.
+	if _, err := runUpdateUnit(ctx, "homebase-ddns.service"); err != nil {
+		// Not fatal: the configuration is recorded and the timer will try again.
+		// What matters is that the status reports it, which it does.
+		return nil
+	}
+	return nil
+}
+
+func disableDDNS(ctx context.Context) error {
+	if err := runSystemctl(ctx, "disable", "--now", ddnsUnit); err != nil {
+		return err
+	}
+	return os.Remove(ddnsConfigFile)
 }

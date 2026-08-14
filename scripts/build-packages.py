@@ -320,10 +320,13 @@ def build_hostd(version: str, binaries: Path) -> Path:
     # file, never anything composed from a request.
     install_file(REPO_ROOT / "packaging/update-run",
                  root / "usr/libexec/homebase/update-run", 0o755)
+    install_file(REPO_ROOT / "packaging/ddns-run",
+                 root / "usr/libexec/homebase/ddns-run", 0o755)
 
     for unit in ("homebase-hostd.service", "homebase-hostd.socket",
                  "homebase-update-check.service", "homebase-update-apply.service",
-                 "homebase-update-check.timer", "homebase-repair.service"):
+                 "homebase-update-check.timer", "homebase-repair.service",
+                 "homebase-ddns.service", "homebase-ddns.timer"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,

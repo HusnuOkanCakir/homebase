@@ -302,6 +302,134 @@ def verify_the_server_knows(vm: VM) -> None:
           f"message was: {status.get('message')!r}")
 
 
+def verify_dynamic_dns(vm: VM) -> None:
+    """The name that has to follow a changing home address.
+
+    The provider is real DuckDNS and this machine has no account with it, so what
+    is checked is everything up to the request: that a provider Homebase does not
+    know is refused, that the token never reaches the audit log, and that a
+    failure to reach the provider is *reported as a failure* rather than passed
+    over. That last one is the point — a name that quietly stopped updating three
+    weeks ago is a server nobody can reach, and it looks exactly like one that is
+    fine.
+    """
+    step("Keeping a name pointing at the house")
+
+    status = ctl_json(vm, "vpn", "dns")
+    check(status.get("configured") is False, "nothing is being kept up to date")
+
+    # A provider Homebase does not know must be refused before anything is
+    # written, because the alternative shape of this feature — a URL from the
+    # caller — is a way to fetch an arbitrary address as root.
+    refused = ssh(vm, ["sudo", "sh", "-c",
+                       "HOMEBASE_DNS_TOKEN=irrelevant homebasectl vpn dns "
+                       "some-other-service myname"], check=False, timeout=120)
+    check(refused.returncode != 0,
+          f"an unknown provider is refused ({refused.returncode})",
+          (refused.stdout + refused.stderr)[-300:])
+
+    # And with no token in the environment and no terminal to ask on, it says so
+    # rather than blocking for ever on a read that will never return. This is
+    # every script, and every `ssh host homebasectl ...`.
+    hung = ssh(vm, ["sudo", "homebasectl", "vpn", "dns", "duckdns", "somename"],
+               check=False, timeout=60)
+    check(hung.returncode == 2,
+          f"and with no terminal to ask on, it stops rather than hanging "
+          f"({hung.returncode})",
+          (hung.stdout + hung.stderr)[-300:])
+    check("environment" in (hung.stdout + hung.stderr),
+          "and says to use the environment instead",
+          (hung.stdout + hung.stderr)[-300:])
+
+    # A real provider with a token it will not accept. The request goes out and
+    # comes back refused, which is the case that has to be reported honestly.
+    token = "not-a-real-duckdns-token"
+    result = ssh(vm, ["sudo", "sh", "-c",
+                      f"HOMEBASE_DNS_TOKEN='{token}' homebasectl vpn dns duckdns "
+                      f"homebase-test-{int(time.time())}"],
+                 check=False, timeout=240)
+    check(result.returncode == 0,
+          f"a name can be configured ({result.returncode})",
+          (result.stdout + result.stderr)[-400:])
+
+    status = ctl_json(vm, "vpn", "dns")
+    check(status.get("configured") is True, "and Homebase records it")
+    check(status.get("enabled") is True, "and systemd is keeping it up to date")
+
+    # Either the provider refused the token or the machine has no internet. Both
+    # are failures, and both must be reported as failures rather than silence.
+    check(status.get("working") is False,
+          f"a name that is not actually being updated says so "
+          f"({status.get('working')})",
+          "This is the whole point: a name that stopped working looks exactly "
+          "like one that is fine unless something says otherwise.\n    "
+          + json.dumps(status, indent=4))
+
+    # The token is a credential, and the audit log is append-only and kept for
+    # ever.
+    audit = ssh(vm, ["sudo", "cat", "/var/log/homebase/audit.log"], check=False).stdout
+    check(token not in audit, "and the token is not in the audit log")
+
+    # It is in the configuration file, which has to be root-only.
+    mode = ssh(vm, ["sudo", "stat", "-c", "%U:%G %a",
+                    "/etc/homebase/ddns.conf"]).stdout.strip()
+    check(mode == "root:root 600", f"the file holding it is root-only ({mode})")
+
+    # And the VPN status folds it in, because they fail together.
+    vpn = ctl_json(vm, "vpn", "status")
+    check(vpn.get("dns", {}).get("configured") is True,
+          "the VPN status reports the name alongside the tunnel",
+          json.dumps(vpn.get("dns"), indent=4))
+    check("not being kept up to date" in (vpn.get("message") or ""),
+          "and warns about it there",
+          f"message was: {vpn.get('message')!r}")
+
+    ctl(vm, "vpn", "dns", "off", check_it=True)
+    status = ctl_json(vm, "vpn", "dns")
+    check(status.get("configured") is False, "and it can be switched off again")
+
+
+def verify_the_server_can_be_woken(vm: VM) -> None:
+    """Waking the server is the one thing that cannot be done from the server."""
+    step("Whether this machine could be woken")
+
+    result = ctl(vm, "network", check_it=True)
+
+    # An actual hardware address, not "some colons appeared" — the labels in this
+    # output have colons in them, so the first version of this check passed on a
+    # listing that showed no address at all.
+    import re as _re
+    shown = _re.search(r"\b([0-9A-F]{2}:){5}[0-9A-F]{2}\b", result.stdout)
+    check(shown is not None,
+          f"the network listing shows a hardware address ({shown.group(0) if shown else 'none'})",
+          "It is what a wake-up packet is addressed to, and nothing on a "
+          "sleeping machine can tell you afterwards.\n" + result.stdout[:400])
+    # Either answer is correct — a QEMU virtio card genuinely cannot be woken,
+    # and a real laptop's usually can. What must not happen is silence, because
+    # this is the one fact about waking the server that has to be known before it
+    # is asleep.
+    said = ("can be woken with" in result.stdout
+            or "cannot be woken" in result.stdout)
+    check(said, "and says whether the machine can be woken by one",
+          result.stdout[:400])
+
+    # And the command that sends one refuses nonsense before sending anything.
+    bad = ctl(vm, "wake", "not-an-address")
+    check(bad.returncode == 2,
+          f"sending to something that is not an address is a usage error ({bad.returncode})")
+
+    ok_send = ctl(vm, "wake", "AA:BB:CC:DD:EE:FF")
+    check(ok_send.returncode == 0,
+          f"and a real address is accepted ({ok_send.returncode})",
+          (ok_send.stdout + ok_send.stderr)[-300:])
+    # Matched on one line of it rather than a phrase, because the message is
+    # wrapped and the previous version of this check searched across a newline.
+    check("Nothing answers a wake-up packet" in ok_send.stdout,
+          "and it says nothing acknowledges a wake-up packet",
+          "Implying the machine woke up would be a lie — nothing answers.\n"
+          + ok_send.stdout[:400])
+
+
 def verify_removing_a_device_stops_it(server: VM, client: VM, server_vpn_ip: str) -> None:
     """The remedy for a lost phone, which has to actually work."""
     step("Taking the key away")
@@ -360,6 +488,8 @@ def main() -> int:
         config = add_device(server)
         verify_the_device_connects(client, config, "10.71.0.1")
         verify_the_server_knows(server)
+        verify_dynamic_dns(server)
+        verify_the_server_can_be_woken(server)
         verify_removing_a_device_stops_it(server, client, "10.71.0.1")
 
         elapsed = int(time.time() - started)

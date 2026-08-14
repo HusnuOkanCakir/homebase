@@ -658,8 +658,10 @@ The half a home server is actually for. Everything so far assumes the same house
       phone, because typing a Wireguard key by hand is nobody's evening
 - [x] A clear account of what has to be done on the router, said at the moment of setting up
       rather than left to be discovered when the first device fails to connect
-- [ ] Dynamic DNS, so a home connection whose address changes stays reachable
-- [ ] Wake-on-LAN: `homebasectl wake`, and the server configured to be woken
+- [x] Dynamic DNS, so a home connection whose address changes stays reachable — a fixed
+      table of providers, never a URL from the caller, and the token declared secret so it is
+      redacted from the audit log
+- [x] Wake-on-LAN: `homebasectl wake`, and the server reporting whether it can be woken
 - [ ] A screen for it on the dashboard
 
 **Done when:** a device outside the house reaches the server by name, over Wireguard, with
@@ -668,8 +670,46 @@ machines, one of which has no Homebase on it and knows nothing about the server 
 configuration it was handed. It completes a handshake, reaches the dashboard over the tunnel,
 and stops reaching it the moment its key is taken away.
 
-What is left is the two things around it: a name that follows a changing home address, and
-waking a machine that has gone to sleep.
+What is left is a screen on the dashboard. The tunnel, the name that follows a changing home
+address, and waking a sleeping machine all work from a terminal.
+
+#### A name that stopped updating says so
+
+The reporting is the point rather than the updating. Every dynamic DNS client updates a
+name; the failure that matters is the one where it stopped three weeks ago — because the
+result is a server nobody can reach, and it is indistinguishable from a server that is fine
+unless something says otherwise. `homebasectl vpn dns` reports whether the last update
+worked, and the VPN status folds it in, because they fail together.
+
+The provider is a **word from a fixed table**, never a URL. A URL from the caller would be a
+way to make the machine fetch an arbitrary address as root — the generic execution path
+ADR-0006 exists to prevent, wearing a different hat. The token is declared `Secret` on the
+operation, so it is redacted from the audit log; that machinery exists because the Wi-Fi
+passphrase needed it first, and `scripts/check_operations.py` refused the commit until the
+new secret was listed there too.
+
+#### Waking, in both directions
+
+`homebasectl wake` sends a magic packet and talks to nothing — not core, not hostd, not the
+database. A wake-up packet is a UDP broadcast any process can send, so routing it through the
+privilege boundary would add an audit record and a permission check to something with no
+privilege in it. It is useful over the VPN: on a train, wanting the desktop at home to start.
+
+Waking *the server* cannot be done from the server, so what Homebase can do is say, before it
+sleeps, whether it could be: `homebasectl network` reports the hardware address and whether
+the card will accept a packet.
+
+#### Three fields eaten in the middle, and the one that mattered
+
+`--json` was printing the struct `homebasectl` decoded into rather than what the server said.
+Those differ whenever core knows a field the CLI does not, and the difference is silent — the
+field is simply absent, and a script relying on it breaks with nothing to read anywhere. It
+now prints the response.
+
+The same shape twice more: `hostclient.NetworkInterface` had no `wake_on_lan`, so the value
+hostd reported vanished between hostd and core. And a secret prompt with no terminal blocked
+for ever rather than failing — every script, and every `ssh host homebasectl …`, which is how
+this CLI is meant to be used.
 
 #### The key is shown once and stored nowhere
 
