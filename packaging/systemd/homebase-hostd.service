@@ -114,6 +114,15 @@ ReadWritePaths=-/etc/apt/sources.list.d -/etc/apt/preferences.d
 # same fault as a network that will not let you in.
 ReadWritePaths=-/etc/netplan
 
+# Remote access: the Wireguard configuration and the one sysctl that lets the
+# kernel forward between the VPN and the house (ADR-0019).
+#
+# hostd writes these files and then asks systemd to start wg-quick@wg0. It does
+# not create the interface itself — not because it could not, since it has
+# AF_NETLINK, but because wg-quick also adds routes and firewall rules, and the
+# line below this block is worth more than the indirection costs.
+ReadWritePaths=-/etc/wireguard -/etc/sysctl.d
+
 # AF_UNIX for the socket; AF_NETLINK for reading network state later. No
 # AF_INET: hostd never talks to the network, and should not be able to.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK

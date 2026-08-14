@@ -206,8 +206,9 @@ Before the installer ships, because real users start storing data immediately.
 - [x] Integrity verification, restore preview, failure reporting
 - [x] Password recovery, brought forward from Milestones 6 and 8 — backups made the gap
       worse rather than better
-- [ ] Scheduling — you have to press the button. Carried to Milestone 8 with the
-      update timers, which need the same machinery
+- [→] Scheduling — carried to Milestone 8 with the update timers, which needed the same
+      machinery. **Shipped there**: nightly or weekly, on a systemd timer that catches up a
+      run the machine was switched off for
 
 **Done when:** a clean machine restores another machine's backup and comes up with its apps,
 configuration and data. ✅
@@ -620,9 +621,10 @@ wrong way round.
       to expose
 - [x] Exit codes that distinguish failure (1) from misuse (2) from the server not answering
       at all (3)
-- [ ] The operations still missing: restoring a backup, formatting and attaching a disk,
-      changing the update channel, factory reset — the destructive ones, which need their
-      confirmations thought about at a terminal rather than copied from the browser
+- [x] **The destructive ones**: restoring a backup, formatting, attaching and detaching a
+      disk, factory reset — with a confirmation designed for a shell rather than copied from
+      the browser
+- [ ] Changing the update channel, and removing an application's data
 
 **Done when:** every operation the dashboard can perform can be performed from a terminal,
 over SSH, on the machine itself — and a shell script can drive an install end to end.
@@ -641,6 +643,22 @@ prompt with echo off. An argument is in the shell history and in `ps` output for
 on the machine for as long as the command runs, which for joining a network is up to a
 minute.
 
+**The confirmation the dashboard uses does not survive the move to a terminal.** In a form
+field, "type the backup id to confirm" works: the id is on the screen and the field is empty,
+so typing it means having read it. At a shell it means almost nothing — the id is already in
+the command that listed it, one press of the up arrow re-runs whatever was done last, and a
+`--yes` flag becomes muscle memory within a week. Copying the browser's confirmation across
+would have looked like safety without being any.
+
+Three things replace it. **The preview**, which is the part that actually stops a mistake: the
+server is asked what would happen and the answer is printed, specifically — this many files
+replaced, from this machine, or this is what is on the disk now. A wrong choice usually looks
+wrong once described. **A terminal is required**, because a script can run a command by
+accident in a way nobody can click a button by accident, so the unattended path has to be
+asked for. And **the confirmation is a value rather than a word** — the backup's id, the
+disk's device, the server's name, which cannot be replayed against a different one. There is
+no `--yes`.
+
 The VM test found two things on its first two runs, both about the shape of a CLI rather
 than about Homebase. `homebasectl apps --json` was read as a subcommand called `--json` and
 refused — the first thing anybody types. And shared flags did not work *before* the
@@ -648,22 +666,104 @@ subcommand, although the help had always listed them under "Options" as though t
 global: `--address` first exited 2 as an unknown command. A documented flag that is refused
 is worse than one that does not exist.
 
-### Milestone 11 — Reachable from anywhere
+### Milestone 11 — Reachable from anywhere — in progress
 
 The half a home server is actually for. Everything so far assumes the same house.
 
-- [ ] [ADR-0019] — remote access is **self-hosted Wireguard**, not an overlay network
-      somebody else operates
-- [ ] `homebasectl vpn setup`, `vpn add-device`, `vpn list`, `vpn remove` — with a QR code
-      for a phone, because typing a Wireguard key by hand is nobody's evening
-- [ ] Dynamic DNS, so a home connection whose address changes stays reachable
-- [ ] Wake-on-LAN: `homebasectl wake`, and the server configured to be woken
-- [ ] A clear account of what has to be done on the router, since that part cannot be
-      automated and pretending otherwise helps nobody
+- [x] [ADR-0019](docs/decisions/0019-remote-access-is-self-hosted-wireguard.md) — remote
+      access is **self-hosted Wireguard**, not an overlay network somebody else operates
+- [x] `homebasectl vpn setup`, `add-device`, `remove-device`, `status` — with a QR code for a
+      phone, because typing a Wireguard key by hand is nobody's evening
+- [x] A clear account of what has to be done on the router, said at the moment of setting up
+      rather than left to be discovered when the first device fails to connect
+- [x] Dynamic DNS, so a home connection whose address changes stays reachable — a fixed
+      table of providers, never a URL from the caller, and the token declared secret so it is
+      redacted from the audit log
+- [x] Wake-on-LAN: `homebasectl wake`, and the server reporting whether it can be woken
+- [ ] A screen for it on the dashboard
 
 **Done when:** a device outside the house reaches the server by name, over Wireguard, with
-no third-party account involved — proven in the VM lab with two machines on separate
-segments, one standing in for the internet.
+no third-party account involved. **The tunnel half is done** — `make vm-test-vpn` (138s), two
+machines, one of which has no Homebase on it and knows nothing about the server except the
+configuration it was handed. It completes a handshake, reaches the dashboard over the tunnel,
+and stops reaching it the moment its key is taken away.
+
+What is left is a screen on the dashboard. The tunnel, the name that follows a changing home
+address, and waking a sleeping machine all work from a terminal.
+
+#### A name that stopped updating says so
+
+The reporting is the point rather than the updating. Every dynamic DNS client updates a
+name; the failure that matters is the one where it stopped three weeks ago — because the
+result is a server nobody can reach, and it is indistinguishable from a server that is fine
+unless something says otherwise. `homebasectl vpn dns` reports whether the last update
+worked, and the VPN status folds it in, because they fail together.
+
+The provider is a **word from a fixed table**, never a URL. A URL from the caller would be a
+way to make the machine fetch an arbitrary address as root — the generic execution path
+ADR-0006 exists to prevent, wearing a different hat. The token is declared `Secret` on the
+operation, so it is redacted from the audit log; that machinery exists because the Wi-Fi
+passphrase needed it first, and `scripts/check_operations.py` refused the commit until the
+new secret was listed there too.
+
+#### Waking, in both directions
+
+`homebasectl wake` sends a magic packet and talks to nothing — not core, not hostd, not the
+database. A wake-up packet is a UDP broadcast any process can send, so routing it through the
+privilege boundary would add an audit record and a permission check to something with no
+privilege in it. It is useful over the VPN: on a train, wanting the desktop at home to start.
+
+Waking *the server* cannot be done from the server, so what Homebase can do is say, before it
+sleeps, whether it could be: `homebasectl network` reports the hardware address and whether
+the card will accept a packet.
+
+#### Three fields eaten in the middle, and the one that mattered
+
+`--json` was printing the struct `homebasectl` decoded into rather than what the server said.
+Those differ whenever core knows a field the CLI does not, and the difference is silent — the
+field is simply absent, and a script relying on it breaks with nothing to read anywhere. It
+now prints the response.
+
+The same shape twice more: `hostclient.NetworkInterface` had no `wake_on_lan`, so the value
+hostd reported vanished between hostd and core. And a secret prompt with no terminal blocked
+for ever rather than failing — every script, and every `ssh host homebasectl …`, which is how
+this CLI is meant to be used.
+
+#### The key is shown once and stored nowhere
+
+The server generates both halves — it has to, because a phone joins by scanning a QR code
+and that code must contain the key — and then keeps only the public one. A configuration that
+is lost cannot be re-shown; the device is removed and added again.
+
+Every comparable tool keeps client configurations on the server, which is convenient right
+up to the day somebody gets into the server and leaves with every device's identity. This is
+the second time the project has chosen "shown once" over "stored for convenience", after the
+recovery code in [ADR-0015](docs/decisions/0015-password-recovery.md).
+
+The VM test checks it by grepping the whole of `/etc` and `/var/lib` for the private key it
+was handed, and the audit log as well.
+
+#### Reachability is a handshake, not a probe
+
+"Is my router forwarding the port?" cannot be answered from inside the house. Answering it
+properly means asking a service on the outside to try — which is the dependency this whole
+record exists to avoid.
+
+So Homebase does not ask. It reports whether any device has ever completed a handshake, which
+proves the same thing with evidence: the name resolved, the router forwarded, the key was
+accepted. Until then it says nothing has connected yet and that the port is the likely
+reason.
+
+#### What the lab cannot simulate
+
+Both machines are on one segment, standing in for a correctly forwarded port. The router is
+not simulated and neither is carrier-grade NAT, which is the case where this design simply
+does not work and the documentation says so.
+
+The first run failed at the handshake, and the reason is worth recording: the test picked the
+server's *Docker bridge* address, 172.17.0.1, because the shared segment has no DHCP and
+nothing had assigned an address on it. WireGuard was working perfectly and the endpoint was a
+network the other machine could not reach.
 
 **Wireguard rather than Tailscale**, and the trade is worth stating plainly. Wireguard needs
 a forwarded UDP port and therefore a router somebody can configure, and it does not work

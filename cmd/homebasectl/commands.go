@@ -44,6 +44,14 @@ type options struct {
 	address  string
 	database string
 	asJSON   bool
+
+	// confirm is how a script agrees to something irreversible. It has to equal
+	// the thing's own name — never a word like "yes", and there is no --yes.
+	confirm string
+
+	// from names the disk a backup is on; name is what to call a disk.
+	from string
+	name string
 }
 
 // globals are the shared flags when they are given *before* the subcommand.
@@ -103,6 +111,10 @@ func bind(flags *flag.FlagSet) *options {
 	flags.StringVar(&o.address, "address", globals.address, "the server to talk to")
 	flags.StringVar(&o.database, "database", globals.database, "path to the Homebase database")
 	flags.BoolVar(&o.asJSON, "json", globals.asJSON, "print the server's answer as JSON")
+	flags.StringVar(&o.confirm, "confirm", "",
+		"agree to something irreversible from a script; must name the thing itself")
+	flags.StringVar(&o.from, "from", "", "which disk a backup is on")
+	flags.StringVar(&o.name, "name", "", "what to call it")
 	return o
 }
 
@@ -134,11 +146,35 @@ type usageError struct{ err error }
 
 func (e usageError) Error() string { return e.err.Error() }
 
-// printJSON writes the server's answer through unchanged.
+// printJSON writes a value as JSON.
+//
+// Used only where there is no server response to pass through — everything that
+// answers a request uses printResponse instead.
 func printJSON(w io.Writer, value any) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
+}
+
+// printResponse writes what the server said, unmodified.
+//
+// Not the struct this package decoded into: those differ whenever core knows a
+// field homebasectl does not, and the difference is silent — the field is simply
+// absent, and a script relying on it breaks with nothing to read. `--json` is
+// documented as the interface to build on, and this is what makes that true.
+func printResponse(w io.Writer, c *Client, fallback any) error {
+	if len(c.lastBody) == 0 {
+		return printJSON(w, fallback)
+	}
+
+	// Re-indented rather than passed through byte for byte, because core answers
+	// compactly and this is read by people as well as by jq.
+	var pretty any
+	if err := json.Unmarshal(c.lastBody, &pretty); err != nil {
+		_, err := w.Write(append(c.lastBody, '\n'))
+		return err
+	}
+	return printJSON(w, pretty)
 }
 
 // --- First use ---------------------------------------------------------------------
@@ -265,7 +301,7 @@ func listApps(ctx context.Context, c *Client, o *options, _ []string, w io.Write
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, reply)
+		return printResponse(w, c, reply)
 	}
 
 	if len(reply.Items) == 0 {
@@ -318,7 +354,7 @@ func appLogs(ctx context.Context, c *Client, o *options, names []string, w io.Wr
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, reply)
+		return printResponse(w, c, reply)
 	}
 	for _, line := range reply.Lines {
 		fmt.Fprintln(w, line)
@@ -358,7 +394,7 @@ func terminal(state string) bool {
 func followJob(ctx context.Context, c *Client, o *options, job jobReply, w io.Writer) error {
 	if job.JobID == "" {
 		if o.asJSON {
-			return printJSON(w, job)
+			return printResponse(w, c, job)
 		}
 		fmt.Fprintln(w, "Done.")
 		return nil
@@ -377,7 +413,7 @@ func followJob(ctx context.Context, c *Client, o *options, job jobReply, w io.Wr
 	}
 
 	if o.asJSON {
-		return printJSON(w, job)
+		return printResponse(w, c, job)
 	}
 
 	if job.State != "succeeded" {
@@ -404,8 +440,15 @@ func storageCommand(args []string, stdout io.Writer) error {
 		return withClient("storage list", rest, stdout, listStorage)
 	case "disks":
 		return withClient("storage disks", rest, stdout, listDisks)
+	case "format":
+		return withClient("storage format", rest, stdout, formatCommand)
+	case "attach":
+		return withClient("storage attach", rest, stdout, attachCommand)
+	case "detach":
+		return withClient("storage detach", rest, stdout, detachCommand)
 	default:
-		return usageError{fmt.Errorf("unknown storage command %q — try list or disks", action)}
+		return usageError{fmt.Errorf("unknown storage command %q — try list, disks, "+
+			"format, attach or detach", action)}
 	}
 }
 
@@ -424,7 +467,7 @@ func listStorage(ctx context.Context, c *Client, o *options, _ []string, w io.Wr
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, reply)
+		return printResponse(w, c, reply)
 	}
 	if len(reply.Items) == 0 {
 		fmt.Fprintln(w, "No disks are set up for Homebase to use.")
@@ -449,7 +492,7 @@ func listDisks(ctx context.Context, c *Client, o *options, _ []string, w io.Writ
 	if err := c.Get(ctx, "/storage/disks", &reply); err != nil {
 		return err
 	}
-	return printJSON(w, reply)
+	return printResponse(w, c, reply)
 }
 
 // --- Backup -----------------------------------------------------------------------
@@ -466,8 +509,11 @@ func backupCommand(args []string, stdout io.Writer) error {
 		return withClient("backup now", rest, stdout, makeBackup)
 	case "schedule":
 		return withClient("backup schedule", rest, stdout, backupSchedule)
+	case "restore":
+		return withClient("backup restore", rest, stdout, restoreCommand)
 	default:
-		return usageError{fmt.Errorf("unknown backup command %q — try list, now or schedule", action)}
+		return usageError{fmt.Errorf("unknown backup command %q — try list, now, "+
+			"schedule or restore", action)}
 	}
 }
 
@@ -489,7 +535,7 @@ func listBackups(ctx context.Context, c *Client, o *options, rest []string, w io
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, reply)
+		return printResponse(w, c, reply)
 	}
 	if len(reply.Items) == 0 {
 		fmt.Fprintln(w, "No backups on that disk yet.")
@@ -548,7 +594,7 @@ func backupSchedule(ctx context.Context, c *Client, o *options, rest []string, w
 	}
 
 	if o.asJSON {
-		return printJSON(w, schedule)
+		return printResponse(w, c, schedule)
 	}
 	fmt.Fprintf(w, "Backups: %s\n", schedule.Description)
 	if schedule.Every != "off" {
@@ -593,7 +639,7 @@ func updateStatus(ctx context.Context, c *Client, o *options, _ []string, w io.W
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, status)
+		return printResponse(w, c, status)
 	}
 	fmt.Fprintf(w, "Version: %s\nChannel: %s\n", status.Version, status.Channel)
 	if status.Interrupted || !status.Consistent {
@@ -614,7 +660,7 @@ func updateCheck(ctx context.Context, c *Client, o *options, _ []string, w io.Wr
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, result)
+		return printResponse(w, c, result)
 	}
 	switch {
 	case !result.Reachable:
@@ -636,7 +682,7 @@ func updateApply(ctx context.Context, c *Client, o *options, _ []string, w io.Wr
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, started)
+		return printResponse(w, c, started)
 	}
 	fmt.Fprintln(w, "The update has started. It restarts Homebase's services, so this")
 	fmt.Fprintln(w, "connection will drop. Watch it with:")
@@ -663,7 +709,7 @@ func repairCommand(args []string, stdout io.Writer) error {
 				return err
 			}
 			if o.asJSON {
-				return printJSON(w, result)
+				return printResponse(w, c, result)
 			}
 			for _, step := range result.Steps {
 				switch {
@@ -694,7 +740,7 @@ func diagnosticsCommand(args []string, stdout io.Writer) error {
 				return err
 			}
 			if o.asJSON {
-				return printJSON(w, result)
+				return printResponse(w, c, result)
 			}
 			fmt.Fprintf(w, "%s\n\n%s (%s)\n\nIt does not contain:\n",
 				result.Message, result.Path, humanBytes(uint64(result.Bytes)))
@@ -732,13 +778,15 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 			Kind      string   `json:"kind"`
 			Up        bool     `json:"up"`
 			Addresses []string `json:"addresses"`
+			MAC       string   `json:"mac"`
+			WakeOnLAN bool     `json:"wake_on_lan"`
 		} `json:"interfaces"`
 	}
 	if err := c.Get(ctx, "/network", &status); err != nil {
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, status)
+		return printResponse(w, c, status)
 	}
 
 	fmt.Fprintf(w, "Name:     %s", status.Hostname)
@@ -761,6 +809,17 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 		}
 		fmt.Fprintf(w, "  %-8s %-9s %s\n", iface.Name, iface.Kind,
 			strings.Join(iface.Addresses, ", "))
+		if iface.MAC != "" {
+			// The hardware address is what a router lists this machine under,
+			// and what a wake-up packet is addressed to — which is worth knowing
+			// before the machine is asleep, because nothing on a sleeping
+			// machine can tell you afterwards.
+			wake := "cannot be woken by a network packet"
+			if iface.WakeOnLAN {
+				wake = "can be woken with: homebasectl wake " + normaliseMAC(iface.MAC)
+			}
+			fmt.Fprintf(w, "           %s — %s\n", normaliseMAC(iface.MAC), wake)
+		}
 	}
 	return nil
 }
@@ -775,7 +834,7 @@ func wifiCommand(args []string, stdout io.Writer) error {
 				if err := c.Get(ctx, "/network/wifi", &status); err != nil {
 					return err
 				}
-				return printJSON(w, status)
+				return printResponse(w, c, status)
 			})
 	case "scan":
 		return withClient("network wifi scan", rest, stdout, scanWifi)
@@ -800,7 +859,7 @@ func scanWifi(ctx context.Context, c *Client, o *options, _ []string, w io.Write
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, reply)
+		return printResponse(w, c, reply)
 	}
 	if len(reply.Networks) == 0 {
 		fmt.Fprintln(w, reply.Message)
@@ -847,7 +906,7 @@ func joinWifi(ctx context.Context, c *Client, o *options, rest []string, w io.Wr
 		return err
 	}
 	if o.asJSON {
-		return printJSON(w, status)
+		return printResponse(w, c, status)
 	}
 	fmt.Fprintf(w, "Joined %s.\n", rest[0])
 	return nil
@@ -882,7 +941,7 @@ func systemCommand(args []string, stdout io.Writer) error {
 				return err
 			}
 			if o.asJSON {
-				return printJSON(w, info)
+				return printResponse(w, c, info)
 			}
 
 			fmt.Fprintf(w, "%s — %s, %s\n", info.Hostname, info.OS, info.Kernel)
@@ -955,4 +1014,251 @@ func humanDuration(seconds int64) string {
 	default:
 		return fmt.Sprintf("%d minutes", minutes)
 	}
+}
+
+// --- Remote access ------------------------------------------------------------------
+
+func vpnCommand(args []string, stdout io.Writer) error {
+	action, rest := defaultTo(args, "status")
+	switch action {
+	case "status", "list":
+		return withClient("vpn status", rest, stdout, vpnStatus)
+	case "setup":
+		return withClient("vpn setup", rest, stdout, vpnSetup)
+	case "add-device":
+		return withClient("vpn add-device", rest, stdout, vpnAddDevice)
+	case "remove-device":
+		return withClient("vpn remove-device", rest, stdout, vpnRemoveDevice)
+	case "dns":
+		return withClient("vpn dns", rest, stdout, vpnDNS)
+	default:
+		return usageError{fmt.Errorf("unknown vpn command %q — try status, setup, "+
+			"add-device, remove-device or dns", action)}
+	}
+}
+
+type vpnStatusReply struct {
+	Configured bool   `json:"configured"`
+	Running    bool   `json:"running"`
+	Hostname   string `json:"hostname"`
+	Port       int    `json:"port"`
+	Devices    []struct {
+		Name          string `json:"name"`
+		Address       string `json:"address"`
+		LastHandshake string `json:"last_handshake"`
+	} `json:"devices"`
+	EverConnected bool   `json:"ever_connected"`
+	Message       string `json:"message"`
+}
+
+func vpnStatus(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
+	var status vpnStatusReply
+	if err := c.Get(ctx, "/network/vpn", &status); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, status)
+	}
+
+	if !status.Configured {
+		fmt.Fprintln(w, status.Message)
+		return nil
+	}
+
+	fmt.Fprintf(w, "Reachable at: %s:%d\n", status.Hostname, status.Port)
+	fmt.Fprintf(w, "Running:      %v\n", status.Running)
+
+	if len(status.Devices) > 0 {
+		fmt.Fprintln(w)
+		rows := [][]string{{"DEVICE", "ADDRESS", "LAST CONNECTED"}}
+		for _, device := range status.Devices {
+			when := device.LastHandshake
+			if when == "" {
+				when = "never"
+			}
+			rows = append(rows, []string{device.Name, device.Address, when})
+		}
+		writeTable(w, rows)
+	}
+
+	if status.Message != "" {
+		fmt.Fprintf(w, "\n%s\n", status.Message)
+	}
+	return nil
+}
+
+func vpnSetup(ctx context.Context, c *Client, o *options, rest []string, w io.Writer) error {
+	if len(rest) != 1 {
+		return usageError{errors.New(
+			"what name will devices connect to? — homebasectl vpn setup NAME\n" +
+				"A dynamic DNS name like yours.duckdns.org, or a fixed address.")}
+	}
+
+	var status vpnStatusReply
+	if err := c.Post(ctx, "/network/vpn", map[string]any{"hostname": rest[0]}, &status); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, status)
+	}
+
+	fmt.Fprintf(w, "Remote access is on, at %s:%d.\n\n", status.Hostname, status.Port)
+	// The part that cannot be automated, said plainly rather than left to be
+	// discovered when the first device fails to connect.
+	fmt.Fprintf(w, "One thing is left, and Homebase cannot do it: forward UDP port %d\n",
+		status.Port)
+	fmt.Fprintln(w, "on your router to this server. Look for \"port forwarding\" in its")
+	fmt.Fprintln(w, "settings.")
+	fmt.Fprintln(w, "\nThen add a device:\n\n    sudo homebasectl vpn add-device phone")
+	return nil
+}
+
+// vpnAddDevice prints a key that is never stored and cannot be shown again.
+func vpnAddDevice(ctx context.Context, c *Client, o *options, rest []string, w io.Writer) error {
+	if len(rest) != 1 {
+		return usageError{errors.New(
+			"what should the device be called? — homebasectl vpn add-device NAME")}
+	}
+
+	var device struct {
+		Name    string `json:"name"`
+		Address string `json:"address"`
+		Config  string `json:"config"`
+		QRCode  string `json:"qr_code"`
+		Message string `json:"message"`
+	}
+	if err := c.Post(ctx, "/network/vpn/devices",
+		map[string]any{"name": rest[0]}, &device); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, device)
+	}
+
+	fmt.Fprintf(w, "%s — %s\n\n", device.Name, device.Address)
+	if device.QRCode != "" {
+		fmt.Fprintln(w, device.QRCode)
+		fmt.Fprintln(w, "Scan that with the WireGuard app on a phone.")
+		fmt.Fprintln(w, "\nOr save this as a file and import it:")
+	} else {
+		fmt.Fprintln(w, "Save this as a .conf file and import it into WireGuard:")
+	}
+	fmt.Fprintf(w, "\n%s\n", device.Config)
+	fmt.Fprintf(w, "%s\n", device.Message)
+	return nil
+}
+
+func vpnRemoveDevice(ctx context.Context, c *Client, o *options, rest []string, w io.Writer) error {
+	if len(rest) != 1 {
+		return usageError{errors.New(
+			"which device? — homebasectl vpn remove-device NAME")}
+	}
+
+	var status vpnStatusReply
+	if err := c.Post(ctx, "/network/vpn/devices/remove",
+		map[string]any{"name": rest[0]}, &status); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, status)
+	}
+	fmt.Fprintf(w, "%s can no longer reach this server from outside.\n", rest[0])
+	return nil
+}
+
+// vpnDNS sets or reports the name that has to keep pointing at the house.
+//
+// The token comes from the environment or a prompt, never an argument — it is a
+// credential for changing where a name points, and an argument is in the shell
+// history and in `ps` for every user on the machine.
+func vpnDNS(ctx context.Context, c *Client, o *options, rest []string, w io.Writer) error {
+	var status struct {
+		Configured  bool   `json:"configured"`
+		Provider    string `json:"provider"`
+		Name        string `json:"name"`
+		Enabled     bool   `json:"enabled"`
+		Working     bool   `json:"working"`
+		LastChecked string `json:"last_checked"`
+		Detail      string `json:"detail"`
+	}
+
+	// The document to print for --json.
+	//
+	// Usually the whole response, which is what printResponse gives. Not here
+	// when reading: the name's state is one field *inside* the VPN status, and
+	// printing the enclosing document would answer a different question from the
+	// one asked. So the field's own bytes are kept — still the server's, just
+	// the right part of them.
+	var answer json.RawMessage
+
+	switch {
+	case len(rest) == 0:
+		var whole struct {
+			DNS json.RawMessage `json:"dns"`
+		}
+		if err := c.Get(ctx, "/network/vpn", &whole); err != nil {
+			return err
+		}
+		if err := json.Unmarshal(whole.DNS, &status); err != nil {
+			return err
+		}
+		answer = whole.DNS
+	case len(rest) == 1 && rest[0] == "off":
+		if err := c.Post(ctx, "/network/vpn/dns/clear", nil, &status); err != nil {
+			return err
+		}
+	case len(rest) == 2:
+		token := os.Getenv("HOMEBASE_DNS_TOKEN")
+		if token == "" {
+			var err error
+			token, err = askForSecret("The token from " + rest[0] + ": ")
+			if err != nil {
+				return err
+			}
+		}
+		if err := c.Post(ctx, "/network/vpn/dns", map[string]any{
+			"provider": rest[0], "name": rest[1], "token": token,
+		}, &status); err != nil {
+			return err
+		}
+	default:
+		return usageError{errors.New(
+			"homebasectl vpn dns                    what the name is doing\n" +
+				"homebasectl vpn dns duckdns NAME       keep NAME pointing here\n" +
+				"homebasectl vpn dns off                stop\n\n" +
+				"The token is read from HOMEBASE_DNS_TOKEN, or asked for.")}
+	}
+
+	if o.asJSON {
+		if len(answer) > 0 {
+			var pretty any
+			if err := json.Unmarshal(answer, &pretty); err != nil {
+				return err
+			}
+			return printJSON(w, pretty)
+		}
+		return printResponse(w, c, status)
+	}
+
+	if !status.Configured {
+		fmt.Fprintln(w, "No name is being kept up to date.")
+		fmt.Fprintln(w, "\nIf your home address changes, devices will stop being able to")
+		fmt.Fprintln(w, "find this server. Set one up with:")
+		fmt.Fprintln(w, "\n    sudo homebasectl vpn dns duckdns yourname")
+		return nil
+	}
+
+	fmt.Fprintf(w, "Name:     %s (%s)\n", status.Name, status.Provider)
+	fmt.Fprintf(w, "Updating: %v\n", status.Enabled)
+	if status.LastChecked != "" {
+		outcome := "worked"
+		if !status.Working {
+			outcome = "FAILED"
+		}
+		fmt.Fprintf(w, "Last try: %s — %s\n", status.LastChecked, outcome)
+	}
+	if status.Detail != "" {
+		fmt.Fprintf(w, "\n%s\n", status.Detail)
+	}
+	return nil
 }

@@ -56,6 +56,12 @@ homebasectl update apply
 homebasectl network                         # how this server is connected
 homebasectl network wifi scan
 homebasectl network wifi join "Your Network"
+homebasectl vpn                             # who can reach this server from outside
+homebasectl vpn setup yours.duckdns.org
+homebasectl vpn add-device phone            # prints a QR code, once
+homebasectl vpn remove-device phone
+homebasectl vpn dns duckdns yourname        # keep a name pointing at the house
+homebasectl wake AA:BB:CC:DD:EE:FF          # start a sleeping machine
 homebasectl repair                          # fix what a power cut left broken
 homebasectl diagnostics                     # a file safe to send to somebody
 ```
@@ -94,6 +100,34 @@ if ! homebasectl backup now backups; then
     esac
 fi
 ```
+
+## The commands that destroy things
+
+```sh
+homebasectl backup restore ID --from DISK
+homebasectl storage format /dev/sdX
+homebasectl storage detach NAME
+homebasectl factory-reset
+```
+
+Each of these shows you what it is about to do — from the server, not from
+memory — and then asks. Restoring prints how many files would be replaced;
+formatting prints what is on the disk now.
+
+**The confirmation is the thing's own name**, never "yes". A backup's id, a
+disk's device, the server's hostname. A confirmation that reads the same on
+every machine is one you can type without looking, and one a script can carry
+from a safe context into a dangerous one.
+
+From a script, pass it explicitly:
+
+```sh
+homebasectl storage format /dev/sdb --confirm /dev/sdb
+```
+
+**There is no `--yes`.** A flag meaning "do it anyway" ends up in every
+invocation within a week, and then it is not a confirmation at all. Without a
+terminal and without `--confirm`, these refuse and tell you what to pass.
 
 ## Passwords
 

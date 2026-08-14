@@ -1,0 +1,23 @@
+[Unit]
+Description=Homebase — keep the dynamic DNS name pointing here
+Documentation=https://github.com/HusnuOkanCakir/homebase/blob/main/docs/user-guide/remote-access.md
+
+[Timer]
+Unit=homebase-ddns.service
+
+# Every five minutes.
+#
+# Far more often than the update check, and the reasoning is the opposite way
+# round. An update check that runs hourly tells the archive how often a machine
+# is switched on and buys nothing; a dynamic DNS name that is wrong for an hour
+# is a server nobody can reach for an hour, and the provider already knows the
+# address because that is the entire service.
+OnBootSec=1min
+OnUnitActiveSec=5min
+
+# Catch up after the machine has been off, because the address has almost
+# certainly changed while it was.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

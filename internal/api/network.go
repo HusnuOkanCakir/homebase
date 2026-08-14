@@ -29,6 +29,13 @@ func (s *Server) registerNetworkRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/network/wifi/scan", s.require(auth.PermNetworkDiag, s.handleWifiScan))
 	mux.Handle("POST /api/v1/network/wifi", s.require(auth.PermNetworkModify, s.handleWifiConnect))
 	mux.Handle("POST /api/v1/network/wifi/forget", s.require(auth.PermNetworkModify, s.handleWifiForget))
+
+	mux.Handle("GET /api/v1/network/vpn", s.require(auth.PermNetworkDiag, s.handleVPNStatus))
+	mux.Handle("POST /api/v1/network/vpn", s.require(auth.PermNetworkModify, s.handleVPNSetup))
+	mux.Handle("POST /api/v1/network/vpn/devices", s.require(auth.PermNetworkModify, s.handleAddVPNDevice))
+	mux.Handle("POST /api/v1/network/vpn/devices/remove", s.require(auth.PermNetworkModify, s.handleRemoveVPNDevice))
+	mux.Handle("POST /api/v1/network/vpn/dns", s.require(auth.PermNetworkModify, s.handleSetDNS))
+	mux.Handle("POST /api/v1/network/vpn/dns/clear", s.require(auth.PermNetworkModify, s.handleClearDNS))
 }
 
 func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request, _ *auth.User) {
@@ -147,5 +154,150 @@ func (s *Server) handleWifiForget(w http.ResponseWriter, r *http.Request, user *
 		"This server is no longer set up to use wireless.")
 	s.log.Info("wireless forgotten", "by", user.Username)
 
+	writeJSON(w, http.StatusOK, status)
+}
+
+// --- Remote access ----------------------------------------------------------------
+
+func (s *Server) handleVPNStatus(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	status, err := s.host.VPNStatus(ctx)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleVPNSetup(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var body struct {
+		Hostname string `json:"hostname"`
+	}
+	if !s.decode(w, r, &body) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+
+	status, err := s.host.SetUpVPN(ctx, strings.TrimSpace(body.Hostname))
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	// Worth an event above 'info'. This opens a way into the house's network
+	// from the internet, and somebody reading the history later needs to find
+	// the day it was switched on.
+	s.events.Warn(r.Context(), "vpn.enabled", status.Hostname,
+		"remote access was switched on",
+		"This server can now be reached from outside the house, at "+
+			status.Hostname+".")
+	s.log.Info("remote access configured", "hostname", status.Hostname,
+		"by", user.Username)
+
+	writeJSON(w, http.StatusOK, status)
+}
+
+// handleAddVPNDevice issues a key, once.
+//
+// The response carries a private key — the only response in the API that does,
+// apart from the recovery code at setup. It is stored nowhere and cannot be
+// asked for again.
+func (s *Server) handleAddVPNDevice(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !s.decode(w, r, &body) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+
+	device, err := s.host.AddVPNDevice(ctx, strings.TrimSpace(body.Name))
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	// The event records that a key was issued and to what it was called. It does
+	// not record the key, and the log line below does not either — this is the
+	// one place in core where that would be easy to do by accident.
+	s.events.Warn(r.Context(), "vpn.device_added", device.Name,
+		"a device was given remote access",
+		"The device \""+device.Name+"\" can now reach this server from anywhere.")
+	s.log.Info("remote access device added", "device", device.Name,
+		"address", device.Address, "by", user.Username)
+
+	writeJSON(w, http.StatusCreated, device)
+}
+
+func (s *Server) handleRemoveVPNDevice(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !s.decode(w, r, &body) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+
+	status, err := s.host.RemoveVPNDevice(ctx, strings.TrimSpace(body.Name))
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	s.events.Warn(r.Context(), "vpn.device_removed", body.Name,
+		"a device lost remote access",
+		"The device \""+body.Name+"\" can no longer reach this server from outside.")
+	s.log.Info("remote access device removed", "device", body.Name, "by", user.Username)
+
+	writeJSON(w, http.StatusOK, status)
+}
+
+// handleSetDNS records the name that has to keep pointing at the house.
+//
+// The token is a credential. It is not logged here, and hostd declares it as a
+// secret so it is redacted from the audit log too.
+func (s *Server) handleSetDNS(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var body struct {
+		Provider string `json:"provider"`
+		Name     string `json:"name"`
+		Token    string `json:"token,omitempty"`
+	}
+	if !s.decode(w, r, &body) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+
+	status, err := s.host.SetDNS(ctx, strings.TrimSpace(body.Provider),
+		strings.TrimSpace(body.Name), body.Token)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	s.log.Info("dynamic DNS configured", "provider", status.Provider,
+		"name", status.Name, "by", user.Username)
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleClearDNS(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	status, err := s.host.ClearDNS(ctx)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+	s.log.Info("dynamic DNS switched off", "by", user.Username)
 	writeJSON(w, http.StatusOK, status)
 }

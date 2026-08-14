@@ -419,6 +419,54 @@ Milestone 0 — contracts and project machinery. No product code.
 - **The Wi-Fi password is never an argument** — `HOMEBASE_WIFI_PASSWORD`, or a prompt with
   echo off. An argument is in the shell history and in `ps` output for every user on the
   machine for as long as the command runs
+- **The destructive commands**: `backup restore`, `storage format`, `storage attach`,
+  `storage detach` and `factory-reset` — with a confirmation designed for a shell rather
+  than copied from the browser. In a form field, "type the id to confirm" works because the
+  field is empty and the id is on screen; at a shell the id is already in the command that
+  listed it and the up arrow re-runs the last thing. Three things replace it: a **preview**
+  printed from the server before anything happens, a **terminal required** unless `--confirm`
+  is passed explicitly, and a confirmation that is **the thing's own name** rather than a
+  word. There is no `--yes`, because a flag meaning "do it anyway" ends up in every
+  invocation within a week
+
+- **Remote access, over self-hosted WireGuard**
+  ([ADR-0019](docs/decisions/0019-remote-access-is-self-hosted-wireguard.md)). No account, no
+  subscription, no coordination server — the first principle in the README is that nobody can
+  switch Homebase off or start charging for it, and that principle decides this one almost on
+  its own. `homebasectl vpn setup`, `add-device`, `remove-device`, with a QR code a phone can
+  scan
+- **A device's key is shown once and stored nowhere.** The server generates both halves — it
+  must, because a phone joins by scanning a code that has to contain the key — and keeps only
+  the public one. A lost configuration cannot be re-shown; remove the device and add it
+  again. Every comparable tool keeps them on the server, which is convenient until somebody
+  gets into the server and leaves with every device's identity
+- **Reachability is a completed handshake, not a probe.** "Is my router forwarding the port?"
+  cannot be answered from inside the house without asking somebody else's service. So it is
+  not asked: a handshake proves the name resolved, the router forwarded and the key was
+  accepted, with evidence rather than a guess
+- Only the house's traffic goes over the tunnel. A full tunnel would route a phone's entire
+  internet through a domestic upload link and a machine in a cupboard
+- Setting up again keeps the server's key and every device. Regenerating it would silently
+  invalidate everything already handed out, which somebody discovers on holiday
+- `make vm-test-vpn` (138s): two machines, one with no Homebase on it, which completes a
+  handshake, reaches the dashboard over the tunnel, and stops reaching it the moment its key
+  is removed. The private key it was handed is grepped for across `/etc`, `/var/lib` and the
+  audit log, and is in none of them
+
+- **Dynamic DNS**, so a home connection whose address changes stays reachable. The provider
+  is a word from a fixed table, never a URL — a URL from the caller would be a way to make
+  the machine fetch an arbitrary address as root. The token is declared secret, so it is
+  redacted from the audit log
+- **A name that stopped updating says so.** Every dynamic DNS client updates a name; the
+  failure that matters is the one where it stopped three weeks ago, because the result is a
+  server nobody can reach that looks exactly like one that is fine
+- **`homebasectl wake`**, which talks to nothing — a magic packet is a UDP broadcast any
+  process can send, so routing it through the privilege boundary would add an audit record
+  and a permission check to something with no privilege in it. Useful over the VPN: the
+  desktop at home, started from a train
+- The server now reports its own hardware address and whether its card will accept a wake-up
+  packet — the one fact about waking it that has to be known *before* it sleeps, because
+  nothing on a sleeping machine can answer
 
 ### Fixed
 
@@ -443,6 +491,18 @@ test that runs is root.
 - **The diagnostic file could not be downloaded.** Its directory was `root:root 0750`, so the
   file inside being readable made no difference: core could not list the directory, and the
   download answered `404` with the file sitting there
+
+**`--json` printed the CLI's struct, not the server's answer.** Those differ whenever core
+knows a field `homebasectl` does not, and the difference is silent: the field is simply
+absent, and a script relying on it breaks with nothing to read. Found when `vpn status
+--json` stopped reporting dynamic DNS state the server was returning perfectly well. The same
+shape appeared twice more in one afternoon — `hostclient.NetworkInterface` had no
+`wake_on_lan`, so the value vanished between hostd and core.
+
+**A secret prompt with no terminal blocked for ever.** `ssh host homebasectl vpn dns …` has
+no TTY, so the read never returned and the command hung until something killed it — worse
+than an error, because it looks like it is working. It now says which environment variable to
+use instead.
 
 And a fourth of the same family, plus the one that makes it interesting. `/etc/netplan` was
 read-only for `hostd` under `ProtectSystem=strict`, so joining a network could not write its

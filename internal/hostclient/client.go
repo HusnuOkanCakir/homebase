@@ -298,6 +298,15 @@ type NetworkInterface struct {
 	Up        bool     `json:"up"`
 	Addresses []string `json:"addresses,omitempty"`
 	MAC       string   `json:"mac,omitempty"`
+
+	// WakeOnLAN is whether the card will start the machine when a magic packet
+	// arrives.
+	//
+	// It has to be here or it is dropped: this struct sits between hostd and
+	// core, and a field it does not know simply disappears on the way through.
+	// That is silent — the value is absent rather than wrong — and it is the
+	// third time in this project a middle layer has quietly eaten a field.
+	WakeOnLAN bool `json:"wake_on_lan"`
 }
 
 // NetworkStatus is how the server is connected, and whether it is.
