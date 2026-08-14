@@ -22,9 +22,27 @@ As an ordinary user it needs a token instead, from `HOMEBASE_TOKEN` or
 `~/.config/homebase/token`. That is the path for a script running as somebody other than
 root, and it is deliberately the less convenient one.
 
+## From nothing to a working server
+
+The whole sequence, which is also in the [README](https://github.com/HusnuOkanCakir/homebase#building-the-server-start-to-finish):
+
+```sh
+# On your own machine
+homebasectl installer devices
+sudo homebasectl installer create --device /dev/sdX
+
+# Boot the laptop from it, wait, then
+ssh you@homebase.local
+sudo homebasectl setup okan            # prints a recovery code — write it down
+sudo homebasectl apps install jellyfin
+sudo homebasectl backup schedule daily backups
+sudo homebasectl update check
+```
+
 ## What it can do
 
 ```sh
+homebasectl setup NAME                      # the first administrator, once
 homebasectl system                          # version, uptime, memory, load, temperature
 homebasectl apps                            # what is installed
 homebasectl apps install jellyfin

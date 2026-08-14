@@ -141,6 +141,80 @@ func printJSON(w io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
+// --- First use ---------------------------------------------------------------------
+
+// setupCommand creates the first administrator.
+//
+// The one command here that needs no authentication, because there is nobody to
+// authenticate as yet: `/setup` is unauthenticated by design and refuses once an
+// account exists. It is also the one that hands back something that must be
+// written down — the recovery code, which is shown once and stored the way a
+// password is.
+func setupCommand(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
+	flags.SetOutput(stdout)
+	o := bind(flags)
+	username := flags.String("user", "", "the name for the administrator account")
+	if err := flags.Parse(args); err != nil {
+		return usageError{err}
+	}
+
+	name := *username
+	if name == "" && flags.NArg() == 1 {
+		name = flags.Arg(0)
+	}
+	if name == "" {
+		return usageError{errors.New(
+			"what should the administrator be called? — homebasectl setup NAME\n" +
+				"The password is read from HOMEBASE_PASSWORD, or asked for.")}
+	}
+
+	password := os.Getenv("HOMEBASE_PASSWORD")
+	if password == "" {
+		var err error
+		password, err = askForSecret("Choose a password: ")
+		if err != nil {
+			return err
+		}
+		again, err := askForSecret("Type it again: ")
+		if err != nil {
+			return err
+		}
+		if again != password {
+			return usageError{errors.New("those did not match")}
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	// No credentials, and none to be had: this runs before there is an account.
+	client := &Client{address: strings.TrimSuffix(o.address, "/"), http: insecureLocalClient()}
+
+	var result struct {
+		User struct {
+			Username string `json:"username"`
+		} `json:"user"`
+		RecoveryCode string `json:"recovery_code"`
+	}
+	if err := client.Post(ctx, "/setup",
+		map[string]any{"username": name, "password": password}, &result); err != nil {
+		return err
+	}
+
+	if o.asJSON {
+		return printJSON(stdout, result)
+	}
+
+	fmt.Fprintf(stdout, "The administrator %s has been created.\n\n", result.User.Username)
+	fmt.Fprintln(stdout, "Write this down and keep it somewhere other than this machine:")
+	fmt.Fprintf(stdout, "\n    %s\n\n", result.RecoveryCode)
+	fmt.Fprintln(stdout, "It is the way back in if the password is forgotten, it is shown")
+	fmt.Fprintln(stdout, "once, and it travels with your backups — so it still works on a")
+	fmt.Fprintln(stdout, "machine rebuilt from one.")
+	return nil
+}
+
 // --- Applications --------------------------------------------------------------
 
 // defaultTo picks the subcommand, treating a leading flag as "the default one".

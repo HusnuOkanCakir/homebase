@@ -87,6 +87,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	// Everything below is an ordinary API client, with the same permission
 	// checks, job records and events as the dashboard.
+	case "setup":
+		return setupCommand(args[1:], stdout)
 	case "system":
 		return systemCommand(args[1:], stdout)
 	case "apps":
@@ -115,6 +117,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 func usage(w io.Writer) {
 	fmt.Fprint(w, `homebasectl — Homebase from a terminal
+
+  homebasectl setup NAME
+        Create the first administrator, on a server that has none. The
+        password is read from HOMEBASE_PASSWORD or asked for. Prints a
+        recovery code, once — write it down.
 
   homebasectl system
         What this machine is: version, uptime, memory, load, temperature.

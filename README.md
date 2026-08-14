@@ -35,7 +35,123 @@ that already holds their photographs.
 >
 > See the [roadmap](ROADMAP.md).
 
-## Try it
+## Building the server, start to finish
+
+Eight commands, from a blank USB stick to a server running your media library, backing
+itself up every night and keeping itself patched.
+
+### 1. Write the stick
+
+On any Linux machine, with the USB drive plugged in:
+
+```sh
+homebasectl installer devices          # what it is allowed to write to, and why
+sudo homebasectl installer create --device /dev/sdX
+```
+
+`devices` refuses anything it should not touch — the disk this computer is running from,
+anything mounted, anything not removable — and says which rule stopped it. Ubuntu's ISO is
+downloaded and checked against its published signature; it is never repacked
+([ADR-0016](docs/decisions/0016-installation-media.md)).
+
+### 2. Install
+
+Plug the stick into the old laptop and boot from it. Ubuntu asks once whether to continue —
+that prompt is Ubuntu's own, and it does not say which disk it is about to erase, so be sure
+which machine you are at. Everything after it is unattended: partitioning, Ubuntu, Homebase,
+the firewall, the service accounts, the lid-close behaviour.
+
+It reboots into a screen showing the server's name and address. That takes about fifteen
+minutes and needs nothing typed.
+
+### 3. Find it
+
+```sh
+ssh you@homebase.local
+```
+
+The name comes from mDNS, so there is no IP address to hunt for and no DHCP reservation to
+make. If your network eats mDNS, the screen on the laptop shows the address instead.
+
+### 4. Create the administrator
+
+```sh
+sudo homebasectl setup okan
+```
+
+It asks for a password and prints a **recovery code**. Write that down somewhere other than
+the server. It is shown once, it is stored the way a password is, and it is the way back in
+if the password is ever forgotten — it also travels with your backups, so it still works on
+a machine rebuilt from one.
+
+### 5. Attach a disk
+
+Plug in the drive your files will live on:
+
+```sh
+sudo homebasectl storage disks         # what is plugged in
+```
+
+Formatting and attaching still needs the dashboard at `https://homebase.local` — those
+commands are the part of Milestone 10 not yet written, because "which disk do I erase" needs
+a confirmation designed for a shell rather than copied from a form.
+
+### 6. Install what you want to run
+
+```sh
+sudo homebasectl apps                  # the catalogue
+sudo homebasectl apps install jellyfin
+sudo homebasectl apps logs jellyfin
+```
+
+Jellyfin's data goes on the disk you attached, not the system disk. The container runs with
+every capability dropped, no new privileges, and its port bound to localhost.
+
+### 7. Turn on backups
+
+```sh
+sudo homebasectl backup schedule daily backups
+```
+
+Every night at about three, onto the disk called `backups`. If the machine is asleep at the
+time — a laptop in a cupboard usually is — it backs up when it next wakes. Run it with no
+arguments to see the schedule, whether systemd is actually running it, and how the last one
+went.
+
+```sh
+sudo homebasectl backup now backups    # and one right now
+```
+
+A backup is plain files with a JSON manifest, readable without Homebase, and it restores
+onto a *different* machine ([ADR-0014](docs/decisions/0014-backups-are-readable-without-homebase.md)).
+
+### 8. Keep it patched
+
+```sh
+sudo homebasectl update check
+sudo homebasectl update apply
+```
+
+It already checks daily on its own. Applying downloads and verifies everything first,
+snapshots the database, health-checks afterwards, and puts the previous version back if the
+check fails. Cutting the power mid-update leaves a machine that boots, says it was
+interrupted, and is put right by `sudo homebasectl repair`.
+
+### When something goes wrong
+
+```sh
+sudo homebasectl repair                # fix what a power cut left broken
+sudo homebasectl diagnostics           # a file safe to send to somebody
+```
+
+`diagnostics` prints what the file does *not* contain — no passwords, no recovery code,
+none of your files — because the question "is this safe to send?" is asked at the moment of
+sending.
+
+Full reference: [From a terminal](docs/user-guide/terminal.md). Everything above is also on
+the dashboard at `https://homebase.local`, if you would rather click.
+
+## Try it without a laptop
 
 Making the stick is one command on a Linux machine. See
 [Installing Homebase](docs/user-guide/installing.md) for the real thing.

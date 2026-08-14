@@ -88,23 +88,7 @@ func (e *APIError) Error() string {
 func connect(ctx context.Context, address, database string) (*Client, error) {
 	client := &Client{
 		address: strings.TrimSuffix(address, "/"),
-		http: &http.Client{
-			Timeout: 5 * time.Minute,
-			Transport: &http.Transport{
-				// The server's certificate is the self-signed one it generated
-				// for itself (ADR-0017), and this connection is to 127.0.0.1 on
-				// the same machine. There is no certificate authority that could
-				// vouch for it and no network for anybody to be in the middle
-				// of: the packets do not leave the host.
-				//
-				// This is the one place in Homebase that skips verification, and
-				// it is worth being explicit that it is not a shortcut for a
-				// remote client. Reaching a *different* machine from here would
-				// need the fingerprint checked, and there is no flag for it
-				// because there is no such command yet.
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-			},
-		},
+		http:    insecureLocalClient(),
 	}
 
 	if token := strings.TrimSpace(os.Getenv("HOMEBASE_TOKEN")); token != "" {
@@ -133,6 +117,26 @@ func connect(ctx context.Context, address, database string) (*Client, error) {
 	client.token = token
 	client.releaseSession = release
 	return client, nil
+}
+
+// insecureLocalClient talks to the server on this machine.
+//
+// The server's certificate is the self-signed one it generated for itself
+// (ADR-0017), and this connection is to 127.0.0.1 on the same machine. There is
+// no certificate authority that could vouch for it and no network for anybody to
+// be in the middle of: the packets do not leave the host.
+//
+// This is the one place in Homebase that skips verification, and it is worth
+// being explicit that it is not a shortcut for a remote client. Reaching a
+// *different* machine from here would need the fingerprint checked, and there is
+// no flag for it because there is no such command yet.
+func insecureLocalClient() *http.Client {
+	return &http.Client{
+		Timeout: 5 * time.Minute,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
+	}
 }
 
 // mintSession creates a session by reading the database directly.

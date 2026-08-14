@@ -739,10 +739,34 @@ def verify_factory_reset(vm: VM) -> None:
           f"the account that was on it cannot sign in ({status})",
           "A reset that leaves an account behind is worse than one that fails.")
 
-    # Set it up again, so the checks after this have a machine to run against.
-    status, body = api(vm, "/setup", "POST",
-                       json.dumps({"username": "okan", "password": PASSWORD}))
-    check(status == 201, f"and it can be set up from scratch again ({status})", body)
+    # Set it up again — from the terminal, which is the one place `homebasectl
+    # setup` can be tested honestly: it refuses once an account exists, so a
+    # freshly reset server is the only server it works on.
+    result = ssh(vm, ["sudo", "sh", "-c",
+                      f"HOMEBASE_PASSWORD='{PASSWORD}' homebasectl setup okan"],
+                 check=False)
+    check(result.returncode == 0,
+          f"and it can be set up again from a terminal ({result.returncode})",
+          (result.stdout + result.stderr)[-400:])
+
+    # The recovery code is shown once and must actually be shown, because there
+    # is no second chance to read it.
+    check("recovery" in result.stdout.lower() or "write" in result.stdout.lower(),
+          "which prints a recovery code to write down", result.stdout[:400])
+
+    # And the account it made really works.
+    status, _ = api(vm, "/auth/login", "POST",
+                    json.dumps({"username": "okan", "password": PASSWORD}))
+    check(status == 200, f"and the account signs in ({status})")
+
+    # Twice is refused: a second administrator created without credentials would
+    # be a way past every permission check on the machine.
+    again = ssh(vm, ["sudo", "sh", "-c",
+                     f"HOMEBASE_PASSWORD='{PASSWORD}' homebasectl setup someone-else"],
+                check=False)
+    check(again.returncode != 0,
+          f"and a second administrator is refused ({again.returncode})",
+          (again.stdout + again.stderr)[-300:])
 
 
 def verify_reboot(vm: VM) -> None:
