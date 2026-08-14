@@ -206,8 +206,9 @@ Before the installer ships, because real users start storing data immediately.
 - [x] Integrity verification, restore preview, failure reporting
 - [x] Password recovery, brought forward from Milestones 6 and 8 — backups made the gap
       worse rather than better
-- [ ] Scheduling — you have to press the button. Carried to Milestone 8 with the
-      update timers, which need the same machinery
+- [→] Scheduling — carried to Milestone 8 with the update timers, which needed the same
+      machinery. **Shipped there**: nightly or weekly, on a systemd timer that catches up a
+      run the machine was switched off for
 
 **Done when:** a clean machine restores another machine's backup and comes up with its apps,
 configuration and data. ✅
