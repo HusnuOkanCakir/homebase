@@ -420,6 +420,30 @@ Milestone 0 — contracts and project machinery. No product code.
   echo off. An argument is in the shell history and in `ps` output for every user on the
   machine for as long as the command runs
 
+- **Remote access, over self-hosted WireGuard**
+  ([ADR-0019](docs/decisions/0019-remote-access-is-self-hosted-wireguard.md)). No account, no
+  subscription, no coordination server — the first principle in the README is that nobody can
+  switch Homebase off or start charging for it, and that principle decides this one almost on
+  its own. `homebasectl vpn setup`, `add-device`, `remove-device`, with a QR code a phone can
+  scan
+- **A device's key is shown once and stored nowhere.** The server generates both halves — it
+  must, because a phone joins by scanning a code that has to contain the key — and keeps only
+  the public one. A lost configuration cannot be re-shown; remove the device and add it
+  again. Every comparable tool keeps them on the server, which is convenient until somebody
+  gets into the server and leaves with every device's identity
+- **Reachability is a completed handshake, not a probe.** "Is my router forwarding the port?"
+  cannot be answered from inside the house without asking somebody else's service. So it is
+  not asked: a handshake proves the name resolved, the router forwarded and the key was
+  accepted, with evidence rather than a guess
+- Only the house's traffic goes over the tunnel. A full tunnel would route a phone's entire
+  internet through a domestic upload link and a machine in a cupboard
+- Setting up again keeps the server's key and every device. Regenerating it would silently
+  invalidate everything already handed out, which somebody discovers on holiday
+- `make vm-test-vpn` (138s): two machines, one with no Homebase on it, which completes a
+  handshake, reaches the dashboard over the tunnel, and stops reaching it the moment its key
+  is removed. The private key it was handed is grepped for across `/etc`, `/var/lib` and the
+  audit log, and is in none of them
+
 ### Fixed
 
 Three bugs of the same shape, each shipped in the commit before the test that caught it, and

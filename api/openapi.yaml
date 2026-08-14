@@ -1468,6 +1468,179 @@ paths:
         "503":
           $ref: "#/components/responses/HostUnavailable"
 
+  /network/vpn:
+    get:
+      tags: [network]
+      summary: Whether this server can be reached from outside the house
+      description: |
+        Requires `network.diagnose`.
+
+        `ever_connected` is the reachability check, and it is evidence rather than a probe: a
+        completed handshake proves the name resolved, the router forwarded the port and the
+        key was accepted. Asking properly whether a port is forwarded means asking a service
+        outside the house, which is the dependency
+        [ADR-0019](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0019-remote-access-is-self-hosted-wireguard.md)
+        exists to avoid — so it is not asked.
+
+        No private key appears in this response, or in any other except the one that creates
+        a device.
+      operationId: getVPNStatus
+      responses:
+        "200":
+          description: What remote access is doing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VPNStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+    post:
+      tags: [network]
+      summary: Switch on remote access
+      description: |
+        Requires `network.modify`.
+
+        `hostname` is what devices will be told to connect to — a dynamic DNS name, or a fixed
+        address for a household that has one.
+
+        Run again on a server that already has devices, it changes the name and **keeps the
+        server's key and every peer**. Regenerating the key would silently invalidate every
+        device already handed out, which somebody discovers on holiday.
+
+        One thing is left that Homebase cannot do: forwarding the UDP port on the router.
+        UPnP would automate it and is a hole this project will not open on somebody's network.
+      operationId: setUpVPN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [hostname]
+              properties:
+                hostname:
+                  type: string
+                  maxLength: 253
+      responses:
+        "200":
+          description: Remote access is on
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VPNStatus"
+        "400":
+          description: Not a name a device could connect to
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /network/vpn/devices:
+    post:
+      tags: [network]
+      summary: Let one more device connect from outside
+      description: |
+        Requires `network.modify`.
+
+        **The response contains a private key, and it is the only chance to read it.** The
+        server generates both halves — it must, because a phone joins by scanning a QR code
+        and that code has to contain the key — and then stores only the public half.
+
+        A configuration that is lost cannot be re-shown. Remove the device and add it again.
+        That is a deliberate cost: every comparable tool keeps client configurations on the
+        server, which is convenient and means one compromise yields every device's identity.
+
+        The same "shown once" model as the recovery code at setup, for the same reason.
+      operationId: addVPNDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 31
+                  description: A label — "phone", "work laptop".
+      responses:
+        "201":
+          description: The device, and its configuration, once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NewVPNDevice"
+        "400":
+          description: Not a name Homebase can give a device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Remote access is not set up, or that name is taken
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /network/vpn/devices/remove:
+    post:
+      tags: [network]
+      summary: Stop a device connecting from outside
+      description: |
+        Requires `network.modify`. This is the remedy for a lost phone, so it asks once rather
+        than making somebody name the device twice in a hurry.
+
+        It cannot be undone in the sense that matters: adding the device again issues a *new*
+        key, and the old configuration stays dead.
+      operationId: removeVPNDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: The device can no longer connect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VPNStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: There is no device by that name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /system/diagnostics:
     post:
       tags: [system]
@@ -2168,6 +2341,90 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    VPNStatus:
+      type: object
+      additionalProperties: false
+      required: [configured, running, port, devices, ever_connected]
+      properties:
+        configured:
+          type: boolean
+        running:
+          type: boolean
+          description: |
+            Whether the interface is actually up. Separate from `configured` for the same
+            reason the backup schedule's `enabled` is: a configuration nothing is acting on
+            is the failure worth seeing.
+        hostname:
+          type: string
+        port:
+          type: integer
+          description: The UDP port that has to be forwarded on the router.
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/VPNDevice"
+        ever_connected:
+          type: boolean
+          description: |
+            Whether any device has ever completed a handshake. This is the reachability
+            check — evidence rather than a probe.
+        message:
+          type: string
+
+    VPNDevice:
+      type: object
+      additionalProperties: false
+      required: [name, address, public_key]
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+          description: Its address inside the VPN.
+        public_key:
+          type: string
+          description: |
+            The public half. The private half was shown once and is not stored, so it is not
+            here — it is nowhere.
+        last_handshake:
+          type: string
+          format: date-time
+        transfer_rx:
+          type: integer
+        transfer_tx:
+          type: integer
+
+    NewVPNDevice:
+      type: object
+      additionalProperties: false
+      required: [name, address, public_key, config, message]
+      description: |
+        A device and its configuration. **The only response in the API besides the recovery
+        code at setup that contains a private key**, and the only chance to read it.
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        public_key:
+          type: string
+        last_handshake:
+          type: string
+        transfer_rx:
+          type: integer
+        transfer_tx:
+          type: integer
+        config:
+          type: string
+          description: |
+            The whole client configuration, including the private key. Returned once, by the
+            call that created it, and stored nowhere.
+        qr_code:
+          type: string
+          description: The same configuration as a QR code, drawn with block characters.
+        message:
+          type: string
+
     WifiStatus:
       type: object
       additionalProperties: false

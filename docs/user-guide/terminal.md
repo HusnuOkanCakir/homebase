@@ -56,6 +56,10 @@ homebasectl update apply
 homebasectl network                         # how this server is connected
 homebasectl network wifi scan
 homebasectl network wifi join "Your Network"
+homebasectl vpn                             # who can reach this server from outside
+homebasectl vpn setup yours.duckdns.org
+homebasectl vpn add-device phone            # prints a QR code, once
+homebasectl vpn remove-device phone
 homebasectl repair                          # fix what a power cut left broken
 homebasectl diagnostics                     # a file safe to send to somebody
 ```

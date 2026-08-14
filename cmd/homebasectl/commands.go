@@ -956,3 +956,151 @@ func humanDuration(seconds int64) string {
 		return fmt.Sprintf("%d minutes", minutes)
 	}
 }
+
+// --- Remote access ------------------------------------------------------------------
+
+func vpnCommand(args []string, stdout io.Writer) error {
+	action, rest := defaultTo(args, "status")
+	switch action {
+	case "status", "list":
+		return withClient("vpn status", rest, stdout, vpnStatus)
+	case "setup":
+		return withClient("vpn setup", rest, stdout, vpnSetup)
+	case "add-device":
+		return withClient("vpn add-device", rest, stdout, vpnAddDevice)
+	case "remove-device":
+		return withClient("vpn remove-device", rest, stdout, vpnRemoveDevice)
+	default:
+		return usageError{fmt.Errorf("unknown vpn command %q — try status, setup, "+
+			"add-device or remove-device", action)}
+	}
+}
+
+type vpnStatusReply struct {
+	Configured bool   `json:"configured"`
+	Running    bool   `json:"running"`
+	Hostname   string `json:"hostname"`
+	Port       int    `json:"port"`
+	Devices    []struct {
+		Name          string `json:"name"`
+		Address       string `json:"address"`
+		LastHandshake string `json:"last_handshake"`
+	} `json:"devices"`
+	EverConnected bool   `json:"ever_connected"`
+	Message       string `json:"message"`
+}
+
+func vpnStatus(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
+	var status vpnStatusReply
+	if err := c.Get(ctx, "/network/vpn", &status); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printJSON(w, status)
+	}
+
+	if !status.Configured {
+		fmt.Fprintln(w, status.Message)
+		return nil
+	}
+
+	fmt.Fprintf(w, "Reachable at: %s:%d\n", status.Hostname, status.Port)
+	fmt.Fprintf(w, "Running:      %v\n", status.Running)
+
+	if len(status.Devices) > 0 {
+		fmt.Fprintln(w)
+		rows := [][]string{{"DEVICE", "ADDRESS", "LAST CONNECTED"}}
+		for _, device := range status.Devices {
+			when := device.LastHandshake
+			if when == "" {
+				when = "never"
+			}
+			rows = append(rows, []string{device.Name, device.Address, when})
+		}
+		writeTable(w, rows)
+	}
+
+	if status.Message != "" {
+		fmt.Fprintf(w, "\n%s\n", status.Message)
+	}
+	return nil
+}
+
+func vpnSetup(ctx context.Context, c *Client, o *options, rest []string, w io.Writer) error {
+	if len(rest) != 1 {
+		return usageError{errors.New(
+			"what name will devices connect to? — homebasectl vpn setup NAME\n" +
+				"A dynamic DNS name like yours.duckdns.org, or a fixed address.")}
+	}
+
+	var status vpnStatusReply
+	if err := c.Post(ctx, "/network/vpn", map[string]any{"hostname": rest[0]}, &status); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printJSON(w, status)
+	}
+
+	fmt.Fprintf(w, "Remote access is on, at %s:%d.\n\n", status.Hostname, status.Port)
+	// The part that cannot be automated, said plainly rather than left to be
+	// discovered when the first device fails to connect.
+	fmt.Fprintf(w, "One thing is left, and Homebase cannot do it: forward UDP port %d\n",
+		status.Port)
+	fmt.Fprintln(w, "on your router to this server. Look for \"port forwarding\" in its")
+	fmt.Fprintln(w, "settings.")
+	fmt.Fprintln(w, "\nThen add a device:\n\n    sudo homebasectl vpn add-device phone")
+	return nil
+}
+
+// vpnAddDevice prints a key that is never stored and cannot be shown again.
+func vpnAddDevice(ctx context.Context, c *Client, o *options, rest []string, w io.Writer) error {
+	if len(rest) != 1 {
+		return usageError{errors.New(
+			"what should the device be called? — homebasectl vpn add-device NAME")}
+	}
+
+	var device struct {
+		Name    string `json:"name"`
+		Address string `json:"address"`
+		Config  string `json:"config"`
+		QRCode  string `json:"qr_code"`
+		Message string `json:"message"`
+	}
+	if err := c.Post(ctx, "/network/vpn/devices",
+		map[string]any{"name": rest[0]}, &device); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printJSON(w, device)
+	}
+
+	fmt.Fprintf(w, "%s — %s\n\n", device.Name, device.Address)
+	if device.QRCode != "" {
+		fmt.Fprintln(w, device.QRCode)
+		fmt.Fprintln(w, "Scan that with the WireGuard app on a phone.")
+		fmt.Fprintln(w, "\nOr save this as a file and import it:")
+	} else {
+		fmt.Fprintln(w, "Save this as a .conf file and import it into WireGuard:")
+	}
+	fmt.Fprintf(w, "\n%s\n", device.Config)
+	fmt.Fprintf(w, "%s\n", device.Message)
+	return nil
+}
+
+func vpnRemoveDevice(ctx context.Context, c *Client, o *options, rest []string, w io.Writer) error {
+	if len(rest) != 1 {
+		return usageError{errors.New(
+			"which device? — homebasectl vpn remove-device NAME")}
+	}
+
+	var status vpnStatusReply
+	if err := c.Post(ctx, "/network/vpn/devices/remove",
+		map[string]any{"name": rest[0]}, &status); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printJSON(w, status)
+	}
+	fmt.Fprintf(w, "%s can no longer reach this server from outside.\n", rest[0])
+	return nil
+}

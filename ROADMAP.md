@@ -648,22 +648,64 @@ subcommand, although the help had always listed them under "Options" as though t
 global: `--address` first exited 2 as an unknown command. A documented flag that is refused
 is worse than one that does not exist.
 
-### Milestone 11 — Reachable from anywhere
+### Milestone 11 — Reachable from anywhere — in progress
 
 The half a home server is actually for. Everything so far assumes the same house.
 
-- [ ] [ADR-0019] — remote access is **self-hosted Wireguard**, not an overlay network
-      somebody else operates
-- [ ] `homebasectl vpn setup`, `vpn add-device`, `vpn list`, `vpn remove` — with a QR code
-      for a phone, because typing a Wireguard key by hand is nobody's evening
+- [x] [ADR-0019](docs/decisions/0019-remote-access-is-self-hosted-wireguard.md) — remote
+      access is **self-hosted Wireguard**, not an overlay network somebody else operates
+- [x] `homebasectl vpn setup`, `add-device`, `remove-device`, `status` — with a QR code for a
+      phone, because typing a Wireguard key by hand is nobody's evening
+- [x] A clear account of what has to be done on the router, said at the moment of setting up
+      rather than left to be discovered when the first device fails to connect
 - [ ] Dynamic DNS, so a home connection whose address changes stays reachable
 - [ ] Wake-on-LAN: `homebasectl wake`, and the server configured to be woken
-- [ ] A clear account of what has to be done on the router, since that part cannot be
-      automated and pretending otherwise helps nobody
+- [ ] A screen for it on the dashboard
 
 **Done when:** a device outside the house reaches the server by name, over Wireguard, with
-no third-party account involved — proven in the VM lab with two machines on separate
-segments, one standing in for the internet.
+no third-party account involved. **The tunnel half is done** — `make vm-test-vpn` (138s), two
+machines, one of which has no Homebase on it and knows nothing about the server except the
+configuration it was handed. It completes a handshake, reaches the dashboard over the tunnel,
+and stops reaching it the moment its key is taken away.
+
+What is left is the two things around it: a name that follows a changing home address, and
+waking a machine that has gone to sleep.
+
+#### The key is shown once and stored nowhere
+
+The server generates both halves — it has to, because a phone joins by scanning a QR code
+and that code must contain the key — and then keeps only the public one. A configuration that
+is lost cannot be re-shown; the device is removed and added again.
+
+Every comparable tool keeps client configurations on the server, which is convenient right
+up to the day somebody gets into the server and leaves with every device's identity. This is
+the second time the project has chosen "shown once" over "stored for convenience", after the
+recovery code in [ADR-0015](docs/decisions/0015-password-recovery.md).
+
+The VM test checks it by grepping the whole of `/etc` and `/var/lib` for the private key it
+was handed, and the audit log as well.
+
+#### Reachability is a handshake, not a probe
+
+"Is my router forwarding the port?" cannot be answered from inside the house. Answering it
+properly means asking a service on the outside to try — which is the dependency this whole
+record exists to avoid.
+
+So Homebase does not ask. It reports whether any device has ever completed a handshake, which
+proves the same thing with evidence: the name resolved, the router forwarded, the key was
+accepted. Until then it says nothing has connected yet and that the port is the likely
+reason.
+
+#### What the lab cannot simulate
+
+Both machines are on one segment, standing in for a correctly forwarded port. The router is
+not simulated and neither is carrier-grade NAT, which is the case where this design simply
+does not work and the documentation says so.
+
+The first run failed at the handshake, and the reason is worth recording: the test picked the
+server's *Docker bridge* address, 172.17.0.1, because the shared segment has no DHCP and
+nothing had assigned an address on it. WireGuard was working perfectly and the endpoint was a
+network the other machine could not reach.
 
 **Wireguard rather than Tailscale**, and the trade is worth stating plainly. Wireguard needs
 a forwarded UDP port and therefore a router somebody can configure, and it does not work

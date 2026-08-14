@@ -77,6 +77,16 @@ EXPECTED = {
     "network.wifi_forget": ("medium", "required"),
     "network.wifi_scan": ("read", "none"),
     "network.wifi_status": ("read", "none"),
+
+    # Remote access. Adding a device is high because of what it *returns* rather
+    # than what it changes: a key to the house's network, shown once, usable from
+    # anywhere in the world by whoever holds it. Removing one is only medium and
+    # asks once — it is the remedy for a lost phone, and a remedy that is hard to
+    # reach in a hurry is not one.
+    "vpn.setup": ("high", "explicit"),
+    "vpn.add_device": ("high", "required"),
+    "vpn.remove_device": ("medium", "required"),
+    "vpn.status": ("read", "none"),
     # Backup. restore is the third operation that destroys data irreversibly,
     # and the only one where what it overwrites is usually what somebody is
     # trying to save. preview must stay read-only: it is what a user is shown

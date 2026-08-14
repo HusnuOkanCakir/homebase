@@ -101,6 +101,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return updateCommand(args[1:], stdout)
 	case "network":
 		return networkCommand(args[1:], stdout)
+	case "vpn":
+		return vpnCommand(args[1:], stdout)
 	case "repair":
 		return repairCommand(args[1:], stdout)
 	case "diagnostics":
@@ -153,6 +155,14 @@ func usage(w io.Writer) {
         How this server is connected. The Wi-Fi password is read from
         HOMEBASE_WIFI_PASSWORD or asked for — never passed as an argument,
         because arguments are visible in ps and in shell history.
+
+  homebasectl vpn [status]
+  homebasectl vpn setup yours.duckdns.org
+  homebasectl vpn add-device phone
+  homebasectl vpn remove-device phone
+        Reaching this server from outside the house, over WireGuard. Adding
+        a device prints its configuration and a QR code — once. It is stored
+        nowhere, so if it is lost, remove the device and add it again.
 
   homebasectl repair
         Check a short list of things that are often wrong and put right what

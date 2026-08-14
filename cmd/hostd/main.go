@@ -72,6 +72,10 @@ func main() {
 	// can change how the machine is reached, and keeping it apart from the
 	// read-only network operations makes that visible in one place.
 	hostd.RegisterWifiOperations(registry, network)
+
+	// Remote access. The only surface that decides who can reach this
+	// machine from outside the house — see ADR-0019.
+	hostd.RegisterVPNOperations(registry, network)
 	updates := hostd.NewUpdateServices()
 	hostd.RegisterUpdateOperations(registry, updates)
 
