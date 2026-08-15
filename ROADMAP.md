@@ -962,6 +962,35 @@ The lesson is not any one of these. It is that **the distance between "verified
 working" and "a person can use it" was seven bugs wide**, and every one of them
 was found in under an hour by somebody trying to do a real thing.
 
+#### Heat, on a machine chosen for being disposable
+
+Milestone 9 is about hardware, and the hardware turned out to have something to
+say. The first real laptop throttles: sustained load takes it to 86 °C against an
+84 °C limit, while its own fan controller stops at two thirds and lets the
+processor slow down rather than make noise. That is the right trade for a laptop
+on a desk and the wrong one for a server transcoding a film in a cupboard.
+
+Homebase reports the fan now — speed, how hard it is driven, and **who is driving
+it**, which is the field that matters. A fan somebody pinned years ago and a fan
+working correctly on a hot machine sound identical from a doorway, and one is
+fixed in seconds while the other needs a heatsink cleaning.
+
+It does not *control* the fan, and that is a decision rather than a gap. On a
+machine already at 89 °C with the fan still climbing, a manual setting is a way
+to cook a computer that is struggling — and the `asus_wmi` driver refuses to
+report a speed at all while under manual control, so it cannot even say what was
+done. Worse, testing it found that the setting is not cleanly reversible: writing
+the mode back to automatic did not restore the curve, and neither did reloading
+the driver. It took a reboot.
+
+- [x] Temperature and fan recorded every five minutes, to a plain CSV
+- [x] `homebasectl system history`, with a chart that works over ssh
+- [x] The same chart on the dashboard, drawn as inline SVG — a charting library
+      would be the largest dependency in the product, for its simplest picture
+- [ ] A boost mode: raising a fan is always safe and on this machine would stop
+      the throttling, which is the opposite of what fan-control tools are usually
+      for. It needs a temperature watchdog that hands control back on its own
+
 ### Milestone 13 — A catalogue worth having
 
 Three applications, one of which exists only to prove installation works, is a

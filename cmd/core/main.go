@@ -180,6 +180,13 @@ func run(log *slog.Logger, opts runOptions) error {
 	// somebody who thinks to look.
 	go api.NewSpaceWatcher(host, eventRecorder).Watch(ctx)
 
+	// Record how hot the machine has been, and how hard its fan has worked.
+	//
+	// One reading tells you almost nothing — 58 °C is fine, or it is the start
+	// of an afternoon that ends in thermal shutdown, and the difference is
+	// entirely in what the last week looked like.
+	go api.NewThermalLog(host, log, api.DefaultThermalLogPath).Watch(ctx)
+
 	// Forget rate-limit buckets nobody has used lately, so a machine being
 	// sprayed with requests from many addresses does not accumulate one entry
 	// per address for as long as it stays up.

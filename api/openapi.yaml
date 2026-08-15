@@ -107,6 +107,78 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /system/history:
+    get:
+      tags: [system]
+      summary: How hot this machine has been, and how hard its fan has worked
+      description: |
+        Requires `system.read`. A reading every five minutes, kept in a plain CSV at
+        `/var/log/homebase/thermal.csv`.
+
+        **The file is the record, not a table in the database.** The same reasoning as
+        backups being plain files: a record about a machine that can only be read by
+        software running on that machine is worth much less than one somebody can open in a
+        spreadsheet or grep from an ssh session. It also means this endpoint keeps working
+        while the database is being restored, which is one of the times somebody most wants
+        to know what the machine was doing.
+
+        One reading tells you almost nothing — 58 °C is fine, or it is the start of an
+        afternoon that ends in thermal shutdown. Every question worth asking is a
+        comparison, which is why this exists at all.
+      operationId: getSystemHistory
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 365, default: 7 }
+          description: How far back to look.
+        - name: points
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 5000, default: 500 }
+          description: |
+            Most readings to return. The series is **thinned, not truncated** — keeping the
+            most recent N would answer "the last six hours" to somebody who asked about the
+            last month.
+      responses:
+        "200":
+          description: The readings, and what they add up to
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [samples, recording]
+                properties:
+                  samples:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        time: { type: string, format: date-time }
+                        celsius: { type: [integer, "null"] }
+                        fan_rpm: { type: [integer, "null"] }
+                        fan_percent: { type: [integer, "null"] }
+                        state: { type: string }
+                        fan_control: { type: string }
+                        load: { type: number }
+                  hottest_celsius: { type: [integer, "null"] }
+                  coolest_celsius: { type: [integer, "null"] }
+                  average_celsius: { type: [integer, "null"] }
+                  loudest_rpm: { type: [integer, "null"] }
+                  quietest_rpm: { type: [integer, "null"] }
+                  since:
+                    type: string
+                    description: The oldest reading returned, so a caller can say what
+                      period the summary covers rather than implying it covers everything.
+                  recording:
+                    type: boolean
+                    description: |
+                      Whether readings are being taken at all. An empty history on a newly
+                      installed machine and an empty history because the recorder is broken
+                      look identical, and only one needs anybody to do something.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /system/reboot:
     post:
       tags: [system]

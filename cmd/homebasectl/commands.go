@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -1281,7 +1282,209 @@ func joinWifi(ctx context.Context, c *Client, o *options, rest []string, w io.Wr
 
 // --- System -----------------------------------------------------------------------
 
+// systemHistory shows how hot the machine has been, as a chart.
+//
+// A chart in a terminal rather than a table of numbers, because every question
+// worth asking here is about shape: is it hotter than it was, does it climb
+// whenever something transcodes, did cleaning the fan help. A column of two
+// thousand readings answers none of those and a line does.
+func systemHistory(ctx context.Context, c *Client, o *options, args []string, w io.Writer) error {
+	days := 7
+	if len(args) > 0 {
+		parsed, err := strconv.Atoi(args[0])
+		if err != nil || parsed < 1 || parsed > 365 {
+			return usageError{fmt.Errorf("how many days? — homebasectl system history 7")}
+		}
+		days = parsed
+	}
+
+	var history struct {
+		Samples []struct {
+			Time    string `json:"time"`
+			Celsius *int   `json:"celsius"`
+			FanRPM  *int   `json:"fan_rpm"`
+		} `json:"samples"`
+		Hottest   *int   `json:"hottest_celsius"`
+		Coolest   *int   `json:"coolest_celsius"`
+		Average   *int   `json:"average_celsius"`
+		Loudest   *int   `json:"loudest_rpm"`
+		Quietest  *int   `json:"quietest_rpm"`
+		Since     string `json:"since"`
+		Recording bool   `json:"recording"`
+	}
+	if err := c.Get(ctx, fmt.Sprintf("/system/history?days=%d&points=240", days), &history); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, history)
+	}
+
+	if len(history.Samples) == 0 {
+		// The two empty cases are different and only one needs doing something
+		// about, so they are not given the same sentence.
+		if history.Recording {
+			fmt.Fprintf(w, "Nothing recorded in the last %d days.\n", days)
+			fmt.Fprintln(w, "\nThe server was probably switched off. Readings are taken "+
+				"every five minutes\nwhile it is running.")
+			return nil
+		}
+		fmt.Fprintln(w, "No readings have been recorded yet.")
+		fmt.Fprintln(w, "\nThe first one is taken when the server starts, so this "+
+			"clears within a\nfew minutes of a restart.")
+		return nil
+	}
+
+	temperatures := make([]float64, 0, len(history.Samples))
+	speeds := make([]float64, 0, len(history.Samples))
+	for _, sample := range history.Samples {
+		if sample.Celsius != nil {
+			temperatures = append(temperatures, float64(*sample.Celsius))
+		}
+		if sample.FanRPM != nil {
+			speeds = append(speeds, float64(*sample.FanRPM))
+		}
+	}
+
+	fmt.Fprintf(w, "The last %d days — %d readings since %s\n\n",
+		days, len(history.Samples), shortTime(history.Since))
+
+	// A chart of three readings is a picture of nothing. Said plainly rather
+	// than drawn, because a wall of solid blocks looks like data.
+	if len(history.Samples) < 6 {
+		fmt.Fprintf(w, "Not enough readings yet to draw a chart — one is taken "+
+			"every five minutes.\n\n")
+		for _, sample := range history.Samples {
+			fmt.Fprintf(w, "  %s  ", shortTime(sample.Time))
+			if sample.Celsius != nil {
+				fmt.Fprintf(w, "%d °C", *sample.Celsius)
+			}
+			if sample.FanRPM != nil {
+				fmt.Fprintf(w, "  %d rpm", *sample.FanRPM)
+			}
+			fmt.Fprintln(w)
+		}
+		return nil
+	}
+
+	if len(temperatures) > 0 {
+		fmt.Fprintln(w, "Temperature")
+		drawChart(w, temperatures, "°C")
+		fmt.Fprintf(w, "  hottest %d °C, coolest %d °C, average %d °C\n\n",
+			valueOr(history.Hottest), valueOr(history.Coolest), valueOr(history.Average))
+	}
+	if len(speeds) > 0 {
+		fmt.Fprintln(w, "Fan")
+		drawChart(w, speeds, "rpm")
+		fmt.Fprintf(w, "  loudest %d rpm, quietest %d rpm\n\n",
+			valueOr(history.Loudest), valueOr(history.Quietest))
+	}
+
+	fmt.Fprintln(w, "The full record is a plain CSV, for anything a chart in a terminal")
+	fmt.Fprintln(w, "cannot answer:")
+	fmt.Fprintln(w, "\n    /var/log/homebase/thermal.csv")
+	return nil
+}
+
+func valueOr(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func shortTime(stamp string) string {
+	when, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return stamp
+	}
+	return when.Local().Format("2 Jan 15:04")
+}
+
+// drawChart plots a series with block characters.
+//
+// Eight rows and Unicode blocks rather than a sparkline, because the thing being
+// looked for is usually a slow climb over days, and one row of sparkline cannot
+// show a five-degree drift that matters. Width is fixed at 72 so it survives an
+// ssh session in a small window, which is where a server is usually talked to.
+func drawChart(w io.Writer, values []float64, unit string) {
+	const width, height = 72, 8
+	if len(values) == 0 {
+		return
+	}
+
+	low, high := values[0], values[0]
+	for _, value := range values {
+		low = min(low, value)
+		high = max(high, value)
+	}
+	// A flat series has no range to scale against. Centred rather than given a
+	// range above it, or a machine that has been perfectly steady draws as a
+	// line along the floor — which reads as "it stopped" rather than
+	// "it did not change".
+	if high-low < 1 {
+		low -= 0.5
+		high += 0.5
+	}
+
+	// Averaged into columns rather than sampled, so a single spike in a week of
+	// readings cannot vanish between two chosen points.
+	columns := make([]float64, width)
+	for i := range columns {
+		start := i * len(values) / width
+		end := (i + 1) * len(values) / width
+		if end <= start {
+			end = start + 1
+		}
+		var total float64
+		var count int
+		for j := start; j < end && j < len(values); j++ {
+			total += values[j]
+			count++
+		}
+		if count > 0 {
+			columns[i] = total / float64(count)
+		} else {
+			columns[i] = low
+		}
+	}
+
+	blocks := []rune(" ▁▂▃▄▅▆▇█")
+	for row := height - 1; row >= 0; row-- {
+		// The axis label on the top and bottom rows only. A number against
+		// every row is noise on a chart this short.
+		label := "     "
+		switch row {
+		case height - 1:
+			label = fmt.Sprintf("%4.0f ", high)
+		case 0:
+			label = fmt.Sprintf("%4.0f ", low)
+		}
+		fmt.Fprint(w, label)
+
+		for _, value := range columns {
+			// How far into this row the value reaches, as eighths.
+			scaled := (value - low) / (high - low) * float64(height)
+			within := scaled - float64(row)
+			switch {
+			case within >= 1:
+				fmt.Fprint(w, string(blocks[8]))
+			case within <= 0:
+				fmt.Fprint(w, " ")
+			default:
+				fmt.Fprint(w, string(blocks[int(within*8)+1]))
+			}
+		}
+		if row == height-1 {
+			fmt.Fprint(w, " "+unit)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
 func systemCommand(args []string, stdout io.Writer) error {
+	if len(args) > 0 && args[0] == "history" {
+		return withClient("system history", args[1:], stdout, systemHistory)
+	}
 	return withClient("system", args, stdout,
 		func(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
 			var info struct {

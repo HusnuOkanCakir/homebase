@@ -140,6 +140,7 @@ func usage(w io.Writer) {
         The application catalogue, and what is installed from it.
 
   homebasectl apps storage APP [SLOT DISK]
+  homebasectl system history [DAYS]
   homebasectl share [status]
   homebasectl share add NAME DISK
   homebasectl share password NAME

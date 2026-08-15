@@ -44,6 +44,16 @@ type Server struct {
 	version   string
 	started   time.Time
 	static    http.Handler
+
+	// thermalPath overrides where the temperature record is read from, so tests
+	// do not need a directory only root can create.
+	thermalPath string
+}
+
+// WithThermalLog points the history endpoint at a particular file.
+func (s *Server) WithThermalLog(path string) *Server {
+	s.thermalPath = path
+	return s
 }
 
 func NewServer(a *auth.Service, j *jobs.Manager, h *hostclient.Client, e *events.Recorder, log *slog.Logger, version string) *Server {
@@ -83,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/auth/recovery-code", s.authenticated(s.handleReissueRecoveryCode))
 
 	mux.Handle("GET /api/v1/system", s.require(auth.PermSystemRead, s.handleSystem))
+	mux.Handle("GET /api/v1/system/history", s.require(auth.PermSystemRead, s.handleSystemHistory))
 	mux.Handle("POST /api/v1/system/reboot", s.require(auth.PermSystemManage, s.handleReboot))
 	mux.Handle("POST /api/v1/system/name", s.require(auth.PermSystemManage, s.handleRename))
 
@@ -417,6 +428,47 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.Us
 		// heatsink full of dust, and they sound the same from across a room.
 		"fan": resources.Fan,
 	})
+}
+
+// handleSystemHistory returns how hot the machine has been.
+//
+// Read from the file rather than from a table, because the file is the record —
+// see internal/api/thermallog.go. It means this endpoint keeps working when the
+// database is being restored, which is one of the times somebody most wants to
+// know what the machine was doing.
+func (s *Server) handleSystemHistory(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+	// Days rather than an arbitrary count, because the question is always about
+	// a period: "the last week" is answerable and "the last two hundred
+	// readings" is not.
+	days := 7
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 365 {
+			days = parsed
+		}
+	}
+
+	// A cap on points rather than on time. A month at five-minute intervals is
+	// nine thousand readings, which is more than any chart can draw and more
+	// than any browser should be asked to parse — and thinning keeps the shape,
+	// which is the whole of what a chart is for.
+	points := 500
+	if raw := r.URL.Query().Get("points"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 5000 {
+			points = parsed
+		}
+	}
+
+	history := readThermalHistory(s.thermalLogPath(), time.Duration(days)*24*time.Hour, points)
+	writeJSON(w, http.StatusOK, history)
+}
+
+// thermalLogPath is where the record is, overridable so tests do not need a
+// directory only root can create.
+func (s *Server) thermalLogPath() string {
+	if s.thermalPath != "" {
+		return s.thermalPath
+	}
+	return DefaultThermalLogPath
 }
 
 // handleRename changes what the machine calls itself.

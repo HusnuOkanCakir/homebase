@@ -678,3 +678,54 @@ ul.plain {
 ul.plain li {
   padding: 0.35rem 0;
 }
+
+/* The temperature and fan charts.
+
+   Inline SVG and no charting library: the dashboard has a bundle-size gate and
+   no UI framework by choice, so importing three hundred kilobytes to draw a
+   polyline would be the largest dependency in the product for its simplest
+   picture. */
+.chart {
+  margin: 0 0 1rem;
+}
+
+.chart figcaption {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-area {
+  fill: var(--accent);
+  opacity: 0.12;
+  stroke: none;
+}
+
+.chart-tick {
+  font-size: 9px;
+  fill: var(--muted);
+}
+
+.row-spread {
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}

@@ -269,6 +269,49 @@ export interface SystemInfo {
     /** Only set when something is worth telling somebody. */
     message?: string;
   };
+  /**
+   * What the cooling is doing, and who is deciding.
+   *
+   * Only meaningful beside the temperature: loud and cool is a fan fault, loud
+   * and hot is a heatsink full of dust, and from across a room they are the
+   * same sound. `rpm: null` is a machine with no sensor — never zero, which
+   * would read as a seized fan.
+   */
+  fan: {
+    rpm: number | null;
+    percent: number | null;
+    label?: string;
+    controlled?: "firmware" | "manual" | "full";
+    message?: string;
+  };
+}
+
+/** One reading from the record. */
+export interface ThermalSample {
+  time: string;
+  celsius: number | null;
+  fan_rpm: number | null;
+  fan_percent: number | null;
+  state?: string;
+  load?: number;
+}
+
+export interface ThermalHistory {
+  samples: ThermalSample[];
+  hottest_celsius: number | null;
+  coolest_celsius: number | null;
+  average_celsius: number | null;
+  loudest_rpm: number | null;
+  quietest_rpm: number | null;
+  since?: string;
+  /**
+   * Whether readings are being taken at all.
+   *
+   * An empty history on a newly installed machine and an empty history because
+   * the recorder is broken look identical, and only one of them needs anybody
+   * to do something.
+   */
+  recording: boolean;
 }
 
 export type JobState =
@@ -643,6 +686,17 @@ export const api = {
   me: () => get<User>("/auth/me"),
 
   system: () => get<SystemInfo>("/system"),
+
+  /**
+   * How hot the machine has been, and how hard its fan has worked.
+   *
+   * `points` is capped because a month at five-minute intervals is nine
+   * thousand readings — more than a chart this size can draw and more than a
+   * browser should be asked to parse. The server thins rather than truncates,
+   * so the shape survives.
+   */
+  systemHistory: (days = 7, points = 200) =>
+    get<ThermalHistory>(`/system/history?days=${days}&points=${points}`),
 
   /**
    * How the server is connected. Slower than most reads, because deciding

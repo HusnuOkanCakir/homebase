@@ -483,6 +483,18 @@ and Windows on it:
 - **The system disk was reported as mounted at `/var/tmp`**, because the mount
   table kept whichever entry came last and `PrivateTmp=yes` on hostd's unit gives
   it a private `/var/tmp` on the root device
+- **The fan is reported, and so is who is driving it.** A loud laptop has two
+  completely different problems behind it — a fan somebody pinned, or a heatsink
+  full of dust — and from across a room they are the same sound. Reporting only:
+  on the first real laptop, full load reached 89 °C with the fan still climbing,
+  past the 84 °C its processor throttles at, and a manual setting on a machine
+  like that is a way to cook one that is already struggling
+- **A record of how hot it has been**, sampled every five minutes into a plain
+  CSV at `/var/log/homebase/thermal.csv`, with `homebasectl system history` and a
+  chart on the dashboard. One reading tells you almost nothing: 58 °C is fine, or
+  it is the start of an afternoon that ends in thermal shutdown, and the
+  difference is entirely in what the last week looked like
+
 Five more found by watching one person try to use it, which is a different
 activity from testing it:
 
