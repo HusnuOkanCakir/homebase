@@ -805,26 +805,7 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 		config.Env = append(config.Env, key+"="+value)
 	}
 
-	// Membership of the service group, for an application that has been given a
-	// folder somebody else also writes into.
-	//
-	// User-selected storage belongs to the group rather than to the application,
-	// so that the file server and the backup can reach it too. Without this the
-	// container is a lone uid with no groups and cannot open any of it — which
-	// is how pointing Jellyfin at a shared folder produced a media server that
-	// could see the directory and nothing inside it.
-	//
-	// Only when there is such a folder. An application with private storage
-	// only stays a uid of its own with no group at all.
-	for _, storage := range manifest.Storage {
-		if storage.Type != "user-selected" {
-			continue
-		}
-		if gid, err := serviceGroupID(); err == nil {
-			config.HostConfig.GroupAdd = []string{strconv.Itoa(gid)}
-		}
-		break
-	}
+	config.HostConfig.GroupAdd = supplementaryGroups(manifest)
 
 	if manifest.Network.InternalPort > 0 && !manifest.Network.HostNetwork {
 		port := fmt.Sprintf("%d/tcp", manifest.Network.InternalPort)
@@ -892,6 +873,62 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 	}
 
 	return config
+}
+
+// supplementaryGroups are the host groups an application's process joins.
+//
+// A container runs as a uid of its own with no groups at all, which is the right
+// default and is why this exists: everything it is allowed to reach beyond its
+// own files is reachable only through group membership, and each one below is
+// there because without it a declared permission did nothing.
+//
+// Nothing is added that the manifest did not already ask for. This grants access
+// to what a manifest declares; it does not decide what may be declared.
+func supplementaryGroups(manifest Manifest) []string {
+	var gids []string
+	add := func(name string) {
+		group, err := user.LookupGroup(name)
+		if err != nil {
+			return
+		}
+		for _, existing := range gids {
+			if existing == group.Gid {
+				return
+			}
+		}
+		gids = append(gids, group.Gid)
+	}
+
+	// The service group, for an application given a folder somebody else also
+	// writes into. User-selected storage belongs to the group rather than to the
+	// application, so the file server and the backup can reach it too — without
+	// this, pointing Jellyfin at a shared folder produced a media server that
+	// could see the directory and nothing inside it.
+	for _, storage := range manifest.Storage {
+		if storage.Type == "user-selected" {
+			add(serviceAccount)
+			break
+		}
+	}
+
+	// The groups that own the device nodes.
+	//
+	// Passing /dev/dri through is not the same as being able to open it: the
+	// render nodes are root:render and the cards are root:video, and a container
+	// that is a member of neither gets "Failed to open the given device" from
+	// every one of them. Jellyfin declared the device, was given the device, and
+	// could not use it — hardware transcoding was impossible on every
+	// installation, silently, with the manifest saying it was available.
+	for _, device := range manifest.Permissions.Devices {
+		switch device {
+		case "dri":
+			add("render")
+			add("video")
+		case "dvb":
+			add("video")
+		}
+	}
+	return gids
 }
 
 // deviceePaths maps the schema's device roles to host paths. A manifest declares

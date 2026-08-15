@@ -6,7 +6,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -679,3 +681,61 @@ func TestADeviceThatExistsIsPassedThrough(t *testing.T) {
 // testOwner is whoever is running the tests. These run unprivileged, so the only
 // ownership a chown can succeed in setting is the one the files already have.
 func testOwner() owner { return owner{uid: os.Getuid(), gid: os.Getgid()} }
+
+// --- Supplementary groups -------------------------------------------------------
+
+// Passing a device through is not the same as being able to open it. The render
+// nodes are root:render and the cards are root:video; a container that is a
+// member of neither is refused by all of them.
+//
+// Jellyfin declared /dev/dri, was given /dev/dri, and could not open it —
+// hardware transcoding was impossible on every installation while the manifest
+// said it was available. Nothing failed: ffmpeg fell back to the processor and
+// the only symptom was a hot laptop.
+func TestAnApplicationGivenADeviceCanOpenIt(t *testing.T) {
+	// The groups exist on any Linux with a modern udev, which is every machine
+	// Homebase installs on. Skipped rather than failed where they do not, so
+	// this does not break on a container image without them.
+	if _, err := user.LookupGroup("render"); err != nil {
+		t.Skip("no render group on this machine")
+	}
+	render, _ := user.LookupGroup("render")
+
+	groups := supplementaryGroups(Manifest{
+		Permissions: ManifestPermissions{Devices: []string{"dri"}},
+	})
+	if !slices.Contains(groups, render.Gid) {
+		t.Errorf("an application given /dev/dri joins %v, which does not include "+
+			"the render group (%s) that owns the node", groups, render.Gid)
+	}
+}
+
+// Nothing is granted that a manifest did not ask for. This decides what access
+// a declared permission actually confers; it is not a place where permissions
+// are invented.
+func TestAnApplicationThatAsksForNothingGetsNoGroups(t *testing.T) {
+	groups := supplementaryGroups(Manifest{
+		Storage: []ManifestStorage{{ID: "config", Type: "private"}},
+	})
+	if len(groups) != 0 {
+		t.Errorf("an application with private storage and no devices joined %v", groups)
+	}
+}
+
+// User-selected storage is shared with whoever else writes into it — the file
+// server, the backup — so it belongs to the service group rather than to the
+// application.
+func TestAnApplicationWithASharedFolderJoinsTheServiceGroup(t *testing.T) {
+	if _, err := user.LookupGroup(serviceAccount); err != nil {
+		t.Skip("no " + serviceAccount + " group on this machine")
+	}
+	service, _ := user.LookupGroup(serviceAccount)
+
+	groups := supplementaryGroups(Manifest{
+		Storage: []ManifestStorage{{ID: "media", Type: "user-selected"}},
+	})
+	if !slices.Contains(groups, service.Gid) {
+		t.Errorf("got %v, which does not include the %s group (%s)",
+			groups, serviceAccount, service.Gid)
+	}
+}
