@@ -760,9 +760,90 @@ func networkCommand(args []string, stdout io.Writer) error {
 		return withClient("network status", rest, stdout, networkStatus)
 	case "wifi":
 		return wifiCommand(rest, stdout)
+	case "wake-on-lan":
+		return wakeOnLANCommand(rest, stdout)
 	default:
-		return usageError{fmt.Errorf("unknown network command %q — try status or wifi", action)}
+		return usageError{fmt.Errorf(
+			"unknown network command %q — try status, wifi or wake-on-lan", action)}
 	}
+}
+
+// wrapAt breaks a sentence over lines no longer than width.
+//
+// Needed because this is one of the few places where the words come from the
+// server rather than from this source file, so they cannot be wrapped by hand
+// where they are written. Terminals are not all 80 columns and this does not
+// ask: 72 is narrow enough to survive an ssh session in a small window, which is
+// where a server is usually being talked to.
+func wrapAt(text string, width int) string {
+	var out strings.Builder
+	column := 0
+	for i, word := range strings.Fields(text) {
+		switch {
+		case i == 0:
+		case column+1+len(word) > width:
+			out.WriteString("\n")
+			column = 0
+		default:
+			out.WriteString(" ")
+			column++
+		}
+		out.WriteString(word)
+		column += len(word)
+	}
+	return out.String()
+}
+
+// wakeOnLANCommand lets a magic packet start this server, or stops it.
+//
+// `homebasectl network wake-on-lan <interface> [on|off]`, defaulting to on,
+// because somebody typing this has read that their server can be woken and is
+// trying to make that true.
+func wakeOnLANCommand(args []string, stdout io.Writer) error {
+	return withClient("network wake-on-lan", args, stdout,
+		func(ctx context.Context, c *Client, o *options, rest []string, w io.Writer) error {
+			if len(rest) == 0 {
+				return usageError{errors.New(
+					"which network card? Run `homebasectl network` to see them")}
+			}
+			enabled := true
+			switch {
+			case len(rest) == 1:
+			case rest[1] == "on":
+			case rest[1] == "off":
+				enabled = false
+			default:
+				return usageError{fmt.Errorf("say on or off, not %q", rest[1])}
+			}
+
+			var result struct {
+				Interface string `json:"interface"`
+				Enabled   bool   `json:"enabled"`
+				Note      string `json:"note"`
+			}
+			if err := c.Post(ctx, "/network/wake-on-lan", map[string]any{
+				"interface": rest[0],
+				"enabled":   enabled,
+			}, &result); err != nil {
+				return err
+			}
+			if o.asJSON {
+				return printResponse(w, c, result)
+			}
+
+			if !result.Enabled {
+				fmt.Fprintf(w, "%s will no longer start this server.\n", result.Interface)
+				return nil
+			}
+			fmt.Fprintf(w, "%s will now start this server when a magic packet "+
+				"arrives, and after a restart too.\n\n", result.Interface)
+			fmt.Fprintf(w, "Try it: shut the server down, then from another machine on\n"+
+				"the same network run\n\n    homebasectl wake <its MAC address>\n\n")
+			if result.Note != "" {
+				fmt.Fprintln(w, wrapAt(result.Note, 72))
+			}
+			return nil
+		})
 }
 
 func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
@@ -827,8 +908,12 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 			case iface.WakeOnLAN:
 				wake = "can be woken with: homebasectl wake " + normaliseMAC(iface.MAC)
 			case iface.WakeOnLANSupported:
-				wake = "could be woken, but the card has it switched off — " +
-					"sudo ethtool -s " + iface.Name + " wol g"
+				// The command Homebase can run, rather than the ethtool
+				// incantation this used to print. `ethtool -s` was also wrong in
+				// a way nobody would notice until it mattered: it lasts until
+				// the machine is restarted, which is the one moment the setting
+				// exists for.
+				wake = "could be woken — homebasectl network wake-on-lan " + iface.Name
 			}
 			fmt.Fprintf(w, "           %s — %s\n", normaliseMAC(iface.MAC), wake)
 		}

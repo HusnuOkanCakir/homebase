@@ -166,6 +166,13 @@ func run(log *slog.Logger, registry *hostd.Registry, apps *hostd.Catalogue,
 		log.Error("rejected an application manifest", "file", name, "reason", reason)
 	}
 
+	// Wake-on-LAN is a property of the card, and the driver resets it on every
+	// boot. Reapplied here rather than through a systemd .link file, because a
+	// .link file that matches a device and says nothing about NamePolicy= takes
+	// over its naming as well — a file about waking up that can rename an
+	// interface and leave a server unreachable. See internal/hostd/wol.go.
+	hostd.ApplyWakeOnLAN(log)
+
 	log.Info("hostd listening",
 		"socket", listener.Addr().String(),
 		"applications", len(apps.IDs()),

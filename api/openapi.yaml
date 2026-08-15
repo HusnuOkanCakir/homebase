@@ -1468,6 +1468,73 @@ paths:
         "503":
           $ref: "#/components/responses/HostUnavailable"
 
+  /network/wake-on-lan:
+    post:
+      tags: [network]
+      summary: Let a magic packet start this server, or stop it
+      description: |
+        Requires `network.modify`. Changes the setting in the card now and records it, so
+        that hostd puts it back after a restart — the driver resets it on every boot.
+
+        Only half of wake-on-LAN is software. The other half is the machine's firmware,
+        which no running system can read or change: a laptop whose BIOS has power saving
+        switched on for the off state cuts power to the network card, and no packet reaches
+        it however this endpoint is set. The response says so rather than reporting plain
+        success, because a server that looks configured and stays dark is one somebody has
+        to walk to.
+      operationId: setWakeOnLAN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [interface, enabled]
+              properties:
+                interface:
+                  type: string
+                  description: The network card, as named by `GET /network`.
+                  example: enp5s0
+                enabled:
+                  type: boolean
+                  description: |
+                    Required rather than defaulted. A body that omits it is refused: reading
+                    a missing field as "switch it off" would silently do the opposite of
+                    what the caller asked, and nobody finds out until the machine will not
+                    start.
+      responses:
+        "200":
+          description: The card was changed and the change was recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [interface, enabled]
+                properties:
+                  interface:
+                    type: string
+                  enabled:
+                    type: boolean
+                  note:
+                    type: string
+                    description: |
+                      What Homebase cannot do, when switching it on: where to look in the
+                      firmware if the machine still will not start.
+        "400":
+          description: |
+            No such card, or one whose driver has no wake-on-LAN at all. Wireless cards
+            usually do not.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
   /network/vpn:
     get:
       tags: [network]

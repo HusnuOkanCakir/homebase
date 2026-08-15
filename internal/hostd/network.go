@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
-	"unsafe"
 )
 
 // What the network actually looks like, read from the kernel.
@@ -89,15 +87,13 @@ type NetworkInterface struct {
 
 	// WakeOnLANKnown is whether Homebase could find out at all.
 	//
-	// It cannot, today, and the reason is the same one that broke the internet
-	// check: reading the setting needs SIOCETHTOOL on an AF_INET socket, and
-	// this process is forbidden from opening one. The honest report is therefore
-	// "cannot tell" — the previous code returned "not supported", which is a
-	// confident false statement about hardware that supports it perfectly well.
-	//
-	// The real fix is ethtool's netlink interface, which exists precisely so this
-	// does not need a socket of the wrong family, and which AF_NETLINK permits.
-	// That is a genlink implementation and it is not written yet.
+	// A third state rather than folding failure into "not supported", which is
+	// what the first implementation did — and it did it on every machine, since
+	// it read the setting through an ioctl on an AF_INET socket that this
+	// process is forbidden to open. It is answered over netlink now, so on a
+	// real installation this is true; a container, a kernel older than 5.6 or an
+	// interface with no driver behind it can still leave it false, and there the
+	// only honest report is that Homebase does not know.
 	WakeOnLANKnown bool `json:"wake_on_lan_known"`
 }
 
@@ -169,7 +165,7 @@ func (s netScanner) describe(iface net.Interface) NetworkInterface {
 	}
 
 	described.WakeOnLAN, described.WakeOnLANSupported, described.WakeOnLANKnown =
-		wakeOnLAN(iface.Name)
+		readWakeOnLAN(iface.Name)
 
 	addrs, err := s.addrsOf(iface)
 	if err != nil {
@@ -259,59 +255,3 @@ func (s netScanner) nameservers() []string {
 	}
 	return servers
 }
-
-// wakeOnLAN asks the card whether it will wake the machine, and whether it could.
-//
-// The kernel's own answer, through the same ioctl `ethtool` uses, rather than by
-// running `ethtool` and reading its output — the rule everywhere else in this
-// file. It also means no dependency on a package that may not be installed.
-//
-// This replaced a read of `device/power/wakeup`, which is the *device's* wakeup
-// capability and not the magic-packet flag. On the first real laptop that said
-// "disabled" while `ethtool` said the hardware supports magic packets and the
-// setting is merely off — two very different facts flattened into one wrong one.
-func wakeOnLAN(name string) (enabled, supported, known bool) {
-	// This fails on every real installation: homebase-hostd.service forbids
-	// AF_INET. Attempted anyway, because it is correct where the restriction is
-	// absent — and because returning "not known" is the honest answer where it
-	// is not, rather than "not supported".
-	socket, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, 0)
-	if err != nil {
-		return false, false, false
-	}
-	defer func() { _ = syscall.Close(socket) }()
-
-	// struct ethtool_wolinfo { __u32 cmd; __u32 supported; __u32 wolopts;
-	//                          __u8 sopass[6]; }
-	var info struct {
-		cmd       uint32
-		supported uint32
-		wolopts   uint32
-		sopass    [6]byte
-	}
-	info.cmd = ethtoolGetWOL
-
-	var request struct {
-		name [16]byte
-		data uintptr
-	}
-	copy(request.name[:], name)
-	request.data = uintptr(unsafe.Pointer(&info))
-
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(socket),
-		uintptr(siocEthtool), uintptr(unsafe.Pointer(&request)))
-	if errno != 0 {
-		return false, false, false
-	}
-
-	return info.wolopts&wakeMagic != 0, info.supported&wakeMagic != 0, true
-}
-
-const (
-	// ETHTOOL_GWOL, SIOCETHTOOL and WAKE_MAGIC, from the kernel's
-	// include/uapi/linux/ethtool.h and sockios.h. Constants rather than a
-	// dependency: hostd carries no third-party Go code (ADR-0002).
-	ethtoolGetWOL = 0x00000005
-	siocEthtool   = 0x8946
-	wakeMagic     = 1 << 5
-)

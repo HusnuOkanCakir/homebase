@@ -342,6 +342,29 @@ func (c *Client) NetworkStatus(ctx context.Context) (*NetworkStatus, error) {
 	return &status, nil
 }
 
+// WakeOnLANResult is what changing the setting reports back.
+type WakeOnLANResult struct {
+	Interface string `json:"interface"`
+	Enabled   bool   `json:"enabled"`
+
+	// Note is what Homebase cannot do for you — the firmware half, which no
+	// running machine can read or change.
+	Note string `json:"note,omitempty"`
+}
+
+// SetWakeOnLAN lets a magic packet start this server, or stops it doing so.
+func (c *Client) SetWakeOnLAN(ctx context.Context, iface string, enabled bool) (*WakeOnLANResult, error) {
+	var result WakeOnLANResult
+	request := struct {
+		Interface string `json:"interface"`
+		Enabled   bool   `json:"enabled"`
+	}{iface, enabled}
+	if err := c.Call(ctx, "network.wake_on_lan", request, false, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Component is one of the packages an installation is made of.
 type Component struct {
 	Package string `json:"package"`

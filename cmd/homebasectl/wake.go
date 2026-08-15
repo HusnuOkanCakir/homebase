@@ -66,9 +66,24 @@ func wakeCommand(args []string, stdout io.Writer) error {
 	// than implying the machine woke up.
 	fmt.Fprintln(stdout, "Nothing answers a wake-up packet, so there is no way to")
 	fmt.Fprintln(stdout, "confirm it arrived. Give it a minute and try to reach the")
-	fmt.Fprintln(stdout, "machine. If nothing happens, the usual reasons are that")
-	fmt.Fprintln(stdout, "wake-on-LAN is switched off in its BIOS, or that it is on")
-	fmt.Fprintln(stdout, "a different network from this server.")
+	fmt.Fprintln(stdout, "machine.")
+	fmt.Fprintln(stdout)
+	// Named settings rather than "check your BIOS", because the first real
+	// laptop had wake-on-LAN switched on in both the card and the firmware and
+	// still would not start. The setting that stopped it was a power-saving one
+	// with a different name, three menus away, whose own help text admitted it
+	// breaks waking up — and finding that took an evening.
+	fmt.Fprintln(stdout, "If nothing happens, the setting is usually in the sleeping")
+	fmt.Fprintln(stdout, "machine's firmware. Restart it, open the BIOS, and:")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "  - turn ON  \"Wake on LAN\" or \"Power On By PCI-E\"")
+	fmt.Fprintln(stdout, "  - turn OFF \"ERP\", \"EuP\", \"Deep Sleep\", or")
+	fmt.Fprintln(stdout, "             \"Power Off Energy Saving\"")
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "The second group cuts power to the network card while the")
+	fmt.Fprintln(stdout, "machine is off, so it never hears the packet. Leave the")
+	fmt.Fprintln(stdout, "machine plugged in to the mains as well — many laptops will")
+	fmt.Fprintln(stdout, "not wake on battery whatever the settings say.")
 	return nil
 }
 

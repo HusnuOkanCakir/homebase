@@ -33,6 +33,57 @@ func RegisterNetworkOperations(r *Registry, services *NetworkServices) {
 		Timeout: 30 * time.Second,
 		Handler: Typed(services.status),
 	})
+
+	r.MustRegister(Operation{
+		Name: "network.wake_on_lan",
+		Summary: "Let this server be started by a magic packet, or stop it " +
+			"being started by one.",
+		// Medium rather than low. It does not change how the machine is
+		// reached, so it cannot strand anybody — but a server that can be
+		// started remotely is one anybody on the network can start, and that is
+		// a decision about the machine rather than a display preference.
+		Risk:        RiskMedium,
+		Permissions: []string{"network.modify"},
+		Confirm:     ConfirmNone,
+		Timeout:     30 * time.Second,
+		Rollback:    "network.wake_on_lan, with enabled reversed",
+		Handler:     Typed(services.wakeOnLAN),
+	})
+}
+
+type wakeOnLANRequest struct {
+	Interface string `json:"interface"`
+	Enabled   bool   `json:"enabled"`
+}
+
+type wakeOnLANResult struct {
+	Interface string `json:"interface"`
+	Enabled   bool   `json:"enabled"`
+
+	// Note is what is left to do, and there is always something: Linux arming
+	// the card is only half of it. On the first real laptop everything here
+	// reported correctly while the machine stayed dark, because the firmware
+	// cuts power to the card when the machine is off — a setting ASUS calls
+	// "Power Off Energy Saving", whose own help text admits it stops wake-up
+	// working. Nothing on a running machine can read that setting, so the only
+	// thing Homebase can do is say where to look.
+	Note string `json:"note,omitempty"`
+}
+
+func (s *NetworkServices) wakeOnLAN(_ context.Context, request wakeOnLANRequest) (any, error) {
+	if err := configureWakeOnLAN(request.Interface, request.Enabled); err != nil {
+		return nil, err
+	}
+	result := wakeOnLANResult{Interface: request.Interface, Enabled: request.Enabled}
+	if request.Enabled {
+		result.Note = "If the server still does not start, the setting is in its " +
+			"firmware: restart it, open the BIOS, and look for \"Wake on LAN\" or " +
+			"\"Power On By PCI-E\". Also switch off anything called \"ERP\", " +
+			"\"EuP\", \"Deep Sleep\" or \"Power Off Energy Saving\" — those cut " +
+			"power to the network card while the machine is off, which stops it " +
+			"hearing anything."
+	}
+	return result, nil
 }
 
 type networkStatusResult struct {

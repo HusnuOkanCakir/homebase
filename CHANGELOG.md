@@ -483,6 +483,12 @@ and Windows on it:
 - **The system disk was reported as mounted at `/var/tmp`**, because the mount
   table kept whichever entry came last and `PrivateTmp=yes` on hostd's unit gives
   it a private `/var/tmp` on the root device
+- **Wake-on-LAN was reported as unsupported on hardware that supports it**, for
+  the same reason, and is now read over ethtool's netlink interface — a family
+  hostd is permitted. `homebasectl network wake-on-lan <card>` switches it on and
+  hostd reapplies it at every boot; `homebasectl wake` now names the firmware
+  settings that stop it working, because on the machine this was found on both
+  software halves were correct and it still would not start
 - **The internet check had never worked on any installation.** hostd is forbidden
   `AF_INET` by its own unit, so it could not dial and returned false everywhere —
   including on a machine downloading Ubuntu updates while it said so. Moved to

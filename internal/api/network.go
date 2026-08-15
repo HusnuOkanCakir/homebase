@@ -26,6 +26,8 @@ import (
 func (s *Server) registerNetworkRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/network", s.require(auth.PermNetworkDiag, s.handleNetwork))
 
+	mux.Handle("POST /api/v1/network/wake-on-lan", s.require(auth.PermNetworkModify, s.handleWakeOnLAN))
+
 	mux.Handle("GET /api/v1/network/wifi", s.require(auth.PermNetworkDiag, s.handleWifiStatus))
 	mux.Handle("POST /api/v1/network/wifi/scan", s.require(auth.PermNetworkDiag, s.handleWifiScan))
 	mux.Handle("POST /api/v1/network/wifi", s.require(auth.PermNetworkModify, s.handleWifiConnect))
@@ -101,6 +103,51 @@ func reachesTheInternet(ctx context.Context) bool {
 }
 
 // --- Wireless ------------------------------------------------------------------
+
+// handleWakeOnLAN switches magic-packet waking on or off for one card.
+func (s *Server) handleWakeOnLAN(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var request struct {
+		Interface string `json:"interface"`
+		Enabled   *bool  `json:"enabled"`
+	}
+	if !s.decode(w, r, &request) {
+		return
+	}
+	// A pointer, so that a body omitting the field is refused rather than read
+	// as "switch it off". This endpoint is reached by a person who has just been
+	// told their server can be woken; silently doing the opposite of what they
+	// asked, because they left out a field, is the kind of thing nobody finds
+	// out about until the machine will not start.
+	if request.Enabled == nil {
+		s.writeError(w, r, http.StatusBadRequest, apiError{
+			Code:        "request.missing_field",
+			Message:     "Homebase needs to know whether to switch this on or off.",
+			Detail:      "enabled is required",
+			Recoverable: true,
+			Recovery:    "Say whether the server should be startable over the network.",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := s.host.SetWakeOnLAN(ctx, request.Interface, *request.Enabled)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	message := "This server can now be started over the network."
+	if !*request.Enabled {
+		message = "This server can no longer be started over the network."
+	}
+	s.events.Info(r.Context(), "network.wake_on_lan_changed", request.Interface, message)
+	s.log.Info("wake-on-LAN changed", "interface", request.Interface,
+		"enabled", *request.Enabled, "by", user.Username)
+
+	writeJSON(w, http.StatusOK, result)
+}
 
 func (s *Server) handleWifiStatus(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)

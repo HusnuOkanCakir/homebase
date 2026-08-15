@@ -547,9 +547,24 @@ cause inferred from a symptom, wrong, and the real cause was a line written by
 the same hand months earlier.
 
 **Wake-on-LAN was reported as unsupported on hardware that supports it.** Same
-root cause: reading the setting needs `SIOCETHTOOL` on an `AF_INET` socket. It
-now says it cannot tell, which is true; the real answer needs ethtool's netlink
-interface and is not written.
+root cause: reading the setting needs `SIOCETHTOOL` on an `AF_INET` socket, so
+the answer was "cannot tell" on every machine that has ever run Homebase.
+
+It is read over ethtool's netlink interface now — a family hostd *is* permitted,
+which is why the fix was to speak the right protocol rather than to widen the
+sandbox. The laptop reports its wired card as wakeable and its wireless card as
+not, both correct, and `homebasectl network wake-on-lan enp5s0` switches it on
+and keeps it on: hostd reapplies it at every boot, because the setting lives in
+the card and the driver resets it.
+
+The rest of it is a lesson about how little the software half is worth. Both
+halves Homebase controls were correct and the machine still would not start,
+because the firmware cuts power to the network card when the machine is off —
+ASUS calls it "Power Off Energy Saving" and its own help text admits it stops
+wake-up working. Nothing on a running machine can read that setting. So the
+product cannot fix it and should not pretend to; what it can do is name it, and
+`homebasectl wake` now does, along with the ERP and Deep Sleep settings that do
+the same thing under other names.
 
 #### Secure Boot, which is the one that would have failed silently
 
