@@ -215,8 +215,38 @@ if [ "$1" = "configure" ]; then
     install -d -o homebase -g homebase -m 0750 /var/lib/homebase
     install -d -o homebase -g homebase -m 0750 /var/log/homebase
 
-    if [ ! -d /srv/homebase ]; then
-        install -d -o homebase -g homebase -m 0750 /srv/homebase
+    # 0755 rather than 0750, and this is the one directory here that is
+    # deliberately traversable by anybody with an account on the machine.
+    #
+    # It was 0750, which meant somebody who had just shared a folder, been told
+    # the path, and typed `ls` on it got "Permission denied" from their own
+    # server. The obvious fix — adding the administrator to the `homebase`
+    # group — is the wrong one: that group owns the hostd socket, so it is
+    # the privilege boundary, and joining it is a way to reach every privileged
+    # operation without sudo.
+    #
+    # Traversal costs nothing. Everything below keeps its own mode: application
+    # data stays private to the account that owns it, and shared folders are
+    # group-writable because that is what they are for.
+    install -d -o homebase -g homebase -m 0755 /srv/homebase
+
+    # Do not publish the container bridge.
+    #
+    # avahi answers for <hostname>.local on every interface it can see, and
+    # once Docker is installed that includes docker0 at 172.17.0.1. A laptop
+    # asking for the server's name then gets an address that is either
+    # unroutable or — if it runs Docker too — its own bridge, and the server
+    # becomes intermittently unreachable by name with nothing to point at.
+    if [ -f /etc/avahi/avahi-daemon.conf ] &&
+       ! grep -q "^deny-interfaces=" /etc/avahi/avahi-daemon.conf; then
+        # Bracket expressions rather than backslash escapes, and `a` rather than
+        # a substitution containing a newline. This text is a Python string inside
+        # a Python script, so an escape here is consumed before sed ever sees it —
+        # which is how the first attempt shipped an unterminated `s` command and
+        # failed the whole install on a machine that was working.
+        sed -i '/^[[]server[]]$/a deny-interfaces=docker0,br-' \\
+            /etc/avahi/avahi-daemon.conf
+        systemctl restart avahi-daemon >/dev/null 2>&1 || true
     fi
 
     systemctl daemon-reload >/dev/null 2>&1 || true

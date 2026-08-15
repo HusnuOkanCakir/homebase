@@ -481,9 +481,14 @@ function ApplicationDetail({
               </li>
             ))}
           </ul>
+          {/* Not "the next time it starts". That was false and was believed for
+              a milestone: a container's folders are fixed when it is built, so
+              restarting one keeps the folders it was built with. Changing this
+              rebuilds it, which is why it takes a moment and why it is worth
+              saying that nothing is moved. */}
           <p className="muted">
-            Changing this takes effect the next time {application.name} starts. Anything it
-            has already saved stays where it is.
+            Changing this rebuilds {application.name} so it can see the new disk, which
+            takes a moment. Nothing already saved is moved.
           </p>
         </section>
       ) : null}
