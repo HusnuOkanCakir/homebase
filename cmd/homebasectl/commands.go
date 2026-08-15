@@ -781,6 +781,7 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 			MAC                string   `json:"mac"`
 			WakeOnLAN          bool     `json:"wake_on_lan"`
 			WakeOnLANSupported bool     `json:"wake_on_lan_supported"`
+			WakeOnLANKnown     bool     `json:"wake_on_lan_known"`
 		} `json:"interfaces"`
 	}
 	if err := c.Get(ctx, "/network", &status); err != nil {
@@ -816,8 +817,13 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 			// before the machine is asleep, because nothing on a sleeping
 			// machine can tell you afterwards.
 			// Three states, and the middle one is the only actionable one.
-			wake := "this card cannot be woken by a network packet"
+			wake := "Homebase cannot tell whether this card can be woken"
 			switch {
+			case !iface.WakeOnLANKnown:
+				// Left as it is. Saying "cannot be woken" here was a confident
+				// false statement about hardware that supports it perfectly well.
+			case !iface.WakeOnLANSupported:
+				wake = "this card cannot be woken by a network packet"
 			case iface.WakeOnLAN:
 				wake = "can be woken with: homebasectl wake " + normaliseMAC(iface.MAC)
 			case iface.WakeOnLANSupported:

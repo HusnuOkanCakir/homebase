@@ -2,7 +2,6 @@ package hostd
 
 import (
 	"context"
-	"net"
 	"os/exec"
 	"time"
 )
@@ -14,15 +13,13 @@ import (
 // larger surface and arrives with Wi-Fi.
 
 // NetworkServices is what the network operations need.
-type NetworkServices struct {
-	// dial is how reachability is tested. Replaced in tests, because a test
-	// whose result depends on whether the machine running it has internet is a
-	// test that fails on a train.
-	dial func(ctx context.Context, address string) error
-}
+//
+// Empty, since the one thing it used to hold was a dialler for an internet check
+// this process is forbidden from performing. See networkStatusResult.Online.
+type NetworkServices struct{}
 
 func NewNetworkServices() *NetworkServices {
-	return &NetworkServices{dial: dialTCP}
+	return &NetworkServices{}
 }
 
 // RegisterNetworkOperations adds the network domain to a registry.
@@ -41,13 +38,20 @@ func RegisterNetworkOperations(r *Registry, services *NetworkServices) {
 type networkStatusResult struct {
 	NetworkStatus
 
-	// Online is whether anything outside this network answered.
+	// Online is no longer answered here, and the reason is structural.
 	//
-	// Deliberately separate from having an address: a machine with a perfectly
-	// good address on a network whose broadband is down is a different problem
-	// from a machine with no address, and telling somebody "not connected" when
-	// their server is fine and their internet is not sends them to the wrong
-	// place entirely.
+	// `homebase-hostd.service` sets RestrictAddressFamilies=AF_UNIX AF_NETLINK,
+	// so this process cannot open an internet socket at all. The check that used
+	// to live here therefore returned false on every machine that ever ran it,
+	// including one downloading Ubuntu updates while it said so.
+	//
+	// Nothing caught it. The unit tests injected a fake dialler, so they
+	// exercised the logic without ever asking whether hostd could execute it,
+	// and the VM suite only ever asserted `online is False` — which passed for
+	// the wrong reason for four milestones.
+	//
+	// Reaching 1.1.1.1 needs no privilege whatsoever, so the check belongs in
+	// core, which is allowed to open sockets. It is set there.
 	Online bool `json:"online"`
 
 	// Reachable is whether this machine can be reached at all — it has an
@@ -74,57 +78,8 @@ func (s *NetworkServices) status(ctx context.Context, _ struct{}) (any, error) {
 	// it sends somebody to type an address that will never load.
 	result.MDNSWorks = mdnsResponderRunning()
 
-	// Only asked if there is a route to ask over. Without a gateway the answer
-	// is already known, and the attempt would cost the caller a timeout.
-	if status.Gateway != "" {
-		result.Online = s.reachesTheInternet(ctx)
-	}
-
+	// Online is left false here and filled in by core. See the field's comment.
 	return result, nil
-}
-
-// reachesTheInternet answers whether anything outside this network responded.
-//
-// A TCP connection rather than a ping: ICMP is blocked on plenty of networks,
-// and "the internet is down" is the wrong conclusion to draw from a firewall.
-// Two addresses, because one being down is not evidence about the internet.
-func (s *NetworkServices) reachesTheInternet(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	// Port 443, not 53.
-	//
-	// This dialled TCP/53 at the public resolvers, and reported "the internet is
-	// not reachable" on the first real network Homebase was installed on — a
-	// machine that was downloading Ubuntu updates at the time. Plenty of
-	// networks block outbound TCP/53 to public resolvers; some ISPs do it as
-	// policy. Almost nothing blocks 443, because blocking it breaks the web.
-	//
-	// Reached by address rather than by name, still: this is a question about
-	// connectivity, and resolving a name first would make a broken resolver look
-	// like a broken connection.
-	//
-	// Two addresses at two organisations, because one being down is not evidence
-	// about the internet. 53 is kept as a last resort for the rarer network that
-	// allows it and not 443.
-	for _, address := range []string{
-		"1.1.1.1:443", "8.8.8.8:443",
-		"1.1.1.1:53", "8.8.8.8:53",
-	} {
-		if err := s.dial(ctx, address); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
-func dialTCP(ctx context.Context, address string) error {
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "tcp", address)
-	if err != nil {
-		return err
-	}
-	return conn.Close()
 }
 
 // mdnsResponderRunning reports whether something is publishing this machine's

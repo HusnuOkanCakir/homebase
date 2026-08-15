@@ -86,6 +86,19 @@ type NetworkInterface struct {
 	// to know is that it could be, and that switching it on is a thing Homebase
 	// can do for them.
 	WakeOnLANSupported bool `json:"wake_on_lan_supported"`
+
+	// WakeOnLANKnown is whether Homebase could find out at all.
+	//
+	// It cannot, today, and the reason is the same one that broke the internet
+	// check: reading the setting needs SIOCETHTOOL on an AF_INET socket, and
+	// this process is forbidden from opening one. The honest report is therefore
+	// "cannot tell" — the previous code returned "not supported", which is a
+	// confident false statement about hardware that supports it perfectly well.
+	//
+	// The real fix is ethtool's netlink interface, which exists precisely so this
+	// does not need a socket of the wrong family, and which AF_NETLINK permits.
+	// That is a genlink implementation and it is not written yet.
+	WakeOnLANKnown bool `json:"wake_on_lan_known"`
 }
 
 // Reachable reports whether this interface is carrying an address.
@@ -155,7 +168,8 @@ func (s netScanner) describe(iface net.Interface) NetworkInterface {
 		MAC: iface.HardwareAddr.String(),
 	}
 
-	described.WakeOnLAN, described.WakeOnLANSupported = wakeOnLAN(iface.Name)
+	described.WakeOnLAN, described.WakeOnLANSupported, described.WakeOnLANKnown =
+		wakeOnLAN(iface.Name)
 
 	addrs, err := s.addrsOf(iface)
 	if err != nil {
@@ -256,10 +270,14 @@ func (s netScanner) nameservers() []string {
 // capability and not the magic-packet flag. On the first real laptop that said
 // "disabled" while `ethtool` said the hardware supports magic packets and the
 // setting is merely off — two very different facts flattened into one wrong one.
-func wakeOnLAN(name string) (enabled, supported bool) {
+func wakeOnLAN(name string) (enabled, supported, known bool) {
+	// This fails on every real installation: homebase-hostd.service forbids
+	// AF_INET. Attempted anyway, because it is correct where the restriction is
+	// absent — and because returning "not known" is the honest answer where it
+	// is not, rather than "not supported".
 	socket, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, 0)
 	if err != nil {
-		return false, false
+		return false, false, false
 	}
 	defer func() { _ = syscall.Close(socket) }()
 
@@ -283,10 +301,10 @@ func wakeOnLAN(name string) (enabled, supported bool) {
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(socket),
 		uintptr(siocEthtool), uintptr(unsafe.Pointer(&request)))
 	if errno != 0 {
-		return false, false
+		return false, false, false
 	}
 
-	return info.wolopts&wakeMagic != 0, info.supported&wakeMagic != 0
+	return info.wolopts&wakeMagic != 0, info.supported&wakeMagic != 0, true
 }
 
 const (

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -50,7 +51,53 @@ func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request, _ *auth.U
 		return
 	}
 
+	// Whether anything outside this network answers.
+	//
+	// Asked here rather than in hostd, and that is structural rather than
+	// tidiness: hostd's unit sets RestrictAddressFamilies=AF_UNIX AF_NETLINK, so
+	// it cannot open an internet socket and the check returned false on every
+	// machine that ever ran it. Reaching 1.1.1.1 needs no privilege at all, so
+	// it belongs on this side of the boundary.
+	//
+	// Only asked when there is a route to ask over: without a gateway the answer
+	// is already known and the attempt would cost the caller a timeout.
+	if status.Gateway != "" {
+		status.Online = reachesTheInternet(ctx)
+	}
+
 	writeJSON(w, http.StatusOK, status)
+}
+
+// reachesTheInternet answers whether anything outside this network responded.
+//
+// A TCP connection rather than a ping: ICMP is blocked on plenty of networks,
+// and "the internet is down" is the wrong conclusion to draw from a firewall.
+//
+// Port 443 rather than 53. It dialled the public resolvers on 53 and reported a
+// working connection as broken on the first real network Homebase met — plenty
+// of networks block outbound TCP/53 to public resolvers, and some ISPs do it as
+// policy. Almost nothing blocks 443, because blocking it breaks the web.
+//
+// Two organisations, because one being down is not evidence about the internet.
+// Reached by address rather than by name: this is a question about connectivity,
+// and resolving a name first would make a broken resolver look like a broken
+// connection.
+func reachesTheInternet(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	for _, address := range []string{
+		"1.1.1.1:443", "8.8.8.8:443",
+		"1.1.1.1:53", "8.8.8.8:53",
+	} {
+		var dialer net.Dialer
+		conn, err := dialer.DialContext(ctx, "tcp", address)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+	}
+	return false
 }
 
 // --- Wireless ------------------------------------------------------------------

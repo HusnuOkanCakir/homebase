@@ -313,6 +313,7 @@ type NetworkInterface struct {
 	// anything this struct does not name is silently dropped between hostd and
 	// core, which has now happened twice.
 	WakeOnLANSupported bool `json:"wake_on_lan_supported"`
+	WakeOnLANKnown     bool `json:"wake_on_lan_known"`
 }
 
 // NetworkStatus is how the server is connected, and whether it is.
