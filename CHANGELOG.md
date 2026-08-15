@@ -483,6 +483,19 @@ and Windows on it:
 - **The system disk was reported as mounted at `/var/tmp`**, because the mount
   table kept whichever entry came last and `PrivateTmp=yes` on hostd's unit gives
   it a private `/var/tmp` on the root device
+Three more found by installing an application and trying to use it:
+
+- **Applications required a disk that was not in the machine.** A server with a
+  1 TB drive could not run one without an external disk beside it. The server's
+  own disk is a storage location now — chosen by name, never fallen back to,
+  never a backup destination, and it cannot be removed or erased
+- **Nothing could reach an installed application.** Containers bound to
+  127.0.0.1 on a port Docker chose, on the reasoning that Homebase proxies them.
+  There is no such proxy, and nothing reported the port. A manifest now declares
+  whether an application is reachable from the network, and may only do so if it
+  has its own accounts
+- **`homebasectl apps logs` had never worked**, and there was no way to give an
+  application a disk from a terminal at all
 - **Wake-on-LAN was reported as unsupported on hardware that supports it**, for
   the same reason, and is now read over ethtool's netlink interface — a family
   hostd is permitted. `homebasectl network wake-on-lan <card>` switches it on and

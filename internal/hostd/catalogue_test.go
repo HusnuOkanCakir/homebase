@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -355,5 +356,124 @@ func TestShippedCatalogueLoads(t *testing.T) {
 		if manifest.Container.Version == "" && manifest.Container.Digest == "" {
 			t.Errorf("%s is not pinned to a version", expected)
 		}
+	}
+}
+
+// --- Publishing to the network ------------------------------------------------
+
+// An application published onto the LAN must not be able to claim a port the
+// server is already using. 443 is the one that matters: an application there
+// would sit where the dashboard is served, so the thing that could undo it is
+// the thing it replaced.
+func TestAnApplicationCannotTakeAPortTheServerUses(t *testing.T) {
+	for port, what := range map[int]string{443: "the dashboard", 80: "the redirect", 22: "ssh"} {
+		manifest := validManifest()
+		manifest["network"] = map[string]any{
+			"internal_port":  8096,
+			"protocol":       "http",
+			"reachable_from": "network",
+			"host_port":      port,
+		}
+
+		// The filename has to match the id, or the manifest is rejected for
+		// that instead and this test passes without ever reaching the port.
+		catalogue := writeCatalogue(t, map[string]any{"test-app.json": manifest})
+		if _, ok := catalogue.Lookup("test-app"); ok {
+			t.Errorf("an application was allowed to publish on %d (%s)", port, what)
+		}
+		reason := catalogue.Rejected()["test-app.json"]
+		if !strings.Contains(reason, strconv.Itoa(port)) {
+			t.Errorf("port %d rejected with %q, which does not name the port", port, reason)
+		}
+	}
+}
+
+// Publishing needs something to publish, and only a thing a browser can open.
+func TestPublishingNeedsAWebPort(t *testing.T) {
+	noPort := validManifest()
+	noPort["network"] = map[string]any{"reachable_from": "network"}
+
+	notWeb := validManifest()
+	notWeb["network"] = map[string]any{
+		"internal_port": 1900, "protocol": "udp", "reachable_from": "network",
+	}
+
+	for what, manifest := range map[string]any{"no port": noPort, "udp": notWeb} {
+		catalogue := writeCatalogue(t, map[string]any{"test-app.json": manifest})
+		if _, ok := catalogue.Lookup("test-app"); ok {
+			t.Errorf("a manifest with %s was accepted", what)
+		}
+		// Rejected for the stated reason, not for something incidental.
+		if reason := catalogue.Rejected()["test-app.json"]; !strings.Contains(reason, "network") {
+			t.Errorf("%s rejected with %q, which is not about publishing", what, reason)
+		}
+	}
+}
+
+// The default is loopback. An application that says nothing about being
+// reachable is not reachable — a manifest gaining a network by omission is the
+// failure this default exists to prevent.
+func TestAnApplicationIsNotPublishedUnlessItSaysSo(t *testing.T) {
+	for _, network := range []map[string]any{
+		{"internal_port": 8096, "protocol": "http"},
+		{"internal_port": 8096, "protocol": "http", "reachable_from": "server"},
+	} {
+		manifest := validManifest()
+		manifest["network"] = network
+
+		catalogue := writeCatalogue(t, map[string]any{"test-app.json": manifest})
+		app, ok := catalogue.Lookup("test-app")
+		if !ok {
+			t.Fatalf("rejected: %v", catalogue.Rejected())
+		}
+		if app.Network.PublishedToNetwork() {
+			t.Errorf("%v was published to the network", network)
+		}
+	}
+}
+
+// The port on the server defaults to the port inside the container, and is
+// overridden when the container's own port is one the server already uses —
+// File Browser listens on 80, where Homebase is.
+func TestThePublishedPortDefaultsToTheContainersOwn(t *testing.T) {
+	if got := (ManifestNetwork{InternalPort: 8096}).PublishedPort(); got != 8096 {
+		t.Errorf("published port %d, want 8096", got)
+	}
+	if got := (ManifestNetwork{InternalPort: 80, HostPort: 8080}).PublishedPort(); got != 8080 {
+		t.Errorf("published port %d, want 8080", got)
+	}
+}
+
+// The address has to say where, and a loopback address has to be distinguishable
+// from one that works from another machine. Until these existed, an application
+// installed, started, passed its health check and was reachable at an address
+// nothing anywhere reported.
+func TestTheAddressSaysWhereToOpenIt(t *testing.T) {
+	published := Manifest{Network: ManifestNetwork{
+		InternalPort: 8096, Protocol: "http", Path: "/", ReachableFrom: "network",
+	}}
+	url := appURL(published, 8096)
+	if !strings.HasSuffix(url, ".local:8096/") || !strings.HasPrefix(url, "http://") {
+		t.Errorf("published application URL is %q, want this machine's name and port", url)
+	}
+	if strings.Contains(url, "127.0.0.1") {
+		t.Error("a published application was given a loopback address")
+	}
+
+	onlyHere := Manifest{Network: ManifestNetwork{
+		InternalPort: 80, Protocol: "http", Path: "/",
+	}}
+	if url := appURL(onlyHere, 32768); url != "http://127.0.0.1:32768/" {
+		t.Errorf("loopback application URL is %q", url)
+	}
+
+	// Nothing to open, and nothing a browser could open, produce no address at
+	// all rather than one that does not work.
+	if url := appURL(published, 0); url != "" {
+		t.Errorf("an application with no port was given the address %q", url)
+	}
+	dlna := Manifest{Network: ManifestNetwork{InternalPort: 1900, Protocol: "udp"}}
+	if url := appURL(dlna, 1900); url != "" {
+		t.Errorf("a UDP service was given the browser address %q", url)
 	}
 }

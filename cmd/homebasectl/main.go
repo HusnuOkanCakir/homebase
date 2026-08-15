@@ -137,6 +137,7 @@ func usage(w io.Writer) {
   homebasectl apps logs NAME
         The application catalogue, and what is installed from it.
 
+  homebasectl apps storage APP [SLOT DISK]
   homebasectl storage [list]
   homebasectl storage disks
   homebasectl storage format /dev/sdX [--name NAME]

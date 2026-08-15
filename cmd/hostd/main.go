@@ -111,14 +111,14 @@ func main() {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	if err := run(log, registry, apps, *socketPath, *auditPath, *peerUser); err != nil {
+	if err := run(log, registry, apps, storage, *socketPath, *auditPath, *peerUser); err != nil {
 		log.Error("hostd failed", "error", err)
 		os.Exit(1)
 	}
 }
 
 func run(log *slog.Logger, registry *hostd.Registry, apps *hostd.Catalogue,
-	socketPath, auditPath, peerUser string) error {
+	storage *hostd.StorageServices, socketPath, auditPath, peerUser string) error {
 	if os.Geteuid() != 0 {
 		// Not fatal: it is useful to run hostd unprivileged while developing,
 		// and the operations that need root will fail on their own terms with a
@@ -164,6 +164,13 @@ func run(log *slog.Logger, registry *hostd.Registry, apps *hostd.Catalogue,
 	// is invalid, and here is why".
 	for name, reason := range apps.Rejected() {
 		log.Error("rejected an application manifest", "file", name, "reason", reason)
+	}
+
+	// This server's own disk is offered as a place to keep files, so the place
+	// has to be there. See internal/hostd/ops_storage.go.
+	if err := storage.PrepareInternalLocation(); err != nil {
+		log.Warn("could not create the directory for this server's own disk",
+			"error", err)
 	}
 
 	// Wake-on-LAN is a property of the card, and the driver resets it on every

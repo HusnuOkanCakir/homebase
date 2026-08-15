@@ -274,6 +274,29 @@ type AppStatus struct {
 	// DataPath is where this application's data lives, so a user can be told
 	// what uninstalling will leave behind.
 	DataPath string `json:"data_path"`
+
+	// HostPort is the port on this machine the application answers on, read
+	// back from the runtime rather than assumed — a container asked to take any
+	// free port only reveals which one afterwards.
+	//
+	// Nothing reported this until it was noticed that nothing could: an
+	// application would install, start, pass its health check and be reachable
+	// at an address no part of Homebase would tell anybody.
+	HostPort int `json:"host_port,omitempty"`
+
+	// ReachableFromNetwork distinguishes an application other machines can open
+	// from one bound to loopback. Without it, an address is worse than no
+	// address: 127.0.0.1:32768 is a real place that is not there from the
+	// laptop somebody is reading it on.
+	ReachableFromNetwork bool `json:"reachable_from_network"`
+
+	// Path is the base path the web interface is served under.
+	Path string `json:"path,omitempty"`
+
+	// URL is where to open it, composed here so that there is one answer rather
+	// than one per interface. Empty until the application is running and has a
+	// port, because an address that is not yet listening is worse than none.
+	URL string `json:"url,omitempty"`
 }
 
 // --- Handlers ----------------------------------------------------------------
@@ -307,6 +330,37 @@ func (s *AppServices) status(ctx context.Context, params AppRef) (any, error) {
 	return s.statusFor(ctx, manifest, s.docker.ping(ctx) == nil), nil
 }
 
+// appURL is where to open an application.
+//
+// The machine's own name rather than an address, because the address changes
+// when the router feels like it and the name does not. `.local` is what the rest
+// of Homebase advertises itself as and what the installer tells people to type.
+//
+// A loopback application gets a loopback URL, which is correct and is why the
+// reachable flag travels beside it: 127.0.0.1:32768 is a real place, and it is
+// not there from the laptop somebody is reading it on.
+func appURL(manifest Manifest, hostPort int) string {
+	if hostPort == 0 {
+		return ""
+	}
+	scheme := manifest.Network.Protocol
+	if scheme != "http" && scheme != "https" {
+		// DLNA and the rest are not things a browser opens.
+		return ""
+	}
+	host := "127.0.0.1"
+	if manifest.Network.PublishedToNetwork() {
+		if name, err := os.Hostname(); err == nil && name != "" {
+			host = name + ".local"
+		}
+	}
+	path := manifest.Network.Path
+	if path == "" {
+		path = "/"
+	}
+	return fmt.Sprintf("%s://%s:%d%s", scheme, host, hostPort, path)
+}
+
 func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp bool) AppStatus {
 	status := AppStatus{
 		ID:           manifest.ID,
@@ -317,6 +371,9 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 		Version:      manifest.Container.Version,
 		InternalPort: manifest.Network.InternalPort,
 		DataPath:     s.appDataDir(manifest.ID),
+
+		ReachableFromNetwork: manifest.Network.PublishedToNetwork(),
+		Path:                 manifest.Network.Path,
 	}
 
 	if !dockerUp {
@@ -338,6 +395,10 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 	}
 
 	status.Installed = boolPtr(true)
+	if manifest.Network.InternalPort > 0 {
+		_, status.HostPort = state.publishedPort(manifest.Network.InternalPort)
+		status.URL = appURL(manifest, status.HostPort)
+	}
 	switch {
 	// Checked before Running, because Docker reports both while a container is
 	// being brought back after it exited. An application crash-looping every two
@@ -743,12 +804,22 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 	if manifest.Network.InternalPort > 0 && !manifest.Network.HostNetwork {
 		port := fmt.Sprintf("%d/tcp", manifest.Network.InternalPort)
 		config.ExposedPorts = map[string]struct{}{port: {}}
-		config.HostConfig.PortBindings = map[string][]portBinding{
-			// Bound to localhost, not 0.0.0.0. Applications are reached through
-			// Homebase, which is what applies authentication — an application
-			// published straight onto the LAN is one nothing is guarding.
-			port: {{HostIP: "127.0.0.1", HostPort: "0"}},
+
+		// Loopback on a port Docker picks, unless the manifest says this
+		// application is reachable from the network — which only an application
+		// with its own accounts may say. See ManifestNetwork.ReachableFrom.
+		binding := portBinding{HostIP: "127.0.0.1", HostPort: "0"}
+		if manifest.Network.PublishedToNetwork() {
+			// A fixed port, and the one the application is known by: Jellyfin is
+			// 8096 to every client that looks for it, and a port that changes
+			// each time the container is recreated is an address nobody can
+			// write down, bookmark, or put in a television.
+			binding = portBinding{
+				HostIP:   "0.0.0.0",
+				HostPort: strconv.Itoa(manifest.Network.PublishedPort()),
+			}
 		}
+		config.HostConfig.PortBindings = map[string][]portBinding{port: {binding}}
 	}
 	if manifest.Network.HostNetwork {
 		config.HostConfig.NetworkMode = "host"
@@ -976,8 +1047,8 @@ func (s *AppServices) locateUserSelected(manifest Manifest, storage ManifestStor
 			Message:     manifest.Name + " needs somewhere to keep its files.",
 			Detail:      described,
 			Recoverable: true,
-			Recovery: "Choose a disk for " + manifest.Name + " in the storage " +
-				"settings, then try again.",
+			Recovery: "Choose where " + manifest.Name + " should keep its files, " +
+				"then try again. This server's own disk is one of the choices.",
 			Status: 409,
 		}
 	}

@@ -521,6 +521,30 @@ type containerState struct {
 		Image  string            `json:"Image"`
 		Labels map[string]string `json:"Labels"`
 	} `json:"Config"`
+
+	// Where the container actually ended up, which is not always where it was
+	// asked to go: a binding of port 0 means Docker chooses, and the choice is
+	// only knowable afterwards. Read back rather than assumed, so that what
+	// Homebase reports is where the application is rather than where it was
+	// meant to be.
+	NetworkSettings struct {
+		Ports map[string][]struct {
+			HostIP   string `json:"HostIp"`
+			HostPort string `json:"HostPort"`
+		} `json:"Ports"`
+	} `json:"NetworkSettings"`
+}
+
+// publishedPort reports the host address a container's port ended up on.
+func (c *containerState) publishedPort(internal int) (hostIP string, hostPort int) {
+	for _, binding := range c.NetworkSettings.Ports[fmt.Sprintf("%d/tcp", internal)] {
+		port, err := strconv.Atoi(binding.HostPort)
+		if err != nil {
+			continue
+		}
+		return binding.HostIP, port
+	}
+	return "", 0
 }
 
 // inspectContainer returns the container's state, or (nil, nil) when there is no

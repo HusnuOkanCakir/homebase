@@ -278,10 +278,102 @@ func appsCommand(args []string, stdout io.Writer) error {
 			})
 	case "logs":
 		return withClient("apps logs", rest, stdout, appLogs)
+	case "storage":
+		return withClient("apps storage", rest, stdout, appStorage)
 	default:
 		return usageError{fmt.Errorf("unknown apps command %q — try list, install, "+
-			"start, stop, restart, uninstall, logs", action)}
+			"start, stop, restart, uninstall, logs, storage", action)}
 	}
+}
+
+// appStorage shows where an application keeps its files, and chooses.
+//
+//	homebasectl apps storage jellyfin                   what it needs and has
+//	homebasectl apps storage jellyfin media internal    put it on this server
+//
+// There was no way to do this from a terminal at all until now: the operation
+// and the endpoint both existed and nothing invoked them, so an application
+// declaring user-selected storage could be installed and could never be started.
+func appStorage(ctx context.Context, c *Client, o *options, args []string, w io.Writer) error {
+	if len(args) == 0 {
+		return usageError{errors.New(
+			"which application? Try `homebasectl apps storage jellyfin`")}
+	}
+	app := args[0]
+
+	if len(args) >= 2 {
+		if len(args) < 3 {
+			return usageError{fmt.Errorf(
+				"which disk should hold %q? Run `homebasectl storage` to see them", args[1])}
+		}
+		var result any
+		if err := c.Post(ctx, "/apps/"+app+"/storage", map[string]any{
+			"storage_id": args[1],
+			"location":   args[2],
+		}, &result); err != nil {
+			return err
+		}
+		if o.asJSON {
+			return printResponse(w, c, result)
+		}
+		fmt.Fprintf(w, "%s will keep its %s on %s.\n", app, args[1], args[2])
+		fmt.Fprintf(w, "\nStart it with: homebasectl apps start %s\n", app)
+		return nil
+	}
+
+	var storage struct {
+		Name    string `json:"name"`
+		Ready   bool   `json:"ready"`
+		Storage []struct {
+			ID           string `json:"id"`
+			Type         string `json:"type"`
+			Description  string `json:"description"`
+			Location     string `json:"location"`
+			LocationName string `json:"location_name"`
+			Ready        bool   `json:"ready"`
+			Path         string `json:"path"`
+		} `json:"storage"`
+	}
+	if err := c.Get(ctx, "/apps/"+app+"/storage", &storage); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, storage)
+	}
+
+	rows := [][]string{{"WHAT", "WHERE", "STATUS"}}
+	var missing []string
+	for _, slot := range storage.Storage {
+		where := "on this server, with the application"
+		if slot.Type == "user-selected" {
+			where = "not chosen yet"
+			if slot.LocationName != "" {
+				where = slot.LocationName
+			}
+		}
+		status := "ready"
+		if !slot.Ready {
+			status = "waiting"
+			if slot.Type == "user-selected" {
+				missing = append(missing, slot.ID)
+			}
+		}
+		rows = append(rows, []string{slot.ID, where, status})
+	}
+	writeTable(w, rows)
+
+	for _, slot := range storage.Storage {
+		if slot.Type == "user-selected" && slot.Description != "" {
+			fmt.Fprintf(w, "\n%s — %s\n", slot.ID, slot.Description)
+		}
+	}
+	if len(missing) > 0 {
+		fmt.Fprintf(w, "\nChoose a disk:\n\n    homebasectl apps storage %s %s <disk>\n",
+			app, missing[0])
+		fmt.Fprintln(w, "\nRun `homebasectl storage` for the list. `internal` is this")
+		fmt.Fprintln(w, "server's own disk, which is fine for anything that fits on it.")
+	}
+	return nil
 }
 
 type application struct {
@@ -291,6 +383,11 @@ type application struct {
 	Version string `json:"version,omitempty"`
 	URL     string `json:"url,omitempty"`
 	Health  string `json:"health,omitempty"`
+
+	// Whether anything other than this machine can open it. Without this an
+	// address is worse than none: a loopback URL is a real place that is not
+	// there from the laptop somebody is reading it on.
+	ReachableFromNetwork bool `json:"reachable_from_network"`
 }
 
 func listApps(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
@@ -311,11 +408,35 @@ func listApps(ctx context.Context, c *Client, o *options, _ []string, w io.Write
 	sort.Slice(reply.Items, func(a, b int) bool { return reply.Items[a].ID < reply.Items[b].ID })
 
 	rows := [][]string{{"ID", "STATE", "VERSION", "ADDRESS"}}
+	onlyHere := false
 	for _, app := range reply.Items {
-		rows = append(rows, []string{app.ID, app.State, app.Version, app.URL})
+		address := app.URL
+		if address != "" && !app.ReachableFromNetwork {
+			address += "  (this server only)"
+			onlyHere = true
+		}
+		rows = append(rows, []string{app.ID, app.State, app.Version, address})
 	}
 	writeTable(w, rows)
+	if onlyHere {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "\"this server only\" means the application is not published onto")
+		fmt.Fprintln(w, "the network. Reach it with an ssh tunnel:")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "    ssh -L 8000:127.0.0.1:PORT console@"+shortHost()+"")
+	}
 	return nil
+}
+
+// shortHost is the name this client is talking to, for use in an example
+// command. The address as typed, so the example can be pasted as printed.
+func shortHost() string {
+	host := os.Getenv("HOMEBASE_ADDRESS")
+	if host == "" {
+		return "homebase.local"
+	}
+	host = strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
+	return strings.TrimSuffix(strings.SplitN(host, "/", 2)[0], ":443")
 }
 
 func actOnApp(ctx context.Context, c *Client, o *options, action string,
@@ -338,6 +459,14 @@ func actOnApp(ctx context.Context, c *Client, o *options, action string,
 		path = "/apps/" + id + "/install"
 	}
 	if err := c.Post(ctx, path, body, &job); err != nil {
+		// The one refusal that has a fix a person can type. hostd cannot phrase
+		// it: it answers a dashboard and a terminal from the same sentence, and
+		// "choose a disk in the storage settings" is no help at a prompt.
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Code == "app.storage_not_assigned" {
+			return fmt.Errorf("%w\n\nChoose a disk first:\n\n    "+
+				"homebasectl apps storage %s", err, id)
+		}
 		return err
 	}
 	return followJob(ctx, c, o, job, w)
@@ -347,8 +476,13 @@ func appLogs(ctx context.Context, c *Client, o *options, names []string, w io.Wr
 	if len(names) != 1 {
 		return usageError{errors.New("which application? — homebasectl apps logs NAME")}
 	}
+	// `lines` is the number asked for and `logs` is the text. This decoded
+	// `lines` as the log itself and failed on every application with
+	// "cannot unmarshal number into Go struct field .lines of type []string" —
+	// which is what `homebasectl apps logs` did for its whole existence, because
+	// nothing ever ran it against a server.
 	var reply struct {
-		Lines []string `json:"lines"`
+		Logs string `json:"logs"`
 	}
 	if err := c.Get(ctx, "/apps/"+names[0]+"/logs?lines=200", &reply); err != nil {
 		return err
@@ -356,9 +490,11 @@ func appLogs(ctx context.Context, c *Client, o *options, names []string, w io.Wr
 	if o.asJSON {
 		return printResponse(w, c, reply)
 	}
-	for _, line := range reply.Lines {
-		fmt.Fprintln(w, line)
+	if strings.TrimSpace(reply.Logs) == "" {
+		fmt.Fprintln(w, "Nothing in the log yet.")
+		return nil
 	}
+	fmt.Fprintln(w, strings.TrimRight(reply.Logs, "\n"))
 	return nil
 }
 
@@ -461,6 +597,7 @@ func listStorage(ctx context.Context, c *Client, o *options, _ []string, w io.Wr
 			MountPoint     string `json:"mount_point"`
 			TotalBytes     uint64 `json:"total_bytes"`
 			AvailableBytes uint64 `json:"available_bytes"`
+			Internal       bool   `json:"internal"`
 		} `json:"items"`
 	}
 	if err := c.Get(ctx, "/storage/locations", &reply); err != nil {
@@ -475,15 +612,34 @@ func listStorage(ctx context.Context, c *Client, o *options, _ []string, w io.Wr
 	}
 
 	rows := [][]string{{"ID", "NAME", "CONNECTED", "FREE", "OF"}}
+	external := false
 	for _, place := range reply.Items {
 		connected := "no"
 		if place.Mounted {
 			connected = "yes"
 		}
+		if place.Internal {
+			// "always" rather than "yes". The column asks whether the disk is
+			// plugged in, and for this one the question does not apply — a row
+			// saying "yes" invites somebody to wonder when it might say no.
+			connected = "always"
+		} else {
+			external = true
+		}
 		rows = append(rows, []string{place.ID, place.Name, connected,
 			humanBytes(place.AvailableBytes), humanBytes(place.TotalBytes)})
 	}
 	writeTable(w, rows)
+
+	// Said once, here, rather than at the moment somebody tries to schedule a
+	// backup and is refused. The refusal is correct and it arrives too late to
+	// be useful: by then they have decided backups are set up.
+	if !external {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Applications can keep their files on this server's own disk.")
+		fmt.Fprintln(w, "Backups cannot — a copy on the same disk as the original is")
+		fmt.Fprintln(w, "lost with it. Those need a disk you plug in.")
+	}
 	return nil
 }
 

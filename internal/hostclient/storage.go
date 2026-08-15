@@ -75,6 +75,11 @@ type Location struct {
 	TotalBytes     uint64 `json:"total_bytes"`
 	AvailableBytes uint64 `json:"available_bytes"`
 	Device         string `json:"device,omitempty"`
+
+	// Internal marks this server's own disk, which is always present and cannot
+	// be detached. Running out of space on it is a worse event than running out
+	// on an external disk, so the difference has to survive the trip to core.
+	Internal bool `json:"internal,omitempty"`
 }
 
 func (c *Client) Disks(ctx context.Context) ([]Disk, error) {

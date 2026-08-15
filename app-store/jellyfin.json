@@ -6,7 +6,6 @@
   "summary": "Watch your films, television and music on any device in your home.",
   "homepage": "https://jellyfin.org",
   "license": "GPL-2.0-only",
-
   "container": {
     "image": "jellyfin/jellyfin",
     "version": "10.10.3",
@@ -14,14 +13,16 @@
       "JELLYFIN_PublishedServerUrl": "http://localhost"
     }
   },
-
   "network": {
     "internal_port": 8096,
     "protocol": "http",
     "path": "/",
-    "discovery": ["dlna", "ssdp"]
+    "reachable_from": "network",
+    "discovery": [
+      "dlna",
+      "ssdp"
+    ]
   },
-
   "storage": [
     {
       "id": "config",
@@ -48,7 +49,6 @@
       "backup": false
     }
   ],
-
   "health": {
     "type": "http",
     "path": "/health",
@@ -57,19 +57,18 @@
     "start_period_seconds": 120,
     "failures_before_unhealthy": 3
   },
-
   "permissions": {
     "gpu": "optional",
-    "devices": ["dri"],
+    "devices": [
+      "dri"
+    ],
     "read_only_root": false
   },
-
   "resources": {
     "memory_limit_bytes": 2147483648,
     "memory_minimum_bytes": 1073741824,
     "disk_minimum_bytes": 2147483648
   },
-
   "credentials": [
     {
       "ref": "jellyfin-admin",
@@ -77,7 +76,6 @@
       "generate": true
     }
   ],
-
   "capabilities": [
     {
       "name": "media.get_status",
@@ -101,7 +99,6 @@
       "rollback": null
     }
   ],
-
   "events": [
     {
       "type": "transcode_failed",
@@ -116,11 +113,15 @@
       "recoverable": false
     }
   ],
-
-  "sensitive_fields": ["api_key", "admin_password"],
-
+  "sensitive_fields": [
+    "api_key",
+    "admin_password"
+  ],
   "requires": {
     "min_homebase_version": "0.3.0",
-    "architectures": ["amd64", "arm64"]
+    "architectures": [
+      "amd64",
+      "arm64"
+    ]
   }
 }

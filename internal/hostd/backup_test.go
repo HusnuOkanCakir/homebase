@@ -558,6 +558,39 @@ func TestBackingUpOntoTheDiskHoldingTheDataIsRefused(t *testing.T) {
 	}
 }
 
+// This server's own disk is now offered as a place applications can keep files,
+// which makes it reachable by anything that takes a location — including the
+// backup destination, where it is the one place a backup must never go.
+//
+// It fails the existing checks for none of the right reasons: it is mounted, it
+// is writable, and until an application is assigned to it nothing keeps files
+// there. So it needs a refusal of its own, and this is the test that says so.
+func TestABackupIsRefusedOntoTheServersOwnDisk(t *testing.T) {
+	s := backupServices(t)
+
+	err := s.requireUsableDestination(InternalLocationID, LocationState{
+		Location: Location{ID: InternalLocationID, Name: "This server's own disk"},
+		Mounted:  true,
+		Internal: true,
+	}, true)
+
+	if err == nil {
+		t.Fatal("a backup was allowed onto the disk it is backing up")
+	}
+	var hostErr *Error
+	if !asHostError(err, &hostErr) || hostErr.Code != "backup.destination_is_system_disk" {
+		t.Fatalf("got %v, want backup.destination_is_system_disk", err)
+	}
+	// The reason has to be in the message. "Not allowed" reads as Homebase
+	// being difficult about a disk with 900 GB free on it.
+	if !strings.Contains(hostErr.Message, "losing that disk") {
+		t.Errorf("the message does not say why: %q", hostErr.Message)
+	}
+	if !hostErr.Recoverable || hostErr.Recovery == "" {
+		t.Error("no way forward was offered")
+	}
+}
+
 // A disconnected or read-only destination fails before anything is written,
 // with an explanation rather than a filesystem error.
 func TestAnUnusableDestinationIsRefusedEarly(t *testing.T) {

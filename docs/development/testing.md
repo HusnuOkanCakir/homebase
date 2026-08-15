@@ -195,6 +195,20 @@ the sandbox it will really have. The VM test now checks `online is True` before
 unplugging anything, and there is a test in `internal/api` that opens a real
 socket rather than a fake one.
 
+### Reaching it the way the product does, not the way the test can
+
+The application test proved a container serves HTTP by asking Docker for its port
+and connecting from inside the VM. It passed for four milestones while installed
+applications were unreachable from anywhere: they were bound to loopback on a
+port Docker chose, and no part of Homebase reported it.
+
+The test was not wrong about the container. It answered a question nobody had —
+"does this image work" — instead of the one that matters, which is whether a
+person on the sofa can open it.
+
+**Reach the thing under test through the path a user has.** If that path does not
+exist, the test cannot be written, and *that* is the finding.
+
 ### Tests that depend on chance
 
 `vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.

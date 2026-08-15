@@ -79,11 +79,51 @@ func (c ManifestContainer) Reference() string {
 }
 
 type ManifestNetwork struct {
-	InternalPort int      `json:"internal_port,omitempty"`
-	Protocol     string   `json:"protocol,omitempty"`
-	Path         string   `json:"path,omitempty"`
-	HostNetwork  bool     `json:"host_network,omitempty"`
-	Discovery    []string `json:"discovery,omitempty"`
+	InternalPort int    `json:"internal_port,omitempty"`
+	Protocol     string `json:"protocol,omitempty"`
+	Path         string `json:"path,omitempty"`
+	HostNetwork  bool   `json:"host_network,omitempty"`
+
+	// ReachableFrom is "server" or "network", and empty means "server".
+	//
+	// Everything used to be "server": bound to 127.0.0.1 on a port Docker
+	// chose, on the reasoning that applications are reached through Homebase,
+	// which applies authentication. Homebase has no such proxy. So an installed
+	// application ran on a random loopback port that nothing reported, and could
+	// not be opened from anywhere — a media server nobody could watch anything
+	// on, which is a strange thing for a media server to be.
+	//
+	// The VM test did not notice because it asked Docker for the port and
+	// connected inside the machine. It proved the container serves HTTP and
+	// nothing whatever about anybody reaching it.
+	//
+	// "network" is therefore not a relaxation of the rule but the honest form of
+	// it: an application with its own accounts publishes itself and guards
+	// itself, and one without stays on loopback until there is a proxy in front
+	// of it. Which of the two an application is, is a decision made per
+	// application in a root-owned manifest and reviewed in a diff (ADR-0012).
+	ReachableFrom string `json:"reachable_from,omitempty"`
+
+	// HostPort is the port on the server, when published to the network.
+	// Defaults to InternalPort — stated explicitly only when the container's own
+	// port is one the server already uses.
+	HostPort int `json:"host_port,omitempty"`
+
+	Discovery []string `json:"discovery,omitempty"`
+}
+
+// PublishedPort is the port on the server an application answers on.
+func (n ManifestNetwork) PublishedPort() int {
+	if n.HostPort > 0 {
+		return n.HostPort
+	}
+	return n.InternalPort
+}
+
+// PublishedToNetwork reports whether this application is reachable from other
+// machines. Default-deny: anything that does not say so is on loopback.
+func (n ManifestNetwork) PublishedToNetwork() bool {
+	return n.ReachableFrom == "network"
 }
 
 type ManifestStorage struct {
@@ -276,6 +316,14 @@ func loadManifest(path string) (Manifest, error) {
 // has come off disk on somebody's machine and CI is not there. The three
 // constraints ADR-0012 and the schema call out — no privileged containers, no
 // floating tags, no host paths — are re-checked here for that reason.
+// reservedHostPorts are the ports on this machine an application may not take.
+var reservedHostPorts = map[int]string{
+	22:  "how this machine is administered over ssh",
+	53:  "name resolution",
+	80:  "where Homebase redirects to its own dashboard",
+	443: "where the Homebase dashboard is served",
+}
+
 func (m Manifest) Validate() error {
 	switch {
 	case m.ManifestVersion != 1:
@@ -318,6 +366,28 @@ func (m Manifest) Validate() error {
 	case "tcp", "command", "none":
 	default:
 		return fmt.Errorf("unknown health check type %q", m.Health.Type)
+	}
+
+	// Publishing onto the network is the one manifest field that decides whether
+	// a machine on the LAN can open this application, so what it may claim is
+	// checked here as well as in the schema.
+	if m.Network.PublishedToNetwork() {
+		switch {
+		case m.Network.InternalPort == 0:
+			return fmt.Errorf(`network.reachable_from is "network" but there is no port to publish`)
+		case m.Network.Protocol != "" && m.Network.Protocol != "http" && m.Network.Protocol != "https":
+			return fmt.Errorf("only http and https may be published to the network, not %q",
+				m.Network.Protocol)
+		}
+		// Ports this machine is already using. Publishing on one of them either
+		// fails at container creation or, worse, takes over the address the
+		// dashboard is served on — which would put an application where people
+		// expect Homebase and lock everybody out of the thing that could undo
+		// it.
+		if reserved := reservedHostPorts[m.Network.PublishedPort()]; reserved != "" {
+			return fmt.Errorf("network.host_port %d is %s; choose another",
+				m.Network.PublishedPort(), reserved)
+		}
 	}
 
 	if len(m.Storage) == 0 {

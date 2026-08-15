@@ -890,6 +890,23 @@ func (s *BackupServices) requireUsableDestination(id string, location LocationSt
 	if !found {
 		return unknownLocation(id)
 	}
+	// The server's own disk. Refused for the reason the whole check exists: a
+	// backup is a second copy somewhere else, and this is not somewhere else.
+	// Worse than the general case, in fact — the system disk failing takes the
+	// backup, the data and the machine together.
+	if location.Internal {
+		return &Error{
+			Code: "backup.destination_is_system_disk",
+			Message: "A backup cannot be kept on this server's own disk, because " +
+				"losing that disk would lose the backup with everything else.",
+			Detail:      "the destination is " + InternalLocationID,
+			Recoverable: true,
+			Recovery: "Plug in a USB disk or an external drive and back up to " +
+				"that. A copy on the same disk as the original protects against " +
+				"deleting a file by mistake, and against nothing else.",
+			Status: 409,
+		}
+	}
 	if !location.Mounted {
 		return &Error{
 			Code:        "backup.destination_not_connected",

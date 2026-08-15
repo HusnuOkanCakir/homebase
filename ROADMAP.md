@@ -566,6 +566,41 @@ product cannot fix it and should not pretend to; what it can do is name it, and
 `homebasectl wake` now does, along with the ERP and Deep Sleep settings that do
 the same thing under other names.
 
+#### Using it found what testing it had not
+
+Installing an application and trying to watch something found three things that
+every test had passed over.
+
+**Applications required a disk that was not in the machine.** Storage locations
+were filesystems added by UUID, so the only way to get one was to plug something
+in — a server with a 1 TB drive could not run a media application without an
+external disk sitting beside it. The server's own disk is now a location like
+any other, chosen by name. What the original design was protecting against is
+kept: an application must never *fall back* to the system disk when the disk it
+was given is missing. That is about silence, and choosing it deliberately is not
+silent. It cannot be a backup destination, and it cannot be removed or erased.
+
+**Nothing could reach an installed application.** Containers were bound to
+127.0.0.1 on a port Docker chose, on the reasoning that applications are reached
+through Homebase, which applies authentication. Homebase has no such proxy.
+Nothing reported the port either. So an application would install, start, pass
+its health check, and sit at an address no part of the product would tell anybody
+— a media server nobody could watch anything on.
+
+The VM test asked Docker for the port and connected from inside the machine. It
+proved the container serves HTTP and nothing whatever about anybody reaching it.
+
+A manifest now says whether an application is reachable from the network, and may
+only say so if it authenticates its own users — a per-application decision in a
+root-owned file, reviewed in a diff, refused outright for the ports the server
+itself uses. Jellyfin and File Browser have their own accounts and are published;
+the test application does not and is not.
+
+**There was no way to give an application a disk from a terminal**, and
+`homebasectl apps logs` had never worked — it decoded the line *count* as the log
+text and failed on every application with a Go type error. Both existed as API
+endpoints. Neither had ever been run against a server.
+
 #### Secure Boot, which is the one that would have failed silently
 
 Every laptop bought in the last decade has Secure Boot on and Microsoft's keys enrolled from
