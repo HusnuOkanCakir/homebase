@@ -3336,6 +3336,46 @@ components:
                 Only set when something is worth telling somebody. A machine at an ordinary
                 temperature says nothing: an indicator that is always lit is one people stop
                 seeing.
+        fan:
+          type: object
+          additionalProperties: false
+          description: |
+            What the cooling is doing, reported beside the temperature and only meaningful
+            with it. Loud and cool is a fan fault; loud and hot is a heatsink full of dust.
+            From across a room those are the same sound and they have completely different
+            fixes.
+
+            Homebase reports the fan and does not drive it. On the first real laptop, full
+            load reached 89 °C with the fan still climbing, past the 84 °C the processor
+            throttles at — a manual fan setting on a machine like that is a way to cook a
+            computer that is already struggling.
+          properties:
+            rpm:
+              type: [integer, "null"]
+              description: |
+                Measured speed. `null` where there is no sensor — every VM — and also on
+                hardware whose driver refuses to report a speed while the fan is under
+                manual control, which is its own answer. **Never zero**, which would read
+                as a seized fan rather than an absent sensor.
+            percent:
+              type: [integer, "null"]
+              minimum: 0
+              maximum: 100
+              description: |
+                How hard it is being driven. Reported alongside `rpm` because they answer
+                different questions: rpm is how loud it is, percent is how much is left.
+            label:
+              type: string
+              description: The kernel's name for it, such as `cpu_fan`.
+            controlled:
+              type: string
+              enum: [firmware, manual, full]
+              description: |
+                Who decides the speed. `firmware` is the machine's own controller running
+                its curve, which is the normal and best state. `manual` means something has
+                overridden it. `full` is hwmon's "no control at all".
+            message:
+              type: string
 
     JobState:
       type: string

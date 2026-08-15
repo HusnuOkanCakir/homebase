@@ -130,6 +130,12 @@ type SystemResources struct {
 	// runs on old laptops in cupboards, and a machine cooking itself looks from
 	// the outside exactly like a machine that is broken.
 	Temperature Temperature `json:"temperature"`
+
+	// Fan is what the cooling is doing. Reported beside the temperature because
+	// the two are only meaningful together: a quiet machine at 50 °C is fine, a
+	// loud one at 50 °C has a fan problem, and a loud one at 90 °C has a dust
+	// problem. The number alone cannot tell those apart.
+	Fan Fan `json:"fan"`
 }
 
 type Memory struct {
@@ -167,6 +173,7 @@ func systemGetResources(ctx context.Context, _ NoParams) (any, error) {
 		UptimeSeconds: uptime,
 		Power:         readPower(),
 		Temperature:   readTemperature(sysThermal),
+		Fan:           readFan(sysHwmon),
 	}, nil
 }
 

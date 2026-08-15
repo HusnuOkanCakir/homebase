@@ -216,6 +216,14 @@ type SystemResources struct {
 
 	// Temperature, with a nil reading meaning "this machine cannot tell" rather
 	// than "cold". Every VM is in that state and so is some real hardware.
+	Fan struct {
+		RPM        *int   `json:"rpm"`
+		Percent    *int   `json:"percent"`
+		Label      string `json:"label,omitempty"`
+		Controlled string `json:"controlled,omitempty"`
+		Message    string `json:"message,omitempty"`
+	} `json:"fan"`
+
 	Temperature struct {
 		Celsius *int   `json:"celsius"`
 		Sensor  string `json:"sensor,omitempty"`

@@ -149,3 +149,115 @@ func TestTheAdviceIsSomethingAPersonCanActOn(t *testing.T) {
 		}
 	}
 }
+
+// --- The fan -------------------------------------------------------------------
+
+func writeHwmon(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for name, content := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestTheFanIsReportedWithWhoIsDrivingIt(t *testing.T) {
+	root := writeHwmon(t, map[string]string{
+		"hwmon0/name":        "acpitz\n",
+		"hwmon1/name":        "asus\n",
+		"hwmon1/fan1_input":  "3300\n",
+		"hwmon1/fan1_label":  "cpu_fan\n",
+		"hwmon1/pwm1":        "170\n",
+		"hwmon1/pwm1_enable": "2\n",
+	})
+
+	fan := readFan(root)
+	if fan.RPM == nil || *fan.RPM != 3300 {
+		t.Errorf("rpm = %v, want 3300", fan.RPM)
+	}
+	// 170 of 255 is two thirds, and the point of reporting it is that it says
+	// how much cooling is left — which the rpm alone does not.
+	if fan.Percent == nil || *fan.Percent != 66 {
+		t.Errorf("percent = %v, want 66", fan.Percent)
+	}
+	if fan.Controlled != "firmware" {
+		t.Errorf("controlled = %q, want firmware", fan.Controlled)
+	}
+	if fan.Message != "" {
+		t.Errorf("a normally behaving fan said something: %q", fan.Message)
+	}
+}
+
+// A fan somebody pinned and a fan working hard on a hot machine sound exactly
+// alike from across a room, and the fixes are completely different — one is a
+// setting, the other is a heatsink full of dust. So who is driving it is
+// reported, and an override is called out.
+func TestAnOverriddenFanSaysSo(t *testing.T) {
+	root := writeHwmon(t, map[string]string{
+		"hwmon0/name":        "asus\n",
+		"hwmon0/fan1_input":  "4200\n",
+		"hwmon0/pwm1":        "255\n",
+		"hwmon0/pwm1_enable": "1\n",
+	})
+
+	fan := readFan(root)
+	if fan.Controlled != "manual" {
+		t.Errorf("controlled = %q, want manual", fan.Controlled)
+	}
+	if fan.Message == "" {
+		t.Error("a fan under manual control said nothing about it")
+	}
+
+	// pwm1_enable of 0 is hwmon's "no control at all", which on most hardware
+	// means full speed — a different thing from somebody having chosen a value.
+	root = writeHwmon(t, map[string]string{
+		"hwmon0/name": "asus\n", "hwmon0/fan1_input": "5000\n",
+		"hwmon0/pwm1_enable": "0\n",
+	})
+	if got := readFan(root).Controlled; got != "full" {
+		t.Errorf("controlled = %q, want full", got)
+	}
+}
+
+// A machine with no fan sensor reports nothing rather than zero. Every VM is
+// this case, and 0 rpm reads as a seized fan rather than an absent sensor — the
+// same rule the temperature follows.
+func TestAMachineWithNoFanReportsNothing(t *testing.T) {
+	root := writeHwmon(t, map[string]string{
+		"hwmon0/name":        "acpitz\n",
+		"hwmon0/temp1_input": "45000\n",
+	})
+	fan := readFan(root)
+	if fan.RPM != nil || fan.Percent != nil {
+		t.Errorf("a machine with no fan reported rpm=%v percent=%v", fan.RPM, fan.Percent)
+	}
+	if readFan(filepath.Join(root, "nothing-here")).RPM != nil {
+		t.Error("a missing hwmon tree reported a fan")
+	}
+}
+
+// asus_wmi returns ENXIO for fan1_input while the fan is under manual control,
+// so the speed genuinely cannot be read. Reported as unknown rather than as
+// zero, and the rest of the answer still comes back.
+func TestAFanWhoseSpeedCannotBeReadStillReportsTheRest(t *testing.T) {
+	root := writeHwmon(t, map[string]string{
+		"hwmon0/name": "asus\n", "hwmon0/fan1_input": "",
+		"hwmon0/pwm1": "100\n", "hwmon0/pwm1_enable": "1\n",
+	})
+	fan := readFan(root)
+	if fan.RPM != nil {
+		t.Errorf("an unreadable speed was reported as %v", *fan.RPM)
+	}
+	if fan.Percent == nil || *fan.Percent != 39 {
+		t.Errorf("percent = %v, want 39 — the rest of the answer is still known", fan.Percent)
+	}
+	if fan.Controlled != "manual" {
+		t.Errorf("controlled = %q, want manual", fan.Controlled)
+	}
+}

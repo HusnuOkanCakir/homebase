@@ -1303,6 +1303,12 @@ func systemCommand(args []string, stdout io.Writer) error {
 					State   string `json:"state"`
 					Message string `json:"message"`
 				} `json:"temperature"`
+				Fan struct {
+					RPM        *int   `json:"rpm"`
+					Percent    *int   `json:"percent"`
+					Controlled string `json:"controlled"`
+					Message    string `json:"message"`
+				} `json:"fan"`
 			}
 			if err := c.Get(ctx, "/system", &info); err != nil {
 				return err
@@ -1321,8 +1327,28 @@ func systemCommand(args []string, stdout io.Writer) error {
 				fmt.Fprintf(w, "Heat:    %d °C (%s)\n",
 					*info.Temperature.Celsius, info.Temperature.State)
 			}
-			if info.Temperature.Message != "" {
-				fmt.Fprintf(w, "\n%s\n", info.Temperature.Message)
+			// Beside the temperature, because neither number means anything
+			// alone: loud and cool is a fan fault, loud and hot is a dust
+			// problem, and they sound identical from across a room.
+			if info.Fan.RPM != nil || info.Fan.Percent != nil {
+				fmt.Fprint(w, "Fan:     ")
+				switch {
+				case info.Fan.RPM != nil && info.Fan.Percent != nil:
+					fmt.Fprintf(w, "%d rpm (%d%%)", *info.Fan.RPM, *info.Fan.Percent)
+				case info.Fan.RPM != nil:
+					fmt.Fprintf(w, "%d rpm", *info.Fan.RPM)
+				default:
+					fmt.Fprintf(w, "%d%%", *info.Fan.Percent)
+				}
+				if info.Fan.Controlled != "" {
+					fmt.Fprintf(w, ", %s controlled", info.Fan.Controlled)
+				}
+				fmt.Fprintln(w)
+			}
+			for _, message := range []string{info.Temperature.Message, info.Fan.Message} {
+				if message != "" {
+					fmt.Fprintf(w, "\n%s\n", message)
+				}
 			}
 			return nil
 		})

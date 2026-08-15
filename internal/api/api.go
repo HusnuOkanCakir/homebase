@@ -412,6 +412,10 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.Us
 		"load_average": resources.LoadAverage,
 		"power":        resources.Power,
 		"temperature":  resources.Temperature,
+		// Beside the temperature and never without it. A fan speed on its own
+		// says nothing: loud and cool is a fan fault, loud and hot is a
+		// heatsink full of dust, and they sound the same from across a room.
+		"fan": resources.Fan,
 	})
 }
 
