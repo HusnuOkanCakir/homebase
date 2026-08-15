@@ -173,6 +173,28 @@ worth it after anything that changes how the product is reached or installed.
 The installer suite is left out of that loop deliberately — it takes fifteen
 minutes on its own and boots a real Ubuntu ISO.
 
+### A check that can only answer "no"
+
+The internet check lived in `hostd`, whose unit sets
+`RestrictAddressFamilies=AF_UNIX AF_NETLINK`. It could not open a socket, so it
+returned `false` on every machine that ever ran it, for four milestones.
+
+Two tests covered it and neither could fail.
+
+The unit tests injected a fake dialler. They exercised the logic exactly as
+intended and never asked whether the process was permitted to do the thing —
+which is the one question that mattered.
+
+The VM test asserted `online is False`, and only after taking the interface down.
+It passed every time, for a reason that had nothing to do with the interface.
+
+**A check that can only answer "no" passes every test that only asks when the
+answer should be no.** When a function has one interesting output, assert the
+other one too — and at least once, in the process that will really run it, with
+the sandbox it will really have. The VM test now checks `online is True` before
+unplugging anything, and there is a test in `internal/api` that opens a real
+socket rather than a fake one.
+
 ### Tests that depend on chance
 
 `vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.

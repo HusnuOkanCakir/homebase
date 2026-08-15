@@ -14,7 +14,7 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–8 complete. Milestone 9 in progress; 10–12 rescoped.** A USB stick turns a Windows
+**Current position: Milestones 0–8, 10 and 11 complete. Milestone 9 in progress.** A USB stick turns a Windows
 laptop into a working server, a new server says what to do next, and it is then reachable by
 name over HTTPS from any device in the house. It backs itself up every night, looks for
 updates on its own, applies one and puts the previous version back if it does not work, and
@@ -27,17 +27,18 @@ it boots with Secure Boot enforcing, as every laptop ships; and it says how hot 
 getting, because an old machine in a cupboard that is cooking looks from the outside exactly
 like one that is broken.
 
-What is still missing is hardware. Everything above is proven in VMs — with real firmware,
-a real `mac80211` stack and a real WPA2 handshake, but emulated disks and no lid. Milestone 9
-finishes on real laptops, which is where driver quirks, lid-close behaviour, thermal
-throttling and USB disks that misbehave all arrive at once. Making the installer stick also
-still takes one command on a Linux machine; the graphical tool for Windows and macOS is
-Milestone 10, and it is what Stage 1 is still missing.
+**It now runs on a real laptop.** An ASUS with a spinning disk and Windows on it, installed
+from the USB stick, reachable by name over HTTPS, reporting its own temperature. That
+afternoon found four bugs no VM could have — the worst being an internet check that had
+never worked on any installation, because the process it lived in is forbidden from opening
+a socket. They are recorded in Milestone 9 below, because how they were missed matters more
+than what they were.
 
-What it cannot do yet is the half a home server is actually for: **be reached from outside
-the house**, and **share files onto the network**. Both are now milestones rather than
-deferrals. And the whole of it is still driven through a browser or the HTTP API —
-`homebasectl` has three commands, which for this audience is the wrong way round.
+What is still missing is *more* hardware: one laptop is a data point, not a milestone.
+Driver quirks, other Wi-Fi adapters, USB disks that misbehave.
+
+The last gap is **sharing files onto the network** — Milestone 12. Remote access and the
+terminal surface both landed.
 
 Nothing has been released. The release machinery exists and has never been run for real, and
 there is no host for the update archive yet.
@@ -496,12 +497,59 @@ it is a disclosure with a download button.
       signatures and Microsoft's keys enrolled, which is how every laptop ships
 - [x] **Thermal reporting** — the machine says how hot it is, and says nothing rather than
       zero when it cannot tell
+- [x] **The first real laptop**, which found four bugs in an afternoon — see below
 - [ ] Intel and AMD laptops, with and without TPM, various Wi-Fi adapters
 - [ ] Lid-close behaviour and sleep prevention, on hardware with a lid
 - [ ] Power-loss recovery on real disks, Wi-Fi reconnection, USB disk handling
 
 **Done when:** three different laptops complete install → first boot → app install → reboot
 → backup → restore, with no manual Linux commands at any point.
+
+#### What one real laptop found in an afternoon
+
+An ASUS with a 5400 rpm 1 TB drive and Windows on it. Everything below was found
+by installing Homebase on it and typing four commands.
+
+**The installer died before it started.** Probing seven Windows partitions on a
+slow spinning disk took 91 seconds against subiquity's 90-second timeout, and the
+install ended in a Python traceback and a root shell. The seed now clears the
+target disk in `early-commands`, which run before the probe — it destroys nothing
+the install was not about to destroy, and it refuses to guess when there is more
+than one candidate disk. No VM could have produced this: the lab's disks are
+qcow2 images on an SSD with no rotational latency and at most two partitions.
+
+**`installer devices` refused a USB stick that would have worked.** The floor was
+4 GB, chosen by guessing; a nominal 4 GB stick holds 3.88 GB and the image needs
+3.43 GB. The writer had computed the real figure all along. The floor is now a
+sanity check rather than a pretend requirement.
+
+**The system disk was reported as mounted at `/var/tmp`.** The mount table kept
+whichever entry came last, and `PrivateTmp=yes` on hostd's own unit gives it a
+private `/var/tmp` backed by the root device. `/` now wins outright.
+
+**The internet check had never worked. On any installation. Ever.**
+`homebase-hostd.service` sets `RestrictAddressFamilies=AF_UNIX AF_NETLINK` — a
+restriction added deliberately and defended at length — and the check lived
+inside hostd, so it could not open a socket and returned false on every machine
+that ever ran it, including one downloading Ubuntu updates while it said so.
+
+Nothing caught it for four milestones, and that is the part worth recording. The
+unit tests injected a fake dialler: they exercised the logic perfectly and never
+asked whether the process could execute it. The VM suite asserted `online is
+False`, and only after taking the interface down — passing every time for a
+reason that had nothing to do with the interface. **A check that can only answer
+"no" passes every test that only asks when the answer should be no.**
+
+It is in core now, which is allowed a socket, and verified on the machine that
+found it. A second lesson came free: the first diagnosis was that the network
+blocked TCP/53. It does not — that server reaches `1.1.1.1:53` perfectly well. A
+cause inferred from a symptom, wrong, and the real cause was a line written by
+the same hand months earlier.
+
+**Wake-on-LAN was reported as unsupported on hardware that supports it.** Same
+root cause: reading the setting needs `SIOCETHTOOL` on an `AF_INET` socket. It
+now says it cannot tell, which is true; the real answer needs ethtool's netlink
+interface and is not written.
 
 #### Secure Boot, which is the one that would have failed silently
 

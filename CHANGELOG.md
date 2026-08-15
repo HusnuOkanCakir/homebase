@@ -468,6 +468,26 @@ Milestone 0 — contracts and project machinery. No product code.
   packet — the one fact about waking it that has to be known *before* it sleeps, because
   nothing on a sleeping machine can answer
 
+Four found by installing on the first real laptop, an ASUS with a spinning disk
+and Windows on it:
+
+- **The installer died before it started.** Probing seven Windows partitions on a
+  5400 rpm drive took 91 seconds against subiquity's 90-second timeout. The seed
+  now clears the target disk in `early-commands`, which run before the probe —
+  and refuses to guess when there is more than one candidate disk, because a slow
+  probe is a worse experience while wiping the wrong disk is a different category
+  of thing
+- **`installer devices` refused a stick that would have worked.** A 4 GB floor
+  picked by guessing, against a 3.43 GB requirement the writer had been computing
+  correctly all along
+- **The system disk was reported as mounted at `/var/tmp`**, because the mount
+  table kept whichever entry came last and `PrivateTmp=yes` on hostd's unit gives
+  it a private `/var/tmp` on the root device
+- **The internet check had never worked on any installation.** hostd is forbidden
+  `AF_INET` by its own unit, so it could not dial and returned false everywhere —
+  including on a machine downloading Ubuntu updates while it said so. Moved to
+  core, which is allowed a socket, and verified on the machine that found it
+
 ### Fixed
 
 Three bugs of the same shape, each shipped in the commit before the test that caught it, and
