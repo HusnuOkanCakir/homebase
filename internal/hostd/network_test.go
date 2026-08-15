@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -142,5 +143,64 @@ func TestOnlineWhenSomethingAnswers(t *testing.T) {
 	// real machine here, so this asserts the pairing rather than the value.
 	if status.Gateway != "" && !status.Online {
 		t.Error("something answered but the result says offline")
+	}
+}
+
+// The internet check must not call a working connection broken.
+//
+// It dialled TCP/53 at the public resolvers, and said "the internet is not
+// reachable" on the first real network Homebase met — a machine that was
+// downloading Ubuntu updates while it said so. Plenty of networks block
+// outbound TCP/53 to public resolvers; some ISPs do it as policy.
+func TestABlockedResolverPortIsNotAnOfflineMachine(t *testing.T) {
+	tried := []string{}
+	services := &NetworkServices{
+		dial: func(_ context.Context, address string) error {
+			tried = append(tried, address)
+			// Exactly the network that broke this: 53 refused, 443 fine.
+			if strings.HasSuffix(address, ":53") {
+				return errors.New("connection refused")
+			}
+			return nil
+		},
+	}
+
+	if !services.reachesTheInternet(t.Context()) {
+		t.Errorf("a machine that can reach 443 was called offline; tried %v", tried)
+	}
+
+	// And 443 has to be tried first, or the answer costs two timeouts on every
+	// such network.
+	if len(tried) == 0 || !strings.HasSuffix(tried[0], ":443") {
+		t.Errorf("the first thing tried was %v, want a 443 address", tried)
+	}
+}
+
+// A genuinely offline machine still says so.
+func TestAnOfflineMachineIsStillOffline(t *testing.T) {
+	services := &NetworkServices{
+		dial: func(_ context.Context, _ string) error {
+			return errors.New("network is unreachable")
+		},
+	}
+	if services.reachesTheInternet(t.Context()) {
+		t.Error("a machine that could reach nothing was called online")
+	}
+}
+
+// Two organisations, because one being down is not evidence about the internet.
+func TestTheCheckAsksMoreThanOneOrganisation(t *testing.T) {
+	tried := map[string]bool{}
+	services := &NetworkServices{
+		dial: func(_ context.Context, address string) error {
+			tried[strings.Split(address, ":")[0]] = true
+			return errors.New("no")
+		},
+	}
+	services.reachesTheInternet(t.Context())
+
+	if len(tried) < 2 {
+		t.Errorf("only asked %v — one host being down is not evidence about "+
+			"the internet", tried)
 	}
 }

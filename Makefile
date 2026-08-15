@@ -40,7 +40,7 @@ $(STAMP): requirements-dev.txt
 # --- The full check ----------------------------------------------------------
 
 .PHONY: check
-check: hygiene lint validate docs-build go-lint go-check test-repo ## Run every check CI runs
+check: hygiene lint validate docs-build go-lint go-check test-repo test-seed ## Run every check CI runs
 	@echo
 	@echo "All checks passed."
 
@@ -151,6 +151,12 @@ go-lint: ## gofmt and go vet
 .PHONY: test-repo
 test-repo: ## Check the archive verifier refuses the archives it should
 	@python3 tests/unit/test_repo.py
+
+# The one piece of shell in this project that can destroy a disk. Tested against
+# invented device tables, with the destructive half replaced by an echo.
+.PHONY: test-seed
+test-seed: ## Check which disk the installer's seed would clear
+	@python3 tests/unit/test_installer_seed.py
 
 .PHONY: hostd-describe
 hostd-describe: ## Print the privileged operation registry as JSON

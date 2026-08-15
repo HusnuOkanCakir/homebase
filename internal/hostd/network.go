@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"unsafe"
 )
 
 // What the network actually looks like, read from the kernel.
@@ -73,6 +75,17 @@ type NetworkInterface struct {
 	// goes to sleep. A laptop in a cupboard that cannot be woken is one somebody
 	// has to walk to.
 	WakeOnLAN bool `json:"wake_on_lan"`
+
+	// WakeOnLANSupported is whether the card *could* be woken, whether or not it
+	// currently is.
+	//
+	// Three states rather than two, and the middle one is the only actionable
+	// one. The first real laptop reported `Supports Wake-on: pumbg` and
+	// `Wake-on: d` — the hardware does magic packets and the setting is off. To
+	// say "cannot be woken" there is accurate and useless: what somebody needs
+	// to know is that it could be, and that switching it on is a thing Homebase
+	// can do for them.
+	WakeOnLANSupported bool `json:"wake_on_lan_supported"`
 }
 
 // Reachable reports whether this interface is carrying an address.
@@ -142,7 +155,7 @@ func (s netScanner) describe(iface net.Interface) NetworkInterface {
 		MAC: iface.HardwareAddr.String(),
 	}
 
-	described.WakeOnLAN = wakeOnLANEnabled(s.classNet, iface.Name)
+	described.WakeOnLAN, described.WakeOnLANSupported = wakeOnLAN(iface.Name)
 
 	addrs, err := s.addrsOf(iface)
 	if err != nil {
@@ -233,21 +246,54 @@ func (s netScanner) nameservers() []string {
 	return servers
 }
 
-// wakeOnLANEnabled reports whether a card will start the machine when a magic
-// packet arrives.
+// wakeOnLAN asks the card whether it will wake the machine, and whether it could.
 //
-// Read from sysfs rather than by running `ethtool`, the same rule as everything
-// else in this file: parsing a tool's output means depending on its formatting
-// and its presence, and the kernel answers directly.
+// The kernel's own answer, through the same ioctl `ethtool` uses, rather than by
+// running `ethtool` and reading its output — the rule everywhere else in this
+// file. It also means no dependency on a package that may not be installed.
 //
-// `device/power/wakeup` is "enabled" or "disabled". It is the device's wakeup
-// capability rather than specifically the magic-packet flag — the distinction
-// matters to a kernel developer and not to somebody deciding whether their
-// server can be woken, and a card with wakeup disabled certainly cannot be.
-func wakeOnLANEnabled(classNet, name string) bool {
-	raw, err := os.ReadFile(filepath.Join(classNet, name, "device", "power", "wakeup"))
+// This replaced a read of `device/power/wakeup`, which is the *device's* wakeup
+// capability and not the magic-packet flag. On the first real laptop that said
+// "disabled" while `ethtool` said the hardware supports magic packets and the
+// setting is merely off — two very different facts flattened into one wrong one.
+func wakeOnLAN(name string) (enabled, supported bool) {
+	socket, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, 0)
 	if err != nil {
-		return false
+		return false, false
 	}
-	return strings.TrimSpace(string(raw)) == "enabled"
+	defer func() { _ = syscall.Close(socket) }()
+
+	// struct ethtool_wolinfo { __u32 cmd; __u32 supported; __u32 wolopts;
+	//                          __u8 sopass[6]; }
+	var info struct {
+		cmd       uint32
+		supported uint32
+		wolopts   uint32
+		sopass    [6]byte
+	}
+	info.cmd = ethtoolGetWOL
+
+	var request struct {
+		name [16]byte
+		data uintptr
+	}
+	copy(request.name[:], name)
+	request.data = uintptr(unsafe.Pointer(&info))
+
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(socket),
+		uintptr(siocEthtool), uintptr(unsafe.Pointer(&request)))
+	if errno != 0 {
+		return false, false
+	}
+
+	return info.wolopts&wakeMagic != 0, info.supported&wakeMagic != 0
 }
+
+const (
+	// ETHTOOL_GWOL, SIOCETHTOOL and WAKE_MAGIC, from the kernel's
+	// include/uapi/linux/ethtool.h and sockios.h. Constants rather than a
+	// dependency: hostd carries no third-party Go code (ADR-0002).
+	ethtoolGetWOL = 0x00000005
+	siocEthtool   = 0x8946
+	wakeMagic     = 1 << 5
+)

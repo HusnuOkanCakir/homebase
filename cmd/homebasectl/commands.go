@@ -774,12 +774,13 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 		Online     bool   `json:"online"`
 		Reachable  bool   `json:"reachable"`
 		Interfaces []struct {
-			Name      string   `json:"name"`
-			Kind      string   `json:"kind"`
-			Up        bool     `json:"up"`
-			Addresses []string `json:"addresses"`
-			MAC       string   `json:"mac"`
-			WakeOnLAN bool     `json:"wake_on_lan"`
+			Name               string   `json:"name"`
+			Kind               string   `json:"kind"`
+			Up                 bool     `json:"up"`
+			Addresses          []string `json:"addresses"`
+			MAC                string   `json:"mac"`
+			WakeOnLAN          bool     `json:"wake_on_lan"`
+			WakeOnLANSupported bool     `json:"wake_on_lan_supported"`
 		} `json:"interfaces"`
 	}
 	if err := c.Get(ctx, "/network", &status); err != nil {
@@ -814,9 +815,14 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 			// and what a wake-up packet is addressed to — which is worth knowing
 			// before the machine is asleep, because nothing on a sleeping
 			// machine can tell you afterwards.
-			wake := "cannot be woken by a network packet"
-			if iface.WakeOnLAN {
+			// Three states, and the middle one is the only actionable one.
+			wake := "this card cannot be woken by a network packet"
+			switch {
+			case iface.WakeOnLAN:
 				wake = "can be woken with: homebasectl wake " + normaliseMAC(iface.MAC)
+			case iface.WakeOnLANSupported:
+				wake = "could be woken, but the card has it switched off — " +
+					"sudo ethtool -s " + iface.Name + " wol g"
 			}
 			fmt.Fprintf(w, "           %s — %s\n", normaliseMAC(iface.MAC), wake)
 		}

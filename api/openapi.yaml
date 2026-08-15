@@ -2672,6 +2672,12 @@ components:
             Whether this card will start the machine when a magic packet arrives. Reported
             because nothing on a sleeping machine can run a command, so this has to be known
             *before* it goes to sleep.
+        wake_on_lan_supported:
+          type: boolean
+          description: |
+            Whether the card *could* be woken, whether or not it currently is. Three states
+            rather than two, and "supported but switched off" is the only actionable one —
+            saying "cannot be woken" about hardware that can is accurate and useless.
 
     UpdateStatus:
       type: object

@@ -92,10 +92,25 @@ func (s *NetworkServices) reachesTheInternet(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Well-known resolvers, reached by address rather than by name: this is a
-	// question about connectivity, and resolving a name first would make a
-	// broken resolver look like a broken connection.
-	for _, address := range []string{"1.1.1.1:53", "8.8.8.8:53"} {
+	// Port 443, not 53.
+	//
+	// This dialled TCP/53 at the public resolvers, and reported "the internet is
+	// not reachable" on the first real network Homebase was installed on — a
+	// machine that was downloading Ubuntu updates at the time. Plenty of
+	// networks block outbound TCP/53 to public resolvers; some ISPs do it as
+	// policy. Almost nothing blocks 443, because blocking it breaks the web.
+	//
+	// Reached by address rather than by name, still: this is a question about
+	// connectivity, and resolving a name first would make a broken resolver look
+	// like a broken connection.
+	//
+	// Two addresses at two organisations, because one being down is not evidence
+	// about the internet. 53 is kept as a last resort for the rarer network that
+	// allows it and not 443.
+	for _, address := range []string{
+		"1.1.1.1:443", "8.8.8.8:443",
+		"1.1.1.1:53", "8.8.8.8:53",
+	} {
 		if err := s.dial(ctx, address); err == nil {
 			return true
 		}

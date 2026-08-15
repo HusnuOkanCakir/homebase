@@ -307,6 +307,12 @@ type NetworkInterface struct {
 	// That is silent — the value is absent rather than wrong — and it is the
 	// third time in this project a middle layer has quietly eaten a field.
 	WakeOnLAN bool `json:"wake_on_lan"`
+
+	// WakeOnLANSupported completes the three states: not supported, supported
+	// but switched off, on. Listed here for the same reason as the field above —
+	// anything this struct does not name is silently dropped between hostd and
+	// core, which has now happened twice.
+	WakeOnLANSupported bool `json:"wake_on_lan_supported"`
 }
 
 // NetworkStatus is how the server is connected, and whether it is.
