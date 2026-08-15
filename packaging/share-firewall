@@ -1,0 +1,57 @@
+#!/bin/sh
+#
+# Open or close the file-sharing port in the firewall.
+#
+# The installer sets ufw to deny everything incoming and opens the four ports
+# Homebase needs. Sharing adds a fifth, and it is opened only while something is
+# actually shared — a port open to nothing is surface with no purpose.
+#
+# Not done by hostd, for the same reason as creating an account: ufw writes
+# /etc/ufw and reloads the kernel's packet filter, and hostd's unit sets
+# ProtectSystem=strict with a short list that does not include either. A root
+# service that can rewrite the firewall is one that can open the machine to the
+# internet, which is precisely the thing worth keeping out of reach.
+#
+# Only to private address ranges. The way into this server from outside the
+# house is the VPN, where the whole tunnel is encrypted; SMB reachable from the
+# internet is among the most attacked services there is. Samba's own
+# configuration says the same thing again — this is the half a mistake in
+# smb.conf cannot undo.
+
+set -eu
+
+REQUEST=/etc/homebase/share-firewall
+PORT=445
+NETWORKS="192.168.0.0/16 10.0.0.0/8 172.16.0.0/12"
+
+[ -r "$REQUEST" ] || { echo "share-firewall: no request" >&2; exit 1; }
+action=$(sed -n 's/^action=//p' "$REQUEST" | head -1)
+
+if ! command -v ufw >/dev/null 2>&1; then
+    echo "share-firewall: no ufw on this machine, nothing to do" >&2
+    exit 0
+fi
+
+case "$action" in
+open)
+    for net in $NETWORKS; do
+        ufw allow from "$net" to any port "$PORT" proto tcp \
+            comment "Homebase file sharing" >/dev/null
+    done
+    echo "share-firewall: port $PORT is open to the local network" >&2
+    ;;
+close)
+    for net in $NETWORKS; do
+        # Deleting a rule that is not there is an error in ufw and is not one
+        # here: this runs whenever the last share goes away, including when the
+        # port was never opened.
+        ufw delete allow from "$net" to any port "$PORT" proto tcp \
+            >/dev/null 2>&1 || true
+    done
+    echo "share-firewall: port $PORT is closed" >&2
+    ;;
+*)
+    echo "share-firewall: unknown action '$action'" >&2
+    exit 1
+    ;;
+esac

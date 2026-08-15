@@ -42,6 +42,8 @@ tags:
     description: Long-running operations
   - name: apps
     description: Installing and running applications
+  - name: shares
+    description: Folders published onto the local network over SMB
   - name: storage
     description: Disks, and the locations Homebase manages on them
   - name: backup
@@ -1468,6 +1470,244 @@ paths:
         "503":
           $ref: "#/components/responses/HostUnavailable"
 
+  /shares:
+    get:
+      tags: [shares]
+      summary: What is shared onto the local network
+      description: |
+        Requires `network.diagnose`. Reports the shared folders, the accounts that may
+        open them, and whether the file server is actually running — which is a separate
+        fact from a share being configured, and the one worth reporting loudly. A share
+        that exists while the server is stopped looks, from a laptop, exactly like a
+        share that was never made.
+      operationId: getShares
+      responses:
+        "200":
+          description: The state of file sharing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+    post:
+      tags: [shares]
+      summary: Share a folder onto the local network
+      description: |
+        Requires `network.modify`. Creates the folder, publishes it over SMB, and installs
+        the file server the first time — which is an apt download and can take minutes.
+
+        Sharing is not part of a Homebase installation. The SMB server is fetched when
+        somebody asks for it, so a server nobody asked to share anything has none on it.
+
+        The share is published to private address ranges only. The way in from outside the
+        house is the VPN, where the whole tunnel is encrypted; SMB exposed to the internet
+        is among the most attacked services there is.
+      operationId: addShare
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, location]
+              properties:
+                name:
+                  type: string
+                  description: What the folder is called on the network.
+                  pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+                  example: backup
+                location:
+                  type: string
+                  description: The storage location it lives on.
+                  example: internal
+                read_only:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: The folder is shared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  path: { type: string }
+                  address: { type: string, example: "\\\\homebase\\backup" }
+                  next:
+                    type: string
+                    description: |
+                      Present when nothing can open the share yet, because no account
+                      exists. That state looks exactly like success and is not.
+        "400":
+          description: The name is not one Homebase can use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The name is taken, or the disk is not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /shares/remove:
+    post:
+      tags: [shares]
+      summary: Stop sharing a folder
+      description: |
+        Requires `network.modify`. Takes the folder off the network and **leaves the files
+        where they are** — "stop sharing this" and "delete my files" are different
+        intentions and are not collapsed into one operation.
+      operationId: removeShare
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: It is no longer shared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  removed: { type: boolean }
+                  path: { type: string }
+                  message: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No share by that name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /shares/users:
+    post:
+      tags: [shares]
+      summary: Create or change a file-sharing password
+      description: |
+        Requires `network.modify`. Creates the account if it is new and sets the password
+        typed on the computer that connects.
+
+        The account has no shell and no password on the machine itself, and its name is
+        prefixed, so it is a way to open a folder and never a way to log in. The password
+        reaches hostd and goes no further: the operation declares it a secret, so the audit
+        log records that it was set and never what it was set to.
+      operationId: setSharePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+                password:
+                  type: string
+                  minLength: 8
+                  description: |
+                    At least eight characters. This is typed once and saved by the computer
+                    that connects, so it is never changed and never remembered — which is
+                    an argument for length rather than for character classes.
+      responses:
+        "200":
+          description: The account can now open the shared folders
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string }
+                  login:
+                    type: string
+                    description: The full name to type, including the prefix.
+                  message: { type: string }
+        "400":
+          description: The name or the password is not acceptable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Nothing is shared yet, so there is nothing to have a password for
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
+  /shares/users/remove:
+    post:
+      tags: [shares]
+      summary: Stop somebody being able to open the shared folders
+      description: Requires `network.modify`. Removes the account. No files are touched.
+      operationId: removeShareUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username: { type: string }
+      responses:
+        "200":
+          description: The account is gone
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string }
+                  removed: { type: boolean }
+                  message: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No such account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
   /network/wake-on-lan:
     post:
       tags: [network]
@@ -2487,6 +2727,45 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    ShareStatus:
+      type: object
+      description: |
+        File sharing on this server. `installed` and `running` are separate facts from
+        there being shares: "configured but not running" is a real state, and from the
+        other end it is indistinguishable from nothing having been set up.
+      properties:
+        installed:
+          type: boolean
+          description: Whether the SMB server is on this machine at all.
+        running:
+          type: boolean
+        server_name:
+          type: string
+          description: What this machine answers to on the network.
+        users:
+          type: array
+          description: |
+            The accounts that may connect, without their prefix. Names only — Homebase
+            cannot read a password back and would not report one if it could.
+          items: { type: string }
+        shares:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              location: { type: string }
+              path: { type: string }
+              read_only: { type: boolean }
+              available:
+                type: boolean
+                description: |
+                  Whether the disk holding it is connected. A share whose disk is
+                  unplugged is still configured and has nothing behind it, which is
+                  not the same as not being shared.
+              address:
+                type: string
+                description: What to type on another machine.
     DynamicDNS:
       type: object
       additionalProperties: false

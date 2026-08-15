@@ -1,0 +1,29 @@
+[Unit]
+Description=Homebase — install the file server
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+
+# A fixed command with a literal argument, for the same reason as the update
+# units: homebase-hostd.service sets RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# and therefore cannot reach an apt mirror. hostd chooses *which* unit to start
+# and nothing else — no part of a request becomes part of a command line here.
+#
+# The file server is not installed with Homebase. It is a service listening on
+# the local network, and one that only exists on machines that were asked for it
+# is one that cannot be misconfigured on the machines that were not.
+ExecStart=/usr/libexec/homebase/install-samba
+
+# Deliberately unsandboxed, and worth stating rather than copying hardening from
+# the other units: this installs system packages, which cannot be done from
+# inside a sandbox. What bounds it is that it is a fixed command in a
+# package-installed file, reachable only through hostd's typed operations.
+User=root
+
+# Ten minutes. Samba and its dependencies are about 40 MB, which on a domestic
+# connection to an old laptop is minutes.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

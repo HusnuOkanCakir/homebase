@@ -14,7 +14,7 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–8, 10 and 11 complete. Milestone 9 in progress.** A USB stick turns a Windows
+**Current position: Milestones 0–8 and 10–12 complete. Milestone 9 in progress.** A USB stick turns a Windows
 laptop into a working server, a new server says what to do next, and it is then reachable by
 name over HTTPS from any device in the house. It backs itself up every night, looks for
 updates on its own, applies one and puts the previous version back if it does not work, and
@@ -37,8 +37,8 @@ than what they were.
 What is still missing is *more* hardware: one laptop is a data point, not a milestone.
 Driver quirks, other Wi-Fi adapters, USB disks that misbehave.
 
-The last gap is **sharing files onto the network** — Milestone 12. Remote access and the
-terminal surface both landed.
+Files are on the network now, over SMB: a folder on the server is a drive on a laptop,
+which is the half a browser cannot be.
 
 Nothing has been released. The release machinery exists and has never been run for real, and
 there is no host for the update archive yet.
@@ -874,18 +874,40 @@ becoming common enough to matter.
 points at a changing address. The design keeps the provider a setting rather than a
 hard-coded assumption.
 
-### Milestone 12 — Files on the network
+### Milestone 12 — Files on the network ✅
 
-- [ ] SMB shares over Samba, so Windows, macOS and Linux can all mount them
-- [ ] Shares defined against managed storage locations, so a share cannot be pointed at the
-      system disk by accident
-- [ ] Accounts and permissions that follow Homebase's, rather than a second set nobody
-      remembers
-- [ ] A test that mounts a share from another machine and reads a file, because a share that
-      exists and cannot be mounted is not a share
+- [x] SMB shares over Samba, so Windows, macOS and Linux can all mount them
+- [x] Shares defined against managed storage locations — including the server's own disk,
+      which is now a location like any other rather than a thing to be protected from
+- [x] Accounts that cannot log in: no shell, no password on the machine, and a namespaced
+      name, so the password saved in a Windows dialog for years is not a credential for
+      anything that administers the server
+- [x] The file server is installed when the first folder is shared, not with Homebase. A
+      machine nobody asked to share anything has no SMB server on it
+- [x] Samba is off, and the port closed, whenever nothing is shared
 
-**Done when:** a laptop on the same network mounts a share, writes a file, and the file is
-in the backup.
+**Done when:** a machine on the same network opens a share. ✅ — verified against the ASUS
+from another laptop: SMB2 negotiated, NTLMv2 accepted, the share opened, a wrong password
+refused, and the account rejected by ssh.
+
+**Neither machine had an SMB client and neither could install one**, so the test is a
+70-line SMB2 client written for the purpose. That is worth recording rather than
+apologising for: the alternative was to declare it working because the port was open and
+`testparm` was happy, which is the exact shape of every other bug in this document.
+
+Three things had to be got out of the privilege boundary's way, and each is a place the
+sandbox did its job:
+
+- `useradd` needs `/etc/passwd` and `/etc/shadow`, which hostd may not write. A root service
+  that can write the credential store can add a root login, so the account is created by a
+  fixed unit instead — and the password never goes near it, because setting one writes only
+  to Samba's own database, which hostd may write directly. So the secret goes from the
+  caller to `smbpasswd`'s standard input and never reaches a disk or a command line.
+- `ufw` writes `/etc/ufw` and reloads the packet filter, neither of which hostd may do. Same
+  answer, and the same reasoning: a root service that can rewrite the firewall can open the
+  machine to the internet.
+- `chmod` refused the set-group-id bit, as root, because `RestrictSUIDSGID=yes` is set.
+  Samba's `force group` does the same job better, and the restriction stays.
 
 ### Stage 1 definition of done
 
@@ -897,8 +919,8 @@ send to somebody, share files onto the network, and reach the whole thing from o
 house over a VPN nobody else operates. Without ever granting the dashboard or the CLI root
 access to do any of it.
 
-**What is outstanding:** the terminal surface (Milestone 10), remote access (11) and file
-sharing (12). Everything else on that list works today.
+**What is outstanding:** nothing on that list. It was finished by Milestone 12, and what
+remains is Milestone 9 — more hardware, and time on the one machine there is.
 
 **This definition changed after Milestone 9.** It used to read "a non-technical person…
 without ever opening a terminal", and Milestone 10 used to be a graphical USB writer for

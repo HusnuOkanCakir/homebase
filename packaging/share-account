@@ -1,0 +1,64 @@
+#!/bin/sh
+#
+# Create or remove a file-sharing account.
+#
+# hostd cannot do this itself, and the reason is a line in its unit file:
+# ProtectSystem=strict makes /etc read-only apart from a short list, and
+# /etc/passwd, /etc/shadow and /etc/group are deliberately not on it. A root
+# service that can write the credential store is one that can add a root login
+# and be there after a reinstall — which is exactly the persistence the sandbox
+# exists to deny.
+#
+# So the work happens here, in a fixed command in a package-installed file, and
+# what it acts on comes from a root-only request file rather than from a command
+# line. The name in that file is validated again below: this script trusts
+# nothing it reads, because "hostd wrote it" is a property of today's hostd.
+#
+# There is no password here and there never will be. Setting one writes only to
+# Samba's own database, which hostd may write directly — so the secret goes from
+# the caller to smbpasswd's stdin and never touches a disk or a command line.
+
+set -eu
+
+REQUEST=/etc/homebase/share-account
+SERVICE_GROUP=homebase
+
+[ -r "$REQUEST" ] || { echo "share-account: no request" >&2; exit 1; }
+
+action=$(sed -n 's/^action=//p' "$REQUEST" | head -1)
+account=$(sed -n 's/^account=//p' "$REQUEST" | head -1)
+
+# The prefix is the whole safety property: it is what stops this being a way to
+# create or delete an account that administers the machine. Checked here rather
+# than trusted from the request, and anchored at both ends.
+case "$account" in
+    hbshare-[a-z]*) ;;
+    *) echo "share-account: refusing the account name '$account'" >&2; exit 1 ;;
+esac
+if ! printf '%s' "$account" | grep -qE '^hbshare-[a-z][a-z0-9-]{0,30}[a-z0-9]$'; then
+    echo "share-account: refusing the account name '$account'" >&2
+    exit 1
+fi
+
+case "$action" in
+add)
+    if ! getent passwd "$account" >/dev/null; then
+        useradd --no-create-home --shell /usr/sbin/nologin \
+                --groups "$SERVICE_GROUP" "$account"
+    fi
+    # No Unix password at all, so this account cannot be logged in with — by
+    # ssh, by su, or at the console. Its only use is opening a shared folder.
+    passwd --lock "$account" >/dev/null
+    echo "share-account: $account exists" >&2
+    ;;
+remove)
+    if getent passwd "$account" >/dev/null; then
+        userdel "$account"
+    fi
+    echo "share-account: $account is gone" >&2
+    ;;
+*)
+    echo "share-account: unknown action '$action'" >&2
+    exit 1
+    ;;
+esac

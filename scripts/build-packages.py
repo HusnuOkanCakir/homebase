@@ -323,10 +323,27 @@ def build_hostd(version: str, binaries: Path) -> Path:
     install_file(REPO_ROOT / "packaging/ddns-run",
                  root / "usr/libexec/homebase/ddns-run", 0o755)
 
+    # The file server is fetched on demand rather than depended on, so that a
+    # Homebase nobody asked to share anything has no SMB server on it at all.
+    install_file(REPO_ROOT / "packaging/install-samba",
+                 root / "usr/libexec/homebase/install-samba", 0o755)
+
+    # Creating the account somebody opens a shared folder with. Separate from
+    # hostd because hostd may not write /etc/passwd — see the unit file.
+    install_file(REPO_ROOT / "packaging/share-account",
+                 root / "usr/libexec/homebase/share-account", 0o755)
+
+    # Opening the file-sharing port, and closing it when nothing is shared.
+    install_file(REPO_ROOT / "packaging/share-firewall",
+                 root / "usr/libexec/homebase/share-firewall", 0o755)
+
     for unit in ("homebase-hostd.service", "homebase-hostd.socket",
                  "homebase-update-check.service", "homebase-update-apply.service",
                  "homebase-update-check.timer", "homebase-repair.service",
-                 "homebase-ddns.service", "homebase-ddns.timer"):
+                 "homebase-ddns.service", "homebase-ddns.timer",
+                 "homebase-install-samba.service",
+                 "homebase-share-account.service",
+                 "homebase-share-firewall.service"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,

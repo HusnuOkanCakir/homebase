@@ -95,6 +95,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return appsCommand(args[1:], stdout)
 	case "storage":
 		return storageCommand(args[1:], stdout)
+	case "share":
+		return shareCommand(args[1:], stdout)
 	case "backup":
 		return backupCommand(args[1:], stdout)
 	case "update":
@@ -138,6 +140,9 @@ func usage(w io.Writer) {
         The application catalogue, and what is installed from it.
 
   homebasectl apps storage APP [SLOT DISK]
+  homebasectl share [status]
+  homebasectl share add NAME DISK
+  homebasectl share password NAME
   homebasectl storage [list]
   homebasectl storage disks
   homebasectl storage format /dev/sdX [--name NAME]

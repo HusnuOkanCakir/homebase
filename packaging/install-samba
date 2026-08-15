@@ -1,0 +1,47 @@
+#!/bin/sh
+#
+# Install the SMB file server.
+#
+# Separate from update-run because it is a different intention with a different
+# risk: that script upgrades Homebase itself and must survive its own service
+# being restarted underneath it. This one adds a package, once, and is started
+# by hostd when somebody asks for a folder to be shared.
+#
+# There is no argument. The package list is written here, in a file the package
+# installs, and nothing a caller sends reaches this script at all.
+
+set -eu
+
+export DEBIAN_FRONTEND=noninteractive
+
+# Configured, not started. Debian's samba package enables smbd and nmbd on
+# install, which would put a file server on the network before Homebase has
+# written a configuration or created an account — a listening service with a
+# default configuration, in the window between installing it and configuring it.
+#
+# The policy file makes the package manager's own start refuse; it is removed
+# again below, because from then on it is Homebase that decides.
+POLICY=/usr/sbin/policy-rc.d
+POLICY_EXISTED=no
+if [ -e "$POLICY" ]; then
+    POLICY_EXISTED=yes
+else
+    printf '#!/bin/sh\nexit 101\n' > "$POLICY"
+    chmod 0755 "$POLICY"
+fi
+
+cleanup() {
+    if [ "$POLICY_EXISTED" = no ]; then
+        rm -f "$POLICY"
+    fi
+}
+trap cleanup EXIT INT TERM
+
+apt-get update
+apt-get install --yes --no-install-recommends samba samba-common-bin
+
+# Off until Homebase turns it on with a configuration of its own.
+systemctl disable --now smbd.service  >/dev/null 2>&1 || true
+systemctl disable --now nmbd.service  >/dev/null 2>&1 || true
+
+echo "homebase: the file server is installed and not yet running" >&2

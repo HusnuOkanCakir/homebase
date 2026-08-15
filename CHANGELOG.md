@@ -483,6 +483,13 @@ and Windows on it:
 - **The system disk was reported as mounted at `/var/tmp`**, because the mount
   table kept whichever entry came last and `PrivateTmp=yes` on hostd's unit gives
   it a private `/var/tmp` on the root device
+- **Folders on the network, over SMB.** `homebasectl share add backup internal` publishes a
+  folder that Windows, macOS and Linux all mount without installing anything. The file
+  server is fetched when the first folder is shared rather than with Homebase, the port is
+  opened to private address ranges only and closed again when the last share goes, and the
+  accounts have no shell and no password on the machine — a password saved in a Windows
+  dialog for years is not a credential for anything that administers the server
+
 Three more found by installing an application and trying to use it:
 
 - **Applications required a disk that was not in the machine.** A server with a

@@ -1,0 +1,24 @@
+[Unit]
+Description=Homebase — create or remove a file-sharing account
+ConditionPathExists=/etc/homebase/share-account
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+
+# A fixed command with no arguments. What it acts on is in a root-only file that
+# hostd writes, and the script validates it again — nothing a caller sends ever
+# becomes part of a command line here.
+#
+# This exists because homebase-hostd.service sets ProtectSystem=strict and does
+# not list /etc/passwd, /etc/shadow or /etc/group among the paths it may write.
+# That is deliberate: a root service that can write the credential store can add
+# a root login. Creating an unprivileged, shell-less, password-less account for
+# opening a folder is worth an indirection to keep it.
+ExecStart=/usr/libexec/homebase/share-account
+
+User=root
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

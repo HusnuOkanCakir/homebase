@@ -101,16 +101,41 @@ sudo homebasectl storage attach UUID backups
 name — never "yes". There is no `--yes`: a flag meaning "do it anyway" ends up in every
 invocation within a week.
 
+You do not have to attach anything. The server's own disk is a storage location called
+`internal`, and applications can keep their files on it — a 1 TB laptop does not need a USB
+drive taped to it to run a media server. What a plugged-in disk is *required* for is
+backups, because a copy on the same disk as the original is lost with it.
+
 ### 6. Install what you want to run
 
 ```sh
-sudo homebasectl apps                  # the catalogue
+sudo homebasectl apps                     # the catalogue
+sudo homebasectl apps storage jellyfin    # what it needs, and where it would go
+sudo homebasectl apps storage jellyfin media internal
 sudo homebasectl apps install jellyfin
 sudo homebasectl apps logs jellyfin
 ```
 
-Jellyfin's data goes on the disk you attached, not the system disk. The container runs with
-every capability dropped, no new privileges, and its port bound to localhost.
+The address is in `homebasectl apps`. Jellyfin lands on `http://<name>.local:8096`, because
+its manifest says it may be reached from the network — which only an application with its
+own accounts may say. Everything else stays on loopback. Containers run with every
+capability dropped and no new privileges.
+
+### 6b. Share a folder onto the network
+
+The half a browser cannot be: a drive on your laptop, that Windows backs up to and Linux
+mounts.
+
+```sh
+sudo homebasectl share add backup internal   # installs the file server the first time
+sudo homebasectl share password okan         # asks for it; never an argument
+sudo homebasectl share                       # what to type, per operating system
+```
+
+That last command prints the exact address for Windows, macOS and Linux. The account it
+creates has no shell and no password on the machine itself, so it opens a folder and is not
+a way to log in. The port is opened to private address ranges only, and closed again when
+the last share goes — the way in from outside the house is the VPN in step 9.
 
 ### 7. Turn on backups
 

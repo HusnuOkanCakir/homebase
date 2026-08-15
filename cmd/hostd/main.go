@@ -87,6 +87,10 @@ func main() {
 	appServices := hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir).WithStorage(storage)
 	hostd.RegisterAppOperations(registry, appServices)
 
+	// Sharing folders onto the local network. Registered after storage because
+	// a share is a folder on a disk storage already knows about.
+	hostd.RegisterShareOperations(registry, hostd.NewShareServices(storage, *stateDir))
+
 	hostd.RegisterBackupOperations(registry, hostd.NewBackupServices(
 		storage, appServices, *databasePath, *configDir, *stateDir, buildVersion()))
 
