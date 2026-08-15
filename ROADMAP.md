@@ -14,7 +14,7 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–8 and 10–12 complete. Milestone 9 in progress.** A USB stick turns a Windows
+**Current position: Milestones 0–8 and 10–12 complete. Milestone 9 in progress; 13–15 planned.** A USB stick turns a Windows
 laptop into a working server, a new server says what to do next, and it is then reachable by
 name over HTTPS from any device in the house. It backs itself up every night, looks for
 updates on its own, applies one and puts the previous version back if it does not work, and
@@ -39,6 +39,12 @@ Driver quirks, other Wi-Fi adapters, USB disks that misbehave.
 
 Files are on the network now, over SMB: a folder on the server is a drive on a laptop,
 which is the half a browser cannot be.
+
+**The gap that is left is the catalogue.** Three applications, one of which exists
+to prove installation works. Everything needed to add more is built and proven —
+Milestones 13 to 15 are the content, and the two places real applications do not
+fit the model: several of them need more than one container, and Home Assistant
+needs privileges no other manifest is allowed.
 
 Nothing has been released. The release machinery exists and has never been run for real, and
 there is no host for the update archive yet.
@@ -909,6 +915,127 @@ sandbox did its job:
 - `chmod` refused the set-group-id bit, as root, because `RestrictSUIDSGID=yes` is set.
   Samba's `force group` does the same job better, and the restriction stays.
 
+#### What one person using it found in an evening
+
+Milestone 12 was finished, tested from another machine, and documented. Then
+somebody opened a file manager and none of it worked. Every one of these is a
+gap between *working* and *usable*, which is a distinction no test in this
+repository was measuring.
+
+**The login refused the name it was created with.** The account is namespaced —
+`hbshare-okan` — which is what stops a file-sharing password from also being an
+ssh login. It is not something anybody should have to type, and the first person
+to try typed the name they had just chosen and got an authentication box that
+came back for ever with no explanation. Samba has a username map for exactly
+this. The account keeps the prefix; the map translates.
+
+**There was no way to open an installed application.** The address existed by
+then and nothing offered it: no button, no command, nothing printed after an
+install. A media server nobody can find is not better than one that will not
+start.
+
+**`apps stop` and `apps restart` had never worked**, because both require the
+name confirmed and only `uninstall` sent it. The same shape as `apps logs`
+decoding the wrong field: an endpoint with a caller nobody had run.
+
+**Changing an application's disk never took effect.** A container's bind mounts
+are fixed when it is created, so restarting one keeps the folders it was built
+with — and the message promised that a restart would apply it. A test asserted
+that message, which is how a false claim survives.
+
+**Pointing an application at a shared folder took the folder away from the file
+server**, because user-selected storage was handed to the application's own
+account recursively. Right for data an application owns; wrong for a folder
+somebody else writes into.
+
+**`homebase.local` sometimes resolved to `172.17.0.1`** — a Docker bridge. avahi
+answers on every interface it can see, so a laptop asking for the server by name
+got back an address that was unroutable, or its own bridge. It appeared as ssh
+reporting a host key for an address nobody recognised.
+
+**`ls` on a shared folder said "Permission denied"** to the person who had just
+been told its path, because `/srv/homebase` was `0750`. The tempting fix — adding
+the administrator to the `homebase` group — is the wrong one: that group owns the
+hostd socket, so it is the privilege boundary.
+
+The lesson is not any one of these. It is that **the distance between "verified
+working" and "a person can use it" was seven bugs wide**, and every one of them
+was found in under an hour by somebody trying to do a real thing.
+
+### Milestone 13 — A catalogue worth having
+
+Three applications, one of which exists only to prove installation works, is a
+demo. The architecture for adding them is finished and proven — a manifest is a
+reviewable file and `hostd` owns what can run ([ADR-0012](docs/decisions/0012-hostd-owns-the-catalogue.md)) —
+so this milestone is the content, and the places where real applications do not
+fit the model.
+
+- [ ] **qBittorrent** — completes the media loop that already half exists. The
+      download folder and the media folder must be storage locations on the same
+      filesystem, or every completed file is copied rather than moved
+- [ ] **Immich** — photographs off a phone and onto hardware its owner controls.
+      The most-wanted self-hosted application there is, and the one that makes a
+      server worth the electricity. Needs a database container, which the manifest
+      schema does not yet describe
+- [ ] **Paperless-ngx** — documents, searchable. Also multi-container
+- [ ] **Nextcloud** — deliberately last of these four. It overlaps with what SMB
+      already does, needs a database and a cache, and is the heaviest thing in the
+      catalogue by a distance
+- [ ] **Multi-container applications** in the manifest schema. Immich, Paperless
+      and Nextcloud all need one, and inventing it three times separately is how
+      the catalogue becomes unreviewable
+- [ ] **A per-application initial password**, generated and reported once. File
+      Browser ships `admin`/`admin`; qBittorrent ships `admin`/`adminadmin`. An
+      application published onto the network with a documented default password is
+      an open door, and the manifest must be able to say so
+
+**Done when:** installing any application in the catalogue produces something
+reachable, with no default credentials left in it, and a folder somebody can put
+files into from their own computer.
+
+### Milestone 14 — Home Assistant, and what it costs
+
+Home Assistant is the application that does not fit, and it is worth its own
+milestone rather than a line in the one above — because making it work means
+deciding what a manifest is allowed to ask for.
+
+It wants the host network namespace, so it can find devices by mDNS and SSDP. It
+wants USB devices passed through, for Zigbee and Z-Wave adapters. Both are
+things every other manifest is forbidden, and both are the difference between the
+application working and not existing.
+
+- [ ] `host_network` in a manifest, which the schema already describes as needing
+      written justification, actually used and actually reviewed
+- [ ] USB device pass-through, named per device rather than as a class
+- [ ] A statement in the application's own screen about what it was granted, so
+      that "this one is different" is visible to the person installing it rather
+      than only to whoever read the manifest
+
+**Done when:** Home Assistant runs, finds a device on the network, and the
+dashboard says plainly what it was allowed to do that other applications are not.
+
+### Milestone 15 — The media loop closes itself
+
+qBittorrent alone means finding a file, adding it, waiting, and moving it into
+the right folder by hand. The applications that automate that — Prowlarr, Radarr,
+Sonarr, Bazarr — are four more manifests and one hard problem: they talk to each
+other, and each needs the others' addresses and API keys.
+
+- [ ] Prowlarr, Radarr, Sonarr, Bazarr as manifests
+- [ ] Applications that can declare they need to reach another application, so
+      that the addresses are Homebase's to fill in rather than a user's to look up
+- [ ] The whole flow on one storage location, so a completed download becomes a
+      film in the library by being renamed rather than copied
+
+**Done when:** something asked for arrives in Jellyfin without anybody moving a
+file.
+
+**Deliberately not in this milestone:** a VPN client. Running a download client
+through somebody else's VPN is the usual arrangement and Homebase has a Wireguard
+*server*, not a client. Those are different things and conflating them would put
+the server's own remote access and a third-party tunnel in one configuration
+file.
+
 ### Stage 1 definition of done
 
 Someone comfortable with Linux can: write the installer USB with one command, plug it into
@@ -919,8 +1046,13 @@ send to somebody, share files onto the network, and reach the whole thing from o
 house over a VPN nobody else operates. Without ever granting the dashboard or the CLI root
 access to do any of it.
 
-**What is outstanding:** nothing on that list. It was finished by Milestone 12, and what
-remains is Milestone 9 — more hardware, and time on the one machine there is.
+**What is outstanding:** nothing on that list. It was finished by Milestone 12.
+
+What remains is Milestone 9 — more hardware, and time on the one machine there is
+— and the fact that a definition of done written around *capabilities* was
+satisfied by a product with three applications in it, one of which is a test
+fixture. Milestones 13 to 15 exist because "can install and use an app" and "has
+apps worth using" turned out to be different claims.
 
 **This definition changed after Milestone 9.** It used to read "a non-technical person…
 without ever opening a terminal", and Milestone 10 used to be a graphical USB writer for

@@ -483,6 +483,32 @@ and Windows on it:
 - **The system disk was reported as mounted at `/var/tmp`**, because the mount
   table kept whichever entry came last and `PrivateTmp=yes` on hostd's unit gives
   it a private `/var/tmp` on the root device
+Five more found by watching one person try to use it, which is a different
+activity from testing it:
+
+- **The share login refused the name it was created with.** The Unix account is
+  namespaced, which is what stops a file-sharing password from also being a
+  login, and is not something anybody should have to type. Samba's username map
+  translates; the authentication box coming back for ever was the first thing
+  the first user hit
+- **There was no way to open an installed application.** The address existed and
+  nothing offered it. The dashboard has an Open button now, `homebasectl apps
+  open` exists, and install, start and restart print the address when they finish
+- **`apps stop` and `apps restart` had never worked.** Both need the name
+  confirmed and only `uninstall` sent it
+- **Changing an application's disk never took effect.** A container's folders are
+  fixed when it is built, so restarting one keeps the folders it was built with —
+  and the message promised a restart would apply it. There was a test holding
+  that claim in place
+- **Pointing an application at a shared folder took the folder away from the file
+  server**, because user-selected storage was handed to the application's own
+  account. It belongs to the service group, and the container joins that group
+- **`homebase.local` sometimes resolved to a Docker bridge address**, because
+  avahi answered on every interface it could see. A machine asking for the server
+  by name got back something unroutable, or its own bridge
+- **`ls` on a shared folder said "Permission denied"** to the person who had just
+  been told its path
+
 - **Folders on the network, over SMB.** `homebasectl share add backup internal` publishes a
   folder that Windows, macOS and Linux all mount without installing anything. The file
   server is fetched when the first folder is shared rather than with Homebase, the port is

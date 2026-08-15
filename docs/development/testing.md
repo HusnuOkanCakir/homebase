@@ -209,6 +209,28 @@ person on the sofa can open it.
 **Reach the thing under test through the path a user has.** If that path does not
 exist, the test cannot be written, and *that* is the finding.
 
+### Watching somebody use it is a test, and it is the one that finds the most
+
+Milestone 12 was finished, tested from another machine with a client written for
+the purpose, and documented. Then one person opened a file manager and none of it
+worked: the login refused the name it was created with, there was no way to open
+an installed application, `apps stop` and `apps restart` had never worked,
+changing an application's disk did nothing, and the server's own name sometimes
+resolved to a Docker bridge.
+
+Seven bugs, all found in under an hour, none of them by a suite.
+
+They are not coverage gaps. Every one of those paths was exercised. They are the
+difference between *working* and *usable*, and nothing in this repository was
+measuring it — because a test knows the prefix on the account name, knows which
+field the confirmation goes in, and never has to find the address of the thing it
+just installed.
+
+There is no assertion that catches this class. The practice is: **after a
+milestone passes, use it as a person would, on the machine somebody actually
+has, and write down every point at which you had to already know something.**
+Each of those is a bug even when the code is correct.
+
 ### Tests that depend on chance
 
 `vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.
