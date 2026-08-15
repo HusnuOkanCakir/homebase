@@ -401,11 +401,33 @@ func (d blockDevice) refusal() string {
 	if !d.Removable && d.Transport != "usb" {
 		return "not a removable drive"
 	}
-	if d.Size < 4*1000*1000*1000 {
-		return "too small — an Ubuntu image needs about 4 GB"
+	if d.Size < smallestUsableMedia {
+		return fmt.Sprintf("too small — the image alone is about %d GB",
+			smallestUsableMedia/1_000_000_000)
 	}
 	return ""
 }
+
+// smallestUsableMedia is a sanity floor for the listing. It is not the
+// requirement, and it is deliberately far below it.
+//
+// The requirement is the size of the ISO being written plus the seed partition,
+// and `create` computes exactly that from the file it was given. This listing
+// cannot: it does not know which image is coming. So it filters out media that
+// could not work with *any* Ubuntu image, and leaves the real judgement to the
+// writer, which can state the exact numbers.
+//
+// The value has been wrong twice, both times by guessing high. It was 4 GB,
+// which refused an ordinary 4 GB stick — those hold about 3.88 GB, and Ubuntu
+// 24.04.4 with the seed needs 3.43 GB, so there were 450 MB spare. Then it was
+// 3.5 GB, which is still above the requirement and would refuse anything between
+// the two.
+//
+// A listing that refuses hardware the writer would accept is worse than one that
+// is optimistic, because the writer explains itself precisely and the listing
+// cannot. So this is now low enough that it cannot over-refuse, and its only job
+// is to stop offering a 512 MB stick as a candidate.
+const smallestUsableMedia = 2_000_000_000
 
 // holdsRunningSystem reports whether anything on this disk is mounted.
 //

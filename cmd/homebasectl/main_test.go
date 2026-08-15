@@ -488,3 +488,43 @@ func TestNothingIrreversibleHappensWithNobodyThere(t *testing.T) {
 		t.Errorf("it does not explain the absence of --yes: %v", err)
 	}
 }
+
+// The listing's size floor must not refuse a stick the writer would accept.
+//
+// It did: the floor was 4 GB, picked by guessing, and an ordinary 4 GB stick
+// holds about 3.88 GB — so `devices` said REFUSED about hardware that had 450 MB
+// to spare. The writer computes the real requirement from the ISO it is given;
+// this floor exists only so a 512 MB stick is not offered as a candidate.
+func TestTheListingDoesNotRefuseMediaThatWouldWork(t *testing.T) {
+	// Ubuntu 24.04.4 server, plus the seed carrying Homebase's packages.
+	const ubuntuISO = 3_405_469_696
+	const seed = 23_599_104
+	const slack = 4 * 1024 * 1024
+	const actuallyNeeded = ubuntuISO + seed + slack
+
+	// The floor must never be above the requirement, or there is a band of
+	// media the listing refuses and the writer would have accepted. This caught
+	// the second version of this bug as well as the first.
+	if smallestUsableMedia > actuallyNeeded {
+		t.Errorf("the floor is %d bytes and the media needs %d — the listing "+
+			"refuses sticks the writer would accept",
+			smallestUsableMedia, actuallyNeeded)
+	}
+
+	// A nominal "4 GB" stick, which is what this failed on.
+	const nominalFourGB = 3_879_731_200
+	if nominalFourGB < smallestUsableMedia {
+		t.Errorf("a 4 GB stick (%d bytes) is refused by a floor of %d",
+			nominalFourGB, smallestUsableMedia)
+	}
+	if nominalFourGB < actuallyNeeded {
+		t.Errorf("a 4 GB stick does not in fact hold the image (%d < %d)",
+			nominalFourGB, actuallyNeeded)
+	}
+
+	// And the floor still has to do its job: something far too small is refused.
+	const tinyStick = 512_000_000
+	if tinyStick >= smallestUsableMedia {
+		t.Error("the floor is so low it offers a 512 MB stick as a candidate")
+	}
+}
