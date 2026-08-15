@@ -332,6 +332,16 @@ export interface Application {
   image: string;
   version?: string;
   internal_port?: number;
+  /**
+   * Where to open it, and whether anything other than this machine can.
+   *
+   * Both, because the address alone cannot say which. An application on
+   * loopback has a real address that is not there from the computer showing
+   * this page, and a link to it would fail in a way that looks like the server
+   * being broken.
+   */
+  url?: string;
+  reachable_from_network: boolean;
   started_at: string | null;
   exit_code: number | null;
   /** Where its data lives, so a user can be told what uninstalling leaves behind. */

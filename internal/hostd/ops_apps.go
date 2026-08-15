@@ -192,14 +192,18 @@ func RegisterAppOperations(r *Registry, services *AppServices) {
 	r.MustRegister(Operation{
 		Name:    "app.assign_storage",
 		Summary: "Choose which disk holds one of an application's storage locations.",
-		// Medium: it changes where an application's files live, taking effect the
-		// next time it starts. Nothing is moved and nothing is deleted — data
-		// already written to the old location stays where it is.
+		// Medium: it changes where an application's files live. Nothing is moved
+		// and nothing is deleted — data already written to the old location
+		// stays where it is.
 		Risk:        RiskMedium,
 		Permissions: []string{"apps.manage", "storage.modify"},
 		Confirm:     ConfirmRequired,
-		Timeout:     30 * time.Second,
-		Handler:     Typed(services.assignStorage),
+		// Three minutes, not thirty seconds. This used to record an assignment
+		// and nothing else, which is instant; it now rebuilds the container,
+		// because Docker fixes bind mounts at creation and a restart keeps the
+		// old ones. Stopping alone is allowed thirty seconds of grace.
+		Timeout: 3 * time.Minute,
+		Handler: Typed(services.assignStorage),
 	})
 
 	r.MustRegister(Operation{
@@ -801,6 +805,27 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 		config.Env = append(config.Env, key+"="+value)
 	}
 
+	// Membership of the service group, for an application that has been given a
+	// folder somebody else also writes into.
+	//
+	// User-selected storage belongs to the group rather than to the application,
+	// so that the file server and the backup can reach it too. Without this the
+	// container is a lone uid with no groups and cannot open any of it — which
+	// is how pointing Jellyfin at a shared folder produced a media server that
+	// could see the directory and nothing inside it.
+	//
+	// Only when there is such a folder. An application with private storage
+	// only stays a uid of its own with no group at all.
+	for _, storage := range manifest.Storage {
+		if storage.Type != "user-selected" {
+			continue
+		}
+		if gid, err := serviceGroupID(); err == nil {
+			config.HostConfig.GroupAdd = []string{strconv.Itoa(gid)}
+		}
+		break
+	}
+
 	if manifest.Network.InternalPort > 0 && !manifest.Network.HostNetwork {
 		port := fmt.Sprintf("%d/tcp", manifest.Network.InternalPort)
 		config.ExposedPorts = map[string]struct{}{port: {}}
@@ -990,13 +1015,13 @@ func (s *AppServices) requireStorage(manifest Manifest) error {
 // Split from locateUserSelected because requireStorage runs before the image is
 // downloaded, purely to answer "can this run at all" — and a check that creates
 // directories and changes their ownership is not a check.
-func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment, as owner) (string, error) {
+func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment, _ owner) (string, error) {
 	hostPath, err := s.locateUserSelected(manifest, storage, assignments)
 	if err != nil {
 		return "", err
 	}
 
-	if err := os.MkdirAll(hostPath, 0o750); err != nil {
+	if err := os.MkdirAll(hostPath, 0o775); err != nil {
 		return "", &Error{
 			Code:        "app.storage_unavailable",
 			Message:     "Homebase could not use that disk for " + manifest.Name + ".",
@@ -1007,10 +1032,21 @@ func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestSto
 		}
 	}
 	if os.Geteuid() == 0 {
-		// Recursive: on a machine that installed this application before it had
-		// an account of its own, the files are still owned by the shared
-		// service account and the container could not read them.
-		if err := giveTo(hostPath, as); err != nil {
+		// Shared with the service group rather than given to the application.
+		//
+		// This used to hand the whole tree to the application's own account,
+		// recursively. That is right for data the application owns and wrong
+		// for this: user-selected storage is by definition a place the *user*
+		// also uses. Pointing Jellyfin at the folder shared over SMB took that
+		// folder away from the file server — the directories became the
+		// application's, and copying a film into them from a laptop stopped
+		// working with a permission error at the far end.
+		//
+		// The group everything on this server shares is `homebase`. The
+		// application's account is a member of it, so it can read and write
+		// here; Samba forces the same group on what it creates; and neither
+		// takes the folder from the other.
+		if err := shareWithServiceGroup(hostPath); err != nil {
 			return "", internalError("setting ownership on " + hostPath + ": " + err.Error())
 		}
 	}
@@ -1259,6 +1295,53 @@ type AssignStorageParams struct {
 	StorageID string `json:"storage_id"`
 	// Location is a managed storage location's id.
 	Location string `json:"location"`
+
+	// Folder is where under that location to look, and is the whole point of
+	// having a media server and file sharing on the same machine: the folder a
+	// laptop copies films into and the folder Jellyfin reads have to be the same
+	// folder, or somebody is copying everything twice.
+	//
+	// Empty means a directory named after the application, which is the right
+	// default for data the application owns and the wrong one for a library
+	// somebody else fills.
+	Folder string `json:"folder,omitempty"`
+}
+
+// storageFolder validates a folder inside a location.
+//
+// The result becomes a path handed to a container as a bind mount, so it is
+// checked rather than trusted: anything that could climb out of the location is
+// refused, and so is anything absolute. `filepath.Clean` is not enough on its
+// own — it resolves "a/../../etc" to "../etc", which is still an escape.
+func storageFolder(app, folder string) (string, error) {
+	folder = strings.Trim(strings.TrimSpace(folder), "/")
+	if folder == "" {
+		return app, nil
+	}
+	cleaned := filepath.Clean(folder)
+	if cleaned == "." || strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
+		return "", &Error{
+			Code:        "app.invalid_folder",
+			Message:     "That is not a folder on the disk.",
+			Detail:      folder,
+			Recoverable: true,
+			Recovery:    "Give a folder inside the disk, such as \"shares\" or \"shares/films\".",
+			Status:      400,
+		}
+	}
+	for _, part := range strings.Split(cleaned, "/") {
+		if part == ".." {
+			return "", &Error{
+				Code:        "app.invalid_folder",
+				Message:     "That is not a folder on the disk.",
+				Detail:      folder,
+				Recoverable: true,
+				Recovery:    "Give a folder inside the disk, such as \"shares\".",
+				Status:      400,
+			}
+		}
+	}
+	return cleaned, nil
 }
 
 // AppStorageSlot describes one of an application's declared storage locations
@@ -1283,7 +1366,7 @@ type AppStorageSlot struct {
 	Path string `json:"path,omitempty"`
 }
 
-func (s *AppServices) assignStorage(_ context.Context, params AssignStorageParams) (any, error) {
+func (s *AppServices) assignStorage(ctx context.Context, params AssignStorageParams) (any, error) {
 	manifest, err := s.manifest(params.ID)
 	if err != nil {
 		return nil, err
@@ -1322,17 +1405,101 @@ func (s *AppServices) assignStorage(_ context.Context, params AssignStorageParam
 		}
 	}
 
-	if err := s.storage.Assign(manifest.ID, slot.ID, params.Location, manifest.ID); err != nil {
+	folder, err := storageFolder(manifest.ID, params.Folder)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.storage.Assign(manifest.ID, slot.ID, params.Location, folder); err != nil {
 		return nil, err
 	}
 
+	// The container is rebuilt, not restarted.
+	//
+	// Docker fixes bind mounts when a container is created, so restarting one
+	// keeps the directories it was built with. This used to report that the
+	// change would "take effect the next time it starts", which was false: an
+	// application given a different disk went on reading the old one for ever,
+	// through any number of restarts, with nothing anywhere saying so.
+	//
+	// Only the container is replaced. No data is touched, on the old location or
+	// the new one — moving files is a different intention and is not this
+	// operation's to take.
+	rebuilt, err := s.rebuildContainer(ctx, manifest)
+	if err != nil {
+		return nil, err
+	}
+
+	message := manifest.Name + " will use that disk the next time it is installed."
+	if rebuilt {
+		message = manifest.Name + " is using that disk now. Anything it had " +
+			"already saved is still where it was."
+	}
 	return map[string]any{
 		"id":         manifest.ID,
 		"storage_id": slot.ID,
 		"location":   params.Location,
-		"message": manifest.Name + " will use that disk. " +
-			"It takes effect the next time it starts.",
+		"folder":     folder,
+		"rebuilt":    rebuilt,
+		"message":    message,
 	}, nil
+}
+
+// rebuildContainer replaces an application's container with one built from the
+// current manifest and the current storage assignments.
+//
+// Reports whether there was one to replace. An application that is not installed
+// is not an error here: the assignment is recorded and will be used when it is.
+func (s *AppServices) rebuildContainer(ctx context.Context, manifest Manifest) (bool, error) {
+	if err := s.docker.ping(ctx); err != nil {
+		return false, err
+	}
+	name := containerName(manifest.ID)
+	state, err := s.docker.inspectContainer(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	if state == nil {
+		return false, nil
+	}
+	wasRunning := state.State.Running
+
+	as, err := ensureAppOwner(s.stateDir, manifest.ID)
+	if err != nil {
+		return false, internalError("preparing an account for " + manifest.Name + ": " + err.Error())
+	}
+	// The new directories are created before the old container goes, so a
+	// failure here leaves the application exactly as it was.
+	binds, err := s.prepareStorage(manifest, as)
+	if err != nil {
+		return false, err
+	}
+
+	_ = s.docker.stopContainer(ctx, name, stopGraceSeconds)
+	if err := s.docker.removeContainer(ctx, name, true); err != nil {
+		return false, wrapDockerError(err, "rebuild_failed",
+			"Homebase could not rebuild "+manifest.Name+" with the new disk.",
+			"Try again. Nothing was deleted.")
+	}
+
+	config := s.buildContainer(manifest, binds, as)
+	if _, err := s.docker.createContainer(ctx, name, config); err != nil {
+		return false, wrapDockerError(err, "rebuild_failed",
+			manifest.Name+" was removed but could not be set up again.",
+			"Install it again. Its data is still on the server.")
+	}
+	s.forgetStopped(manifest.ID)
+
+	// Left stopped if it was stopped. Changing where an application keeps its
+	// files is not a reason to start something somebody had turned off.
+	if !wasRunning {
+		return true, nil
+	}
+	if err := s.docker.startContainer(ctx, name); err != nil {
+		return false, wrapDockerError(err, "rebuild_failed",
+			manifest.Name+" was rebuilt with the new disk but would not start.",
+			"Check the application's logs for the reason.")
+	}
+	return true, nil
 }
 
 func (s *AppServices) storageStatus(_ context.Context, params AppRef) (any, error) {
@@ -1457,6 +1624,46 @@ func chownToService(path string) error {
 // It is worth its own function because getting it wrong is silent. A root:root
 // 0640 file is perfectly readable by everything that writes it and by every test
 // that runs as root, and invisible to the one account that actually needs it.
+// shareWithServiceGroup makes a directory usable by everything that runs as the
+// service group — applications, the file server, and the backup.
+//
+// Group ownership and the group-write bit, recursively; user ownership is left
+// exactly as it is. That matters: files here may have been written by a person
+// over SMB or by an application, and taking them from whoever wrote them is what
+// this replaced.
+func shareWithServiceGroup(path string) error {
+	gid, err := serviceGroupID()
+	if err != nil {
+		return err
+	}
+	return filepath.Walk(path, func(name string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Symlinks are changed, not followed: following one would let a link
+		// planted here redirect a root chown at something outside.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return os.Lchown(name, -1, gid)
+		}
+		if err := os.Chown(name, -1, gid); err != nil {
+			return err
+		}
+		// Group gets whatever the owner has, so a directory the owner can enter
+		// is one the group can enter. Never the set-group-id bit: hostd's unit
+		// sets RestrictSUIDSGID=yes and the kernel refuses it.
+		mode := info.Mode().Perm()
+		return os.Chmod(name, mode|((mode&0o700)>>3))
+	})
+}
+
+func serviceGroupID() (int, error) {
+	group, err := user.LookupGroup(serviceAccount)
+	if err != nil {
+		return 0, fmt.Errorf("looking up the %s group: %w", serviceAccount, err)
+	}
+	return strconv.Atoi(group.Gid)
+}
+
 func giveToServiceGroup(path string) error {
 	group, err := user.LookupGroup(serviceAccount)
 	if err != nil {

@@ -271,11 +271,23 @@ func (s *ShareServices) setPassword(ctx context.Context, params SharePasswordPar
 	if err := setSharePassword(ctx, username, params.Password); err != nil {
 		return nil, err
 	}
+
+	// The name map is rendered from the accounts that exist, so it has to be
+	// written again now that there is one more. Without this the account is
+	// real, the password is right, and typing the name it was created with
+	// fails — which is what happened to the first person to use this.
+	shares, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.apply(ctx, shares); err != nil {
+		return nil, err
+	}
+
 	return map[string]any{
 		"username": username,
-		"message": username + " can now open the shared folders. The name to type " +
-			"is " + shareUserPrefix + username + ".",
-		"login": shareUserPrefix + username,
+		"message":  username + " can now open the shared folders.",
+		"login":    username,
 	}, nil
 }
 

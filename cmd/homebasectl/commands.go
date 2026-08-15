@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -280,10 +281,59 @@ func appsCommand(args []string, stdout io.Writer) error {
 		return withClient("apps logs", rest, stdout, appLogs)
 	case "storage":
 		return withClient("apps storage", rest, stdout, appStorage)
+	case "open":
+		return withClient("apps open", rest, stdout, openApp)
 	default:
 		return usageError{fmt.Errorf("unknown apps command %q — try list, install, "+
-			"start, stop, restart, uninstall, logs, storage", action)}
+			"start, stop, restart, uninstall, logs, storage, open", action)}
 	}
+}
+
+// openApp prints the address of a running application, and opens it if there is
+// a desktop to open it on.
+//
+// There was no way to find this out from anywhere in Homebase. An application
+// would install, start, pass its health check, and sit at an address nothing
+// reported — which for a media server is the whole of what it is for.
+func openApp(ctx context.Context, c *Client, o *options, args []string, w io.Writer) error {
+	if len(args) != 1 {
+		return usageError{errors.New("which application? — homebasectl apps open NAME")}
+	}
+	var app application
+	if err := c.Get(ctx, "/apps/"+args[0], &app); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, app)
+	}
+
+	if app.URL == "" {
+		fmt.Fprintf(w, "%s has no address to open.\n", app.Name)
+		if app.State != "running" {
+			fmt.Fprintf(w, "\nIt is %s. Start it with: homebasectl apps start %s\n",
+				strings.ReplaceAll(app.State, "_", " "), app.ID)
+		}
+		return nil
+	}
+
+	fmt.Fprintln(w, app.URL)
+	if !app.ReachableFromNetwork {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "That address only works on the server itself. Reach it from")
+		fmt.Fprintln(w, "another computer with an ssh tunnel:")
+		fmt.Fprintf(w, "\n    ssh -L 8000:%s console@%s\n",
+			strings.TrimPrefix(strings.TrimPrefix(app.URL, "http://"), "https://"),
+			shortHost())
+		return nil
+	}
+
+	// Opened as well as printed, when there is a desktop to open it on. Printed
+	// first and always, because the usual place this runs is an ssh session,
+	// where there is nothing to open and the address is the whole answer.
+	if opener, err := exec.LookPath("xdg-open"); err == nil && os.Getenv("DISPLAY") != "" {
+		_ = exec.CommandContext(ctx, opener, app.URL).Start()
+	}
+	return nil
 }
 
 // appStorage shows where an application keeps its files, and chooses.
@@ -306,18 +356,47 @@ func appStorage(ctx context.Context, c *Client, o *options, args []string, w io.
 			return usageError{fmt.Errorf(
 				"which disk should hold %q? Run `homebasectl storage` to see them", args[1])}
 		}
-		var result any
-		if err := c.Post(ctx, "/apps/"+app+"/storage", map[string]any{
-			"storage_id": args[1],
-			"location":   args[2],
-		}, &result); err != nil {
+		body := map[string]any{"storage_id": args[1], "location": args[2]}
+		if len(args) > 3 {
+			// The folder on that disk. Given so that a media server can read
+			// the same folder a laptop copies films into, rather than a
+			// directory of its own that somebody then has to fill twice.
+			body["folder"] = args[3]
+		}
+
+		var job jobReply
+		if err := c.Post(ctx, "/apps/"+app+"/storage", body, &job); err != nil {
+			return err
+		}
+		if err := followJob(ctx, c, o, job, w); err != nil {
 			return err
 		}
 		if o.asJSON {
-			return printResponse(w, c, result)
+			return printResponse(w, c, job)
 		}
-		fmt.Fprintf(w, "%s will keep its %s on %s.\n", app, args[1], args[2])
-		fmt.Fprintf(w, "\nStart it with: homebasectl apps start %s\n", app)
+
+		// Read back rather than echoed. The response to this is a job envelope,
+		// so the folder is not in it — printing the one that was asked for
+		// reported an empty folder as though it had been set, which is a claim
+		// about the server made from the request.
+		var placed struct {
+			Storage []struct {
+				ID   string `json:"id"`
+				Path string `json:"path"`
+			} `json:"storage"`
+		}
+		if err := c.Get(ctx, "/apps/"+app+"/storage", &placed); err != nil {
+			return err
+		}
+		for _, slot := range placed.Storage {
+			if slot.ID == args[1] && slot.Path != "" {
+				fmt.Fprintf(w, "%s will read its %s from %s\n", app, args[1], slot.Path)
+			}
+		}
+		// No "now restart it". The container is rebuilt by the assignment,
+		// because a restart would have kept the old directories — Docker fixes
+		// bind mounts when a container is created. Telling somebody to run a
+		// command that would not have worked is worse than saying nothing.
 		return nil
 	}
 
@@ -368,10 +447,18 @@ func appStorage(ctx context.Context, c *Client, o *options, args []string, w io.
 		}
 	}
 	if len(missing) > 0 {
-		fmt.Fprintf(w, "\nChoose a disk:\n\n    homebasectl apps storage %s %s <disk>\n",
+		fmt.Fprintf(w, "\nChoose a disk:\n\n    homebasectl apps storage %s %s internal\n",
 			app, missing[0])
 		fmt.Fprintln(w, "\nRun `homebasectl storage` for the list. `internal` is this")
 		fmt.Fprintln(w, "server's own disk, which is fine for anything that fits on it.")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "To point it at folders you can also reach from your own computer,")
+		fmt.Fprintln(w, "share them first and then name the folder:")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "    homebasectl share add films internal")
+		fmt.Fprintln(w, "    homebasectl share add shows internal")
+		fmt.Fprintf(w, "    homebasectl apps storage %s %s internal shares\n",
+			app, missing[0])
 	}
 	return nil
 }
@@ -447,9 +534,17 @@ func actOnApp(ctx context.Context, c *Client, o *options, action string,
 	id := names[0]
 
 	body := map[string]any{}
-	// Uninstalling asks for the name back. The API checks it again, and so does
-	// hostd: this is not the confirmation, it is passing one along.
-	if action == "uninstall" {
+	// Stopping, restarting and uninstalling all ask for the name back — each of
+	// them takes a service away from whoever is using it, possibly somebody else
+	// in the house. In a terminal the command itself is the confirmation: the
+	// name is already typed, deliberately, in the line that was run.
+	//
+	// Only uninstall sent it, so `apps stop` and `apps restart` failed with
+	// "confirm must be jellyfin" against every server they were ever pointed at.
+	// The same shape as `apps logs` decoding the wrong field: an endpoint with a
+	// caller nobody had run.
+	switch action {
+	case "stop", "restart", "uninstall":
 		body["confirm"] = id
 	}
 
@@ -469,7 +564,26 @@ func actOnApp(ctx context.Context, c *Client, o *options, action string,
 		}
 		return err
 	}
-	return followJob(ctx, c, o, job, w)
+	if err := followJob(ctx, c, o, job, w); err != nil {
+		return err
+	}
+
+	// The address, at the moment somebody wants it. Anything that starts an
+	// application ends with a person wanting to look at it, and until this was
+	// added there was nowhere at all in Homebase that would say where.
+	if o.asJSON || (action != "install" && action != "start" && action != "restart") {
+		return nil
+	}
+	var app application
+	if err := c.Get(ctx, "/apps/"+id, &app); err != nil || app.URL == "" {
+		return nil
+	}
+	if app.ReachableFromNetwork {
+		fmt.Fprintf(w, "\nOpen it at: %s\n", app.URL)
+	} else {
+		fmt.Fprintf(w, "\nIt is at %s, on the server only.\n", app.URL)
+	}
+	return nil
 }
 
 func appLogs(ctx context.Context, c *Client, o *options, names []string, w io.Writer) error {

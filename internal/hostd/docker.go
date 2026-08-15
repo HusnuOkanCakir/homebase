@@ -396,17 +396,25 @@ type containerConfig struct {
 }
 
 type hostConfig struct {
-	Binds          []string                 `json:"Binds,omitempty"`
-	PortBindings   map[string][]portBinding `json:"PortBindings,omitempty"`
-	RestartPolicy  restartPolicy            `json:"RestartPolicy"`
-	Memory         int64                    `json:"Memory,omitempty"`
-	CpuShares      int                      `json:"CpuShares,omitempty"`
-	CapDrop        []string                 `json:"CapDrop,omitempty"`
-	CapAdd         []string                 `json:"CapAdd,omitempty"`
-	SecurityOpt    []string                 `json:"SecurityOpt,omitempty"`
-	ReadonlyRootfs bool                     `json:"ReadonlyRootfs,omitempty"`
-	NetworkMode    string                   `json:"NetworkMode,omitempty"`
-	Devices        []deviceMapping          `json:"Devices,omitempty"`
+	Binds         []string                 `json:"Binds,omitempty"`
+	PortBindings  map[string][]portBinding `json:"PortBindings,omitempty"`
+	RestartPolicy restartPolicy            `json:"RestartPolicy"`
+	Memory        int64                    `json:"Memory,omitempty"`
+	CpuShares     int                      `json:"CpuShares,omitempty"`
+	CapDrop       []string                 `json:"CapDrop,omitempty"`
+
+	// GroupAdd are supplementary groups the container's process joins.
+	//
+	// One group, ever: the service group, and only for an application that has
+	// been given a folder the user also uses. That folder belongs to the group
+	// rather than to the application — because the file server writes into it
+	// too — and a container that is not a member of it can read nothing there.
+	GroupAdd       []string        `json:"GroupAdd,omitempty"`
+	CapAdd         []string        `json:"CapAdd,omitempty"`
+	SecurityOpt    []string        `json:"SecurityOpt,omitempty"`
+	ReadonlyRootfs bool            `json:"ReadonlyRootfs,omitempty"`
+	NetworkMode    string          `json:"NetworkMode,omitempty"`
+	Devices        []deviceMapping `json:"Devices,omitempty"`
 	// Privileged is deliberately present and deliberately never set. Its absence
 	// from the struct would make it impossible to assert that it is false.
 	Privileged bool `json:"Privileged"`

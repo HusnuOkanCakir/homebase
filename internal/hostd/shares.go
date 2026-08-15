@@ -35,6 +35,18 @@ const (
 	sambaConfig      = "/etc/samba/smb.conf"
 	sambaConfigSaved = "/etc/samba/smb.conf.before-homebase"
 
+	// sambaUserMap lets somebody type the name they chose.
+	//
+	// The Unix account is namespaced — `hbshare-okan` — and that is what stops a
+	// file-sharing password from also being a login. It is not what anybody
+	// should have to type. The first person to use this typed "okan", which is
+	// the name they had just set, and got an authentication box that came back
+	// for ever with no explanation.
+	//
+	// A prefix nobody chose is not a thing to expect people to remember. The
+	// account keeps it and the map translates.
+	sambaUserMap = "/etc/samba/homebase-users"
+
 	// sharesDirName is where share folders live inside a storage location, so
 	// that they are visibly separate from application data on the same disk.
 	sharesDirName = "shares"
@@ -229,6 +241,24 @@ func (s *ShareServices) shareUsers() []string {
 
 // --- Writing the configuration --------------------------------------------------
 
+// renderUserMap maps the name somebody types to the account it belongs to.
+//
+// One line per account: `hbshare-okan = okan`. Samba reads the left side as the
+// Unix account and everything after the equals as names that may be typed for
+// it.
+func renderUserMap(users []string) string {
+	var out strings.Builder
+	out.WriteString("# Written by Homebase. Changes here are replaced.\n")
+	out.WriteString("#\n")
+	out.WriteString("# The account on the left is namespaced so that a file-sharing\n")
+	out.WriteString("# password cannot also be a login. The name on the right is what\n")
+	out.WriteString("# somebody types, which is the name they chose.\n")
+	for _, user := range users {
+		out.WriteString(shareUserPrefix + user + " = " + user + "\n")
+	}
+	return out.String()
+}
+
 // renderSambaConfig produces the whole of smb.conf.
 //
 // Written by hand rather than by editing what is there, and deliberately short.
@@ -248,6 +278,7 @@ func renderSambaConfig(server string, shares []ShareState) string {
 	// Passwords, always. `security = user` is Samba's default and is restated
 	// because the alternative is a share anybody on the network can open.
 	out.WriteString("   security = user\n")
+	out.WriteString("   username map = " + sambaUserMap + "\n")
 	out.WriteString("   map to guest = never\n")
 	// SMB1 is the protocol with the wormable bugs, off by default since Windows
 	// 10 and disabled here so that nothing turns it back on to make an old
@@ -423,6 +454,9 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 	}
 
 	if err := writeSambaConfig(renderSambaConfig(server, states)); err != nil {
+		return err
+	}
+	if err := writeRootFile(sambaUserMap, renderUserMap(s.shareUsers()), 0o644); err != nil {
 		return err
 	}
 

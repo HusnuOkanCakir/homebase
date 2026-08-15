@@ -182,13 +182,24 @@ input:focus-visible {
   color: var(--warning);
 }
 
-button {
+button,
+a.button {
   padding: 0.6rem 1.1rem;
   border: 1px solid transparent;
   border-radius: 8px;
   font: inherit;
   font-weight: 500;
   cursor: pointer;
+}
+
+/* Opening an application is a link, not a button, because it goes somewhere —
+   so it middle-clicks, opens in a new tab, and shows its address on hover the
+   way every other link does. It is styled as a button because that is what it
+   looks like it should be. */
+a.button {
+  display: inline-block;
+  text-align: center;
+  text-decoration: none;
 }
 
 button:disabled {

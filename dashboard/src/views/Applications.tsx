@@ -323,6 +323,20 @@ function ApplicationDetail({
           </p>
         ) : (
           <div className="row">
+            {/* Open comes first, because it is the thing somebody came here to do.
+                Until this existed there was no way to reach an installed
+                application from anywhere in Homebase — it would install, start,
+                pass its health check, and sit at an address nothing reported. */}
+            {application.state === "running" && application.url && application.reachable_from_network ? (
+              <a
+                className="button primary"
+                href={application.url}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Open {application.name}
+              </a>
+            ) : null}
             {application.installed === null ? (
               <p className="muted">
                 Homebase cannot see whether {application.name} is installed, so it is not

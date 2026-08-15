@@ -106,7 +106,7 @@ func shareStatus(ctx context.Context, c *Client, o *options, _ []string, w io.Wr
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Sign in as: %s\n", strings.Join(prefixed(status.Users), ", "))
+	fmt.Fprintf(w, "Sign in as: %s\n", strings.Join(status.Users, ", "))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "To open it, on a computer on the same network:")
 	fmt.Fprintln(w)
@@ -123,20 +123,8 @@ func shareStatus(ctx context.Context, c *Client, o *options, _ []string, w io.Wr
 	fmt.Fprintf(w, "            Or mount it permanently:\n")
 	fmt.Fprintf(w, "            sudo mount -t cifs //%s.local/%s /mnt/%s \\\n",
 		server, first, first)
-	fmt.Fprintf(w, "                 -o username=%s%s,uid=$(id -u)\n",
-		"hbshare-", status.Users[0])
+	fmt.Fprintf(w, "                 -o username=%s,uid=$(id -u)\n", status.Users[0])
 	return nil
-}
-
-// prefixed shows the names as they are actually typed. The prefix is what stops
-// a file-sharing password from also being a way to log in to the machine, and
-// somebody typing it into Windows needs the whole thing.
-func prefixed(users []string) []string {
-	out := make([]string, 0, len(users))
-	for _, user := range users {
-		out = append(out, "hbshare-"+user)
-	}
-	return out
 }
 
 func addShare(ctx context.Context, c *Client, o *options, args []string, w io.Writer) error {

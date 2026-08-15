@@ -194,13 +194,16 @@ func (c *Client) AppStorage(ctx context.Context, id string) (*AppStorage, error)
 	return &storage, nil
 }
 
-// AssignStorage chooses which disk holds one of an application's storage slots.
-func (c *Client) AssignStorage(ctx context.Context, app, storageID, location string) error {
+// AssignStorage chooses which disk holds one of an application's storage slots,
+// and optionally which folder on it — so a media server can read the same folder
+// a laptop copies films into.
+func (c *Client) AssignStorage(ctx context.Context, app, storageID, location, folder string) error {
 	params := struct {
 		ID        string `json:"id"`
 		StorageID string `json:"storage_id"`
 		Location  string `json:"location"`
-	}{ID: app, StorageID: storageID, Location: location}
+		Folder    string `json:"folder,omitempty"`
+	}{ID: app, StorageID: storageID, Location: location, Folder: folder}
 	return c.Call(ctx, "app.assign_storage", params, true, nil)
 }
 
