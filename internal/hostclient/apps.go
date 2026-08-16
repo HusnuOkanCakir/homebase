@@ -51,6 +51,7 @@ type App struct {
 	// Where to open it, and whether anything other than this machine can. Both,
 	// because an address alone cannot say which — and until these existed,
 	// nothing anywhere reported how to reach an application that was running.
+	AfterInstall         string `json:"after_install,omitempty"`
 	HostPort             int    `json:"host_port,omitempty"`
 	ReachableFromNetwork bool   `json:"reachable_from_network"`
 	URL                  string `json:"url,omitempty"`

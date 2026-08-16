@@ -4,6 +4,7 @@
   "id": "jellyfin",
   "name": "Jellyfin",
   "summary": "Watch your films, television and music on any device in your home.",
+  "after_install": "Open Jellyfin and work through its setup: it asks you to make an account, then where your films and programmes are. The folder you chose here is /media inside Jellyfin \u2014 add /media/films and /media/shows as libraries.",
   "homepage": "https://jellyfin.org",
   "license": "GPL-2.0-only",
   "container": {

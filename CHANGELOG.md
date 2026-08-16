@@ -500,6 +500,18 @@ and Windows on it:
   on the first real laptop, full load reached 89 °C with the fan still climbing,
   past the 84 °C its processor throttles at, and a manual setting on a machine
   like that is a way to cook one that is already struggling
+- **qBittorrent**, downloading into a folder the media server reads. Pointed at
+  the same storage location as the shared folders, so a finished file is renamed
+  into place rather than copied — a 40 GB film moved between disks is minutes and
+  twice the space
+- **A manifest can say what is left to do**, shown once after installing and on
+  the application's own screen. For several applications that is the difference
+  between working and usable: one that is running, reachable, and asking for a
+  password nobody was given is indistinguishable from one that is broken
+- **Two applications can no longer claim the same port.** Each manifest is valid
+  alone, so the collision only exists across the catalogue — and without the
+  check the second one fails at container creation while the symptom is that the
+  *first* stopped working
 - **Processor, memory and network on the dashboard**, beside the temperature and
   fan, as charts over a day, a week or a month. Counters are recorded as running
   totals and differenced on the way out, so a rate can be recomputed years later

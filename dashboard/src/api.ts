@@ -398,6 +398,14 @@ export interface Application {
    */
   url?: string;
   reachable_from_network: boolean;
+  /**
+   * What the person who installed it still has to do.
+   *
+   * For several applications this is the difference between working and
+   * usable: one that is running, reachable, and asking for a password nobody
+   * was given is indistinguishable from one that is broken.
+   */
+  after_install?: string;
   started_at: string | null;
   exit_code: number | null;
   /** Where its data lives, so a user can be told what uninstalling leaves behind. */

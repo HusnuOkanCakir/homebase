@@ -472,6 +472,9 @@ type application struct {
 	URL     string `json:"url,omitempty"`
 	Health  string `json:"health,omitempty"`
 
+	// What is still left for a person to do, from the manifest.
+	AfterInstall string `json:"after_install,omitempty"`
+
 	// Whether anything other than this machine can open it. Without this an
 	// address is worse than none: a loopback URL is a real place that is not
 	// there from the laptop somebody is reading it on.
@@ -583,6 +586,12 @@ func actOnApp(ctx context.Context, c *Client, o *options, action string,
 		fmt.Fprintf(w, "\nOpen it at: %s\n", app.URL)
 	} else {
 		fmt.Fprintf(w, "\nIt is at %s, on the server only.\n", app.URL)
+	}
+	// What is left to do, from the manifest. Printed after an install rather
+	// than only in a screen somebody might visit: an application asking for a
+	// password nobody was given looks exactly like one that is broken.
+	if action == "install" && app.AfterInstall != "" {
+		fmt.Fprintf(w, "\n%s\n", wrapAt(app.AfterInstall, 72))
 	}
 	return nil
 }

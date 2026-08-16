@@ -1014,9 +1014,16 @@ reviewable file and `hostd` owns what can run ([ADR-0012](docs/decisions/0012-ho
 so this milestone is the content, and the places where real applications do not
 fit the model.
 
-- [ ] **qBittorrent** — completes the media loop that already half exists. The
-      download folder and the media folder must be storage locations on the same
-      filesystem, or every completed file is copied rather than moved
+- [x] **qBittorrent** — completes the media loop that already half exists. The
+      download folder and the media folder are storage locations on the same
+      filesystem, so a completed file is renamed into place rather than copied
+- [x] **A manifest can say what is left to do.** qBittorrent invents a new
+      password on every start until somebody sets one, and it says so in its log;
+      File Browser prints one once; Jellyfin has a setup wizard. All three were
+      installable and unusable without a sentence saying which
+- [x] **Two applications cannot claim the same port**, which nothing checked —
+      each manifest is valid alone and the collision only exists across the
+      catalogue
 - [ ] **Immich** — photographs off a phone and onto hardware its owner controls.
       The most-wanted self-hosted application there is, and the one that makes a
       server worth the electricity. Needs a database container, which the manifest

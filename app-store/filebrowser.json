@@ -4,6 +4,7 @@
   "id": "filebrowser",
   "name": "File Browser",
   "summary": "Put files on your server and get them back, from any device.",
+  "after_install": "File Browser starts with the user \"admin\" and prints a password into its log the first time it runs. Find it with `homebasectl apps logs filebrowser`, sign in, and change it under Settings, User Management.",
   "homepage": "https://filebrowser.org",
   "license": "Apache-2.0",
   "container": {

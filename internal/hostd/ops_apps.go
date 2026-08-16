@@ -297,6 +297,11 @@ type AppStatus struct {
 	// Path is the base path the web interface is served under.
 	Path string `json:"path,omitempty"`
 
+	// AfterInstall is what is still left for a person to do — carried on the
+	// status rather than only on the install result, so that somebody who
+	// closed the terminal can still find out.
+	AfterInstall string `json:"after_install,omitempty"`
+
 	// URL is where to open it, composed here so that there is one answer rather
 	// than one per interface. Empty until the application is running and has a
 	// port, because an address that is not yet listening is worse than none.
@@ -378,6 +383,7 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 
 		ReachableFromNetwork: manifest.Network.PublishedToNetwork(),
 		Path:                 manifest.Network.Path,
+		AfterInstall:         manifest.AfterInstall,
 	}
 
 	if !dockerUp {

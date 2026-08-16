@@ -316,6 +316,17 @@ function ApplicationDetail({
           />
         ) : null}
 
+        {/* What is still left for a person to do, from the manifest. Above the
+            buttons, because it is the answer to "it is running and I cannot get
+            in" — which otherwise looks exactly like a broken application. */}
+        {application.installed && application.after_install ? (
+          <Message
+            tone="info"
+            title={`One thing left to set up in ${application.name}.`}
+            recovery={application.after_install}
+          />
+        ) : null}
+
         {!canManage ? (
           <p className="muted">
             You can see this application but not change it. Ask whoever set up this server for

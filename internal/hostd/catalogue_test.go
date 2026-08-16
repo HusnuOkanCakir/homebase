@@ -477,3 +477,69 @@ func TestTheAddressSaysWhereToOpenIt(t *testing.T) {
 		t.Errorf("a UDP service was given the browser address %q", url)
 	}
 }
+
+// Two applications cannot answer on the same port.
+//
+// Each manifest is valid alone, so the collision exists only across the
+// catalogue — which is the only place it can be seen. Without this check the
+// second application fails at container creation with a message from Docker
+// about an address in use, on a machine where the symptom is that the *first*
+// application stopped working.
+func TestTwoApplicationsCannotPublishTheSamePort(t *testing.T) {
+	first := validManifest()
+	first["id"] = "first-app"
+	first["name"] = "First"
+	first["network"] = map[string]any{
+		"internal_port": 8096, "protocol": "http", "reachable_from": "network",
+	}
+
+	second := validManifest()
+	second["id"] = "second-app"
+	second["name"] = "Second"
+	second["network"] = map[string]any{
+		// A different port inside its container, published on the same one.
+		"internal_port": 80, "protocol": "http", "reachable_from": "network",
+		"host_port": 8096,
+	}
+
+	catalogue := writeCatalogue(t, map[string]any{
+		"first-app.json": first, "second-app.json": second,
+	})
+
+	loaded := 0
+	for _, id := range []string{"first-app", "second-app"} {
+		if _, ok := catalogue.Lookup(id); ok {
+			loaded++
+		}
+	}
+	if loaded != 1 {
+		t.Fatalf("%d of the two applications loaded, want exactly one", loaded)
+	}
+	reasons := catalogue.Rejected()
+	if len(reasons) != 1 {
+		t.Fatalf("got %d rejections, want 1: %v", len(reasons), reasons)
+	}
+	for name, reason := range reasons {
+		if !strings.Contains(reason, "8096") {
+			t.Errorf("%s was rejected with %q, which does not name the port", name, reason)
+		}
+	}
+}
+
+// An application on loopback claims no port on the machine — Docker picks a
+// free one — so two of them are not a collision.
+func TestApplicationsOnLoopbackDoNotCollide(t *testing.T) {
+	manifests := map[string]any{}
+	for _, id := range []string{"one-app", "two-app"} {
+		manifest := validManifest()
+		manifest["id"] = id
+		manifest["name"] = id
+		manifest["network"] = map[string]any{"internal_port": 8080, "protocol": "http"}
+		manifests[id+".json"] = manifest
+	}
+
+	catalogue := writeCatalogue(t, manifests)
+	if reasons := catalogue.Rejected(); len(reasons) != 0 {
+		t.Errorf("two loopback applications were treated as a collision: %v", reasons)
+	}
+}

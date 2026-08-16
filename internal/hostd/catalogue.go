@@ -47,7 +47,16 @@ type Manifest struct {
 	Permissions ManifestPermissions `json:"permissions,omitempty"`
 	Resources   ManifestResources   `json:"resources,omitempty"`
 
-	Credentials     []ManifestCredential `json:"credentials,omitempty"`
+	Credentials []ManifestCredential `json:"credentials,omitempty"`
+
+	// AfterInstall is what the person who installed this still has to do.
+	//
+	// Prose, never a template and never a command Homebase runs — the only
+	// thing that reads it is a human being. It exists because for several
+	// applications it is the difference between working and usable: one that is
+	// running, reachable, and asking for a password nobody was given is
+	// indistinguishable from one that is broken.
+	AfterInstall    string               `json:"after_install,omitempty"`
 	Capabilities    []ManifestCapability `json:"capabilities,omitempty"`
 	Events          []ManifestEvent      `json:"events,omitempty"`
 	SensitiveFields []string             `json:"sensitive_fields,omitempty"`
@@ -231,6 +240,8 @@ func (c *Catalogue) Load() error {
 
 	manifests := make(map[string]Manifest)
 	rejected := make(map[string]string)
+	// Published ports, so that two applications cannot claim the same one.
+	ports := make(map[int]string)
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
@@ -258,6 +269,27 @@ func (c *Catalogue) Load() error {
 			rejected[entry.Name()] = fmt.Sprintf(
 				"id %q is already provided by %s", manifest.ID, existing.Name)
 			continue
+		}
+
+		// Two applications cannot answer on the same port.
+		//
+		// Checked across the catalogue rather than within one manifest, because
+		// that is the only place it is visible: each file is valid on its own,
+		// and the collision exists only once they are both installed. Without
+		// this the second one fails at container creation with a message from
+		// Docker about an address already in use, on a machine where the first
+		// application is the one that stops working.
+		//
+		// The reserved-port list is the same idea for the ports the machine
+		// itself uses; this is for the ports the catalogue hands out.
+		if manifest.Network.PublishedToNetwork() {
+			if taken, clash := ports[manifest.Network.PublishedPort()]; clash {
+				rejected[entry.Name()] = fmt.Sprintf(
+					"port %d is already published by %s",
+					manifest.Network.PublishedPort(), taken)
+				continue
+			}
+			ports[manifest.Network.PublishedPort()] = manifest.Name
 		}
 
 		manifests[manifest.ID] = manifest
