@@ -54,8 +54,13 @@ type DDNSStatus struct {
 type NewDevice struct {
 	VPNDevice
 
-	Config  string `json:"config"`
-	QRCode  string `json:"qr_code,omitempty"`
+	Config string `json:"config"`
+	QRCode string `json:"qr_code,omitempty"`
+
+	// QRImage is the same code as a PNG data URI, for a browser. Separate from
+	// the terminal drawing because neither can be shown where the other belongs,
+	// and a page that renders block characters as text is not a QR code.
+	QRImage string `json:"qr_image,omitempty"`
 	Message string `json:"message"`
 }
 

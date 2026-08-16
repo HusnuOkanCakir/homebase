@@ -127,6 +127,11 @@ type NewDevice struct {
 	// terminal block characters.
 	QRCode string `json:"qr_code,omitempty"`
 
+	// QRImage is the same code as a PNG data URI, for a browser. Separate from
+	// the terminal drawing because neither can be shown where the other belongs,
+	// and a page that renders block characters as text is not a QR code.
+	QRImage string `json:"qr_image,omitempty"`
+
 	Message string `json:"message"`
 }
 
@@ -404,6 +409,7 @@ func addDevice(ctx context.Context, name string) (*NewDevice, error) {
 		VPNDevice: device,
 		Config:    client,
 		QRCode:    qrCode(client),
+		QRImage:   qrImage(client),
 		Message: "This is the only time this configuration can be shown. Save it, or " +
 			"scan the code, before closing this. If it is lost, remove the device " +
 			"and add it again.",
@@ -632,24 +638,55 @@ func runWG(ctx context.Context, args ...string) (string, error) {
 // A machine without qrencode gets no code and the text configuration, which is
 // what a laptop wants anyway.
 func qrCode(config string) string {
+	// ANSIUTF8 draws with half-block characters, so the code is square in a
+	// terminal rather than twice as tall as it is wide — which matters, because
+	// a stretched code will not scan.
+	out, ok := runQrencode(config, "ANSIUTF8")
+	if !ok {
+		return ""
+	}
+	return string(out)
+}
+
+// qrImage renders the same code as a PNG, for a browser.
+//
+// A PNG rather than the SVG qrencode can also produce, and the difference is
+// not aesthetic: an SVG has to be put into the page as markup, and this one is
+// generated from a configuration containing a hostname somebody typed. A PNG
+// arrives as a data URI in an `img` tag, where there is nothing to inject into.
+// The code is a few kilobytes either way.
+func qrImage(config string) string {
+	// -s 6 gives a code large enough to scan from a laptop screen at arm's
+	// length, which is where this is read from; -m 2 is the quiet border a
+	// scanner needs to find the edges at all.
+	out, ok := runQrencode(config, "PNG", "-s", "6", "-m", "2")
+	if !ok {
+		return ""
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(out)
+}
+
+// runQrencode encodes a configuration, with it arriving on standard input and
+// never as an argument — the configuration contains the device's private key,
+// and an argument is readable in /proc by every process on the machine for as
+// long as the command runs.
+func runQrencode(config, format string, extra ...string) ([]byte, bool) {
 	binary, err := exec.LookPath("qrencode")
 	if err != nil {
-		return ""
+		return nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// ANSIUTF8 draws with half-block characters, so the code is square in a
-	// terminal rather than twice as tall as it is wide — which matters, because
-	// a stretched code will not scan.
-	cmd := exec.CommandContext(ctx, binary, "-t", "ANSIUTF8", "-o", "-")
+	args := append([]string{"-t", format, "-o", "-"}, extra...)
+	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Stdin = strings.NewReader(config)
 	cmd.Env = aptEnv()
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return nil, false
 	}
-	return string(out)
+	return out, true
 }
 
 // --- Dynamic DNS --------------------------------------------------------------------

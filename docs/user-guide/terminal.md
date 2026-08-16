@@ -61,6 +61,13 @@ homebasectl vpn setup yours.duckdns.org
 homebasectl vpn add-device phone            # prints a QR code, once
 homebasectl vpn remove-device phone
 homebasectl vpn dns duckdns yourname        # keep a name pointing at the house
+homebasectl vpn off                         # close the port; the keys are kept
+homebasectl share                           # folders on the network, and what to type
+homebasectl share add backup internal
+homebasectl share password okan
+homebasectl apps storage jellyfin           # where an application keeps its files
+homebasectl apps open jellyfin              # the address, and open it if there is a desktop
+homebasectl system history 7                # how hot it has been, as a chart
 homebasectl wake AA:BB:CC:DD:EE:FF          # start a sleeping machine
 homebasectl repair                          # fix what a power cut left broken
 homebasectl diagnostics                     # a file safe to send to somebody
@@ -69,6 +76,49 @@ homebasectl diagnostics                     # a file safe to send to somebody
 Anything that takes a while — installing an application, making a backup — waits and reports
 how it ended, rather than handing back a job number for you to poll. The polling loop would
 otherwise be written once per caller, slightly differently each time.
+
+## Reaching it from outside the house
+
+Wireguard, and Homebase runs the server itself — there is no third party in the path and
+no account anywhere ([ADR-0019](../decisions/0019-remote-access-is-self-hosted-wireguard.md)).
+
+```sh
+sudo homebasectl vpn dns duckdns yourname       # asks for the token, never an argument
+sudo homebasectl vpn setup yourname.duckdns.org
+sudo homebasectl vpn add-device phone
+```
+
+The last one prints a QR code **once**. It contains the device's private key, which is
+stored nowhere — losing it means removing the device and adding it again.
+
+Three things are worth knowing before you rely on it.
+
+**It opens a port.** UDP 51820, to the whole internet rather than to private addresses
+only, because being reachable from outside is what this is for. Every other listening
+thing Homebase sets up is offered to the house alone. What makes the difference acceptable
+is Wireguard's answer to a packet it does not recognise, which is silence — there is no
+banner, no error, and no way to distinguish the port from a closed one without a key.
+
+**Your router has to forward it, and Homebase cannot.** Nor can it check from here: a
+firewalled port and a wrong key are the same experience on a phone, which is to say
+nothing happening. `homebasectl vpn` therefore keeps telling you the forwarding is
+outstanding until a device has actually connected once, and `ever_connected` is the field
+that makes that possible.
+
+**Give the server a fixed address in the router** while you are in there. A forward points
+at an address, and the server's changes when its lease does — which is how remote access
+stops working three weeks later for no visible reason.
+
+To switch it off:
+
+```sh
+sudo homebasectl vpn off
+```
+
+The port closes first and the tunnel stops second, deliberately: a failure to stop leaves
+something nothing can reach, where the other order would leave the door open after you
+were told it was shut. The devices keep their keys and work again when it is switched back
+on — "switch this off" and "forget every device I set up" are different intentions.
 
 ## Scripting it
 

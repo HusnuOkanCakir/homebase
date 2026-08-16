@@ -516,6 +516,55 @@ export interface WifiStatus {
   has_wired_connection: boolean;
 }
 
+/**
+ * Remote access, over Wireguard.
+ *
+ * `configured` and `running` are separate facts, and so is `ever_connected`: a
+ * tunnel that is set up, running, and has never seen a handshake is almost
+ * always a router that has not been told to forward the port — the one part of
+ * this Homebase cannot do and the only part that usually goes wrong.
+ */
+export interface VPNStatus {
+  configured: boolean;
+  running: boolean;
+  hostname?: string;
+  port: number;
+  devices: VPNDevice[];
+  ever_connected: boolean;
+  dns: {
+    configured: boolean;
+    provider?: string;
+    name?: string;
+    last_result?: string;
+    last_checked?: string;
+    message?: string;
+  };
+  message?: string;
+}
+
+export interface VPNDevice {
+  name: string;
+  address: string;
+  public_key: string;
+  last_handshake?: string;
+  transfer_rx?: number;
+  transfer_tx?: number;
+}
+
+/**
+ * A device's configuration, returned exactly once by the call that created it.
+ *
+ * It contains the device's private key and is stored nowhere. Losing it means
+ * removing the device and adding it again — which is why the server says so in
+ * `message` rather than leaving the interface to imply it.
+ */
+export interface NewVPNDevice extends VPNDevice {
+  config: string;
+  /** The same configuration as a PNG data URI, for scanning with a phone. */
+  qr_image?: string;
+  message: string;
+}
+
 export interface WifiNetwork {
   ssid: string;
   signal: number;
@@ -853,6 +902,29 @@ export const api = {
 
   createBackup: (location: string, includeData: boolean) =>
     post<Job>("/backups", { location, include_data: includeData }),
+
+  // --- Remote access ------------------------------------------------------------
+
+  vpn: () => get<VPNStatus>("/network/vpn"),
+
+  /** Switching it on writes a configuration, starts the tunnel and opens a port
+   *  in the firewall — so it is allowed longer than an ordinary request. */
+  setUpVPN: (hostname: string) =>
+    post<VPNStatus>("/network/vpn", { hostname }, 120_000),
+
+  /** Closes the port first, then stops the tunnel. The keys are kept. */
+  disableVPN: () => post<VPNStatus>("/network/vpn/disable", undefined, 60_000),
+
+  addVPNDevice: (name: string) =>
+    post<NewVPNDevice>("/network/vpn/devices", { name }, 60_000),
+
+  removeVPNDevice: (name: string) =>
+    post<VPNStatus>("/network/vpn/devices/remove", { name }, 60_000),
+
+  setVPNDNS: (provider: string, name: string, token: string) =>
+    post<VPNStatus>("/network/vpn/dns", { provider, name, token }, 120_000),
+
+  clearVPNDNS: () => post<VPNStatus>("/network/vpn/dns/clear", undefined, 60_000),
 
   // --- Wireless ---------------------------------------------------------------
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type NetworkStatus } from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
+import { RemoteAccess } from "./RemoteAccess";
 import { Wifi } from "./Wifi";
 
 /**
@@ -176,6 +177,11 @@ export function Network({ canManage }: { canManage: boolean }) {
           cannot reach their server, and the first thing they need is which of
           the three faults it is — not a list of networks to join. */}
       <Wifi canManage={canManage} />
+
+      {/* Last, because it is the only thing on this page somebody can reach
+          without already being on the network — and therefore the only thing
+          they are never looking at when they cannot. */}
+      <RemoteAccess canManage={canManage} />
     </>
   );
 }

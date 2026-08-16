@@ -155,7 +155,32 @@ sudo homebasectl backup now backups    # and one right now
 A backup is plain files with a JSON manifest, readable without Homebase, and it restores
 onto a *different* machine ([ADR-0014](docs/decisions/0014-backups-are-readable-without-homebase.md)).
 
-### 8. Keep it patched
+### 8. Reach it from anywhere
+
+Wireguard, self-hosted ([ADR-0019](docs/decisions/0019-remote-access-is-self-hosted-wireguard.md)).
+Your phone joins this house's network from anywhere; nothing else on the server is exposed.
+
+```sh
+sudo homebasectl vpn dns duckdns yourname     # a name that follows your address
+sudo homebasectl vpn setup yourname.duckdns.org
+sudo homebasectl vpn add-device phone         # prints a QR code — scan it
+sudo homebasectl vpn                          # who is set up, and who has connected
+sudo homebasectl vpn remove-device phone      # a lost phone, dealt with
+sudo homebasectl vpn off                      # closes the port; keys are kept
+```
+
+Setting it up writes the configuration, starts the tunnel and **opens UDP 51820 in the
+firewall** — the one port Homebase offers to the whole internet rather than to the house
+only, because being reachable from outside is the entire purpose of this one. What makes
+that acceptable is what Wireguard does with a packet it does not recognise, which is
+nothing at all: no reply, no banner, no way to tell the port from a closed one.
+
+**One thing is left that no server can do for you: forward UDP 51820 on your router.**
+Give the server a fixed address there at the same time, or the forwarding breaks the next
+time it restarts. Until a device has connected once, `homebasectl vpn` keeps saying so —
+because a port the router has not forwarded looks from a phone exactly like a wrong key.
+
+### 9. Keep it patched
 
 ```sh
 sudo homebasectl update check
