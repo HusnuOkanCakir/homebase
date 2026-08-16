@@ -363,9 +363,11 @@ def build_hostd(version: str, binaries: Path) -> Path:
     install_file(REPO_ROOT / "packaging/share-account",
                  root / "usr/libexec/homebase/share-account", 0o755)
 
-    # Opening the file-sharing port, and closing it when nothing is shared.
-    install_file(REPO_ROOT / "packaging/share-firewall",
-                 root / "usr/libexec/homebase/share-firewall", 0o755)
+    # Opening a port when a feature needs one, and closing it again when it
+    # does not. One helper rather than one per feature: the decision about who
+    # may reach a port is worth having in a single reviewable place.
+    install_file(REPO_ROOT / "packaging/firewall",
+                 root / "usr/libexec/homebase/firewall", 0o755)
 
     for unit in ("homebase-hostd.service", "homebase-hostd.socket",
                  "homebase-update-check.service", "homebase-update-apply.service",
@@ -373,7 +375,7 @@ def build_hostd(version: str, binaries: Path) -> Path:
                  "homebase-ddns.service", "homebase-ddns.timer",
                  "homebase-install-samba.service",
                  "homebase-share-account.service",
-                 "homebase-share-firewall.service"):
+                 "homebase-firewall.service"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,

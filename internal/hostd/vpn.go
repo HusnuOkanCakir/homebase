@@ -288,12 +288,41 @@ func setUpVPN(ctx context.Context, hostname string) error {
 	}
 	_ = runQuietly(ctx, "sysctl", "-p", "/etc/sysctl.d/99-homebase-vpn.conf")
 
+	// The one port in Homebase opened to the whole internet, and it is opened
+	// deliberately rather than as a side effect.
+	//
+	// Everything else that listens is offered to private address ranges only.
+	// This is remote access: a service reachable from outside the house is the
+	// entire point of it, and a Wireguard port that is closed is a VPN that is
+	// configured, running, and impossible to connect to — which looks from a
+	// phone exactly like a wrong password.
+	//
+	// What makes it defensible is what Wireguard does with an unrecognised
+	// packet, which is nothing at all: no reply, no banner, no way to tell the
+	// port from a closed one without a key.
+	openPort(ctx, vpnPort, "udp", "any", "Homebase remote access")
+
 	if err := runSystemctl(ctx, "enable", "--now", wireguardUnit); err != nil {
 		return err
 	}
 	// Restart rather than start: enable --now does nothing if it was already
 	// running, and the configuration has just changed.
 	return runSystemctl(ctx, "restart", wireguardUnit)
+}
+
+// disableVPN stops the tunnel and closes the port.
+//
+// The port is closed first and unconditionally. If stopping the service then
+// fails, what is left is a Wireguard nothing on the internet can reach, which is
+// the safe half of the pair — the reverse order would leave the door open after
+// somebody was told it had been shut.
+func disableVPN(ctx context.Context) error {
+	closePort(ctx, vpnPort, "udp", "any", "Homebase remote access")
+
+	if err := runSystemctl(ctx, "disable", "--now", wireguardUnit); err != nil {
+		return err
+	}
+	return nil
 }
 
 func serverKeyFrom(config string) string {

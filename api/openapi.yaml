@@ -1926,6 +1926,38 @@ paths:
         "503":
           $ref: "#/components/responses/HostUnavailable"
 
+  /network/vpn/disable:
+    post:
+      tags: [network]
+      summary: Switch remote access off, keeping the keys
+      description: |
+        Requires `network.modify`. Stops the tunnel and **closes the port in the firewall**,
+        in that order — the port is closed first and unconditionally, so a failure to stop
+        the service leaves a Wireguard nothing on the internet can reach rather than an open
+        door somebody was told had been shut.
+
+        The keys stay. "Switch this off" and "forget every device I have set up" are
+        different intentions, and collapsing them would mean turning remote access off for
+        an afternoon costs re-issuing a configuration to every phone in the house.
+
+        This is the rollback `POST /network/vpn` has always named. It did not exist until
+        the port-opening did, which meant there was a way to open a port to the whole
+        internet and none to shut it.
+      operationId: disableVPN
+      responses:
+        "200":
+          description: Remote access is off
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VPNStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HostUnavailable"
+
   /network/vpn/devices:
     post:
       tags: [network]

@@ -35,6 +35,7 @@ func (s *Server) registerNetworkRoutes(mux *http.ServeMux) {
 
 	mux.Handle("GET /api/v1/network/vpn", s.require(auth.PermNetworkDiag, s.handleVPNStatus))
 	mux.Handle("POST /api/v1/network/vpn", s.require(auth.PermNetworkModify, s.handleVPNSetup))
+	mux.Handle("POST /api/v1/network/vpn/disable", s.require(auth.PermNetworkModify, s.handleVPNDisable))
 	mux.Handle("POST /api/v1/network/vpn/devices", s.require(auth.PermNetworkModify, s.handleAddVPNDevice))
 	mux.Handle("POST /api/v1/network/vpn/devices/remove", s.require(auth.PermNetworkModify, s.handleRemoveVPNDevice))
 	mux.Handle("POST /api/v1/network/vpn/dns", s.require(auth.PermNetworkModify, s.handleSetDNS))
@@ -300,6 +301,30 @@ func (s *Server) handleVPNSetup(w http.ResponseWriter, r *http.Request, user *au
 // The response carries a private key — the only response in the API that does,
 // apart from the recovery code at setup. It is stored nowhere and cannot be
 // asked for again.
+// handleVPNDisable closes the way in from outside.
+func (s *Server) handleVPNDisable(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	ctx, cancel := context.WithTimeout(r.Context(), 1*time.Minute)
+	defer cancel()
+
+	status, err := s.host.DisableVPN(ctx)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	// A warning rather than an ordinary note. Somebody away from home who
+	// relies on this has just been disconnected, and the event log is where
+	// they will look to find out why.
+	s.events.Warn(r.Context(), "network.vpn_disabled", "",
+		"remote access was switched off",
+		"This server can no longer be reached from outside the house. The "+
+			"devices already set up keep their keys and will work again when "+
+			"it is switched back on.")
+	s.log.Info("remote access disabled", "by", user.Username)
+
+	writeJSON(w, http.StatusOK, status)
+}
+
 func (s *Server) handleAddVPNDevice(w http.ResponseWriter, r *http.Request, user *auth.User) {
 	var body struct {
 		Name string `json:"name"`

@@ -1627,10 +1627,34 @@ func vpnCommand(args []string, stdout io.Writer) error {
 		return withClient("vpn remove-device", rest, stdout, vpnRemoveDevice)
 	case "dns":
 		return withClient("vpn dns", rest, stdout, vpnDNS)
+	case "off", "disable":
+		return withClient("vpn off", rest, stdout, vpnDisable)
 	default:
 		return usageError{fmt.Errorf("unknown vpn command %q — try status, setup, "+
-			"add-device, remove-device or dns", action)}
+			"add-device, remove-device, dns or off", action)}
 	}
+}
+
+// vpnDisable closes the way in from outside.
+//
+// It existed as a promise before it existed as a command: `vpn.setup` named
+// `vpn.disable` as its rollback and nothing implemented it, so there was a way
+// to open a port to the internet and none to shut it.
+func vpnDisable(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
+	var status vpnStatusReply
+	if err := c.Post(ctx, "/network/vpn/disable", map[string]any{}, &status); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, status)
+	}
+	fmt.Fprintln(w, "Remote access is off, and the port is closed.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "The devices you have set up keep their keys and will work")
+	fmt.Fprintln(w, "again the moment you switch it back on:")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "    homebasectl vpn setup <name>")
+	return nil
 }
 
 type vpnStatusReply struct {

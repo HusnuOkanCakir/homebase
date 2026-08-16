@@ -1,0 +1,23 @@
+[Unit]
+Description=Homebase — open or close a port in the firewall
+ConditionPathExists=/etc/homebase/firewall
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+
+# A fixed command with no arguments. What to change is in a root-only file that
+# hostd writes and this script validates again — nothing a caller sends ever
+# becomes part of a command line here.
+#
+# hostd does not do this itself because ufw writes /etc/ufw and reloads the
+# kernel's packet filter, and neither is in that service's ProtectSystem=strict
+# allowance. A root service that can rewrite the firewall can open the machine to
+# the internet.
+ExecStart=/usr/libexec/homebase/firewall
+
+User=root
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

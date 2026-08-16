@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -358,23 +359,37 @@ func writeSambaConfig(content string) error {
 	return writeRootFile(sambaConfig, content, 0o644)
 }
 
-// setShareFirewall opens or closes the file-sharing port.
+// openPort and closePort ask the firewall helper to change one rule.
 //
-// Failures are logged into the error path of nothing: a share that works while
-// the firewall did not change is a share nobody can reach, and that is visible
-// immediately and fixable by hand. Refusing to share at all because ufw was
-// removed from the machine would be worse.
-func setShareFirewall(ctx context.Context, action string) {
-	request := "# Written by Homebase for homebase-share-firewall.service.\n" +
-		"action=" + action + "\n"
-	if err := writeRootFile(shareFirewallRequest, request, 0o600); err != nil {
-		return
-	}
-	defer os.Remove(shareFirewallRequest)
-	_, _ = runUpdateUnit(ctx, "homebase-share-firewall.service")
+// Failures are deliberately not returned. A share that works while the firewall
+// did not change is a share nobody can reach — visible immediately and fixable
+// by hand — whereas refusing to share at all because ufw has been removed from
+// the machine would be worse.
+func openPort(ctx context.Context, port int, proto, scope, label string) {
+	setFirewall(ctx, "open", port, proto, scope, label)
 }
 
-const shareFirewallRequest = "/etc/homebase/share-firewall"
+func closePort(ctx context.Context, port int, proto, scope, label string) {
+	setFirewall(ctx, "close", port, proto, scope, label)
+}
+
+func setFirewall(ctx context.Context, action string, port int, proto, scope, label string) {
+	request := "# Written by Homebase for homebase-firewall.service.\n" +
+		"action=" + action + "\n" +
+		"port=" + strconv.Itoa(port) + "\n" +
+		"proto=" + proto + "\n" +
+		"scope=" + scope + "\n" +
+		"comment=" + label + "\n"
+	if err := writeRootFile(firewallRequest, request, 0o600); err != nil {
+		return
+	}
+	// Removed either way. It is a request, not configuration, and one left
+	// behind would be acted on again by a stray start of the unit.
+	defer os.Remove(firewallRequest)
+	_, _ = runUpdateUnit(ctx, "homebase-firewall.service")
+}
+
+const firewallRequest = "/etc/homebase/firewall"
 
 // enableUnit makes a unit start at boot, and starts it now.
 //
@@ -470,7 +485,7 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 		// with no purpose is surface, and an open port with nothing behind it
 		// is surface somebody has forgotten about.
 		disableUnit(ctx, "smbd.service")
-		setShareFirewall(ctx, "close")
+		closePort(ctx, 445, "tcp", "local", "Homebase file sharing")
 		return nil
 	}
 
@@ -479,7 +494,7 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 	}
 	// After the server is configured and before it is started, so there is never
 	// a moment when the port is open onto a stale configuration.
-	setShareFirewall(ctx, "open")
+	openPort(ctx, 445, "tcp", "local", "Homebase file sharing")
 
 	if err := runSystemctl(ctx, "restart", "smbd.service"); err != nil {
 		return &Error{

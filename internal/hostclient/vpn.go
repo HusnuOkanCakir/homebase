@@ -67,6 +67,19 @@ func (c *Client) VPNStatus(ctx context.Context) (*VPNStatus, error) {
 	return &status, nil
 }
 
+// DisableVPN switches remote access off, keeping the keys.
+//
+// "Switch this off" and "forget every device I have set up" are different
+// intentions. Collapsing them would mean turning the VPN off for an afternoon
+// costs re-issuing a configuration to every phone in the house.
+func (c *Client) DisableVPN(ctx context.Context) (*VPNStatus, error) {
+	var status VPNStatus
+	if err := c.Call(ctx, "vpn.disable", struct{}{}, true, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
 func (c *Client) SetUpVPN(ctx context.Context, hostname string) (*VPNStatus, error) {
 	params := struct {
 		Hostname string `json:"hostname"`

@@ -483,6 +483,17 @@ and Windows on it:
 - **The system disk was reported as mounted at `/var/tmp`**, because the mount
   table kept whichever entry came last and `PrivateTmp=yes` on hostd's unit gives
   it a private `/var/tmp` on the root device
+- **Remote access opens its own port, and can be switched off.** `vpn.setup` had
+  always named `vpn.disable` as its rollback and nothing implemented it — so
+  there was a way to configure a service reachable from the internet and none to
+  shut it. Neither did anything touch the firewall, which denies inbound by
+  default, so the tunnel ran behind a closed port and looked from a phone exactly
+  like a wrong key
+- **One firewall helper rather than one per feature.** The decision about who may
+  reach a port — the house only, or the whole internet — is worth having in a
+  single reviewable place. Wireguard is the only thing in Homebase that asks for
+  the second, and it is the one service whose purpose is being reachable from
+  outside
 - **The fan is reported, and so is who is driving it.** A loud laptop has two
   completely different problems behind it — a fan somebody pinned, or a heatsink
   full of dust — and from across a room they are the same sound. Reporting only:
