@@ -31,6 +31,32 @@ import (
 
 var macAddress = regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$`)
 
+// reorderFlags moves anything beginning with a dash to the front, so a flag
+// after the positional argument is still seen.
+//
+// A flag taking a value keeps the value with it. Everything else stays in the
+// order it was typed, so an error message about the wrong argument still names
+// the one the person meant.
+func reorderFlags(args []string) []string {
+	var options, positional []string
+	for i := 0; i < len(args); i++ {
+		if !strings.HasPrefix(args[i], "-") || args[i] == "-" {
+			positional = append(positional, args[i])
+			continue
+		}
+		options = append(options, args[i])
+		// A flag written as `--name value` rather than `--name=value` takes the
+		// next argument with it. Not for the last one: there is nothing after
+		// it, and the flag package will say so more clearly than this could.
+		if !strings.Contains(args[i], "=") && i+1 < len(args) &&
+			!strings.HasPrefix(args[i+1], "-") {
+			options = append(options, args[i+1])
+			i++
+		}
+	}
+	return append(options, positional...)
+}
+
 func wakeCommand(args []string, stdout io.Writer) error {
 	flags := flag.NewFlagSet("wake", flag.ContinueOnError)
 	flags.SetOutput(stdout)
@@ -38,7 +64,16 @@ func wakeCommand(args []string, stdout io.Writer) error {
 	// because a house with more than one segment needs it, and defaulted because
 	// almost nobody does.
 	broadcast := flags.String("broadcast", "255.255.255.255", "where to send it")
-	if err := flags.Parse(args); err != nil {
+
+	// Flags are gathered from anywhere in the line, not only from the front.
+	//
+	// Go's flag package stops at the first argument that is not a flag, so
+	// `wake AA:BB:... --broadcast 192.168.1.255` parsed the address and silently
+	// ignored the rest — the packet went to the default and the person who
+	// typed it had no way to know their flag had been dropped. The same trap
+	// the global flags already work around, in a command where the failure is
+	// invisible because nothing acknowledges a magic packet.
+	if err := flags.Parse(reorderFlags(args)); err != nil {
 		return usageError{err}
 	}
 
