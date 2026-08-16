@@ -297,6 +297,12 @@ type AppStatus struct {
 	// Path is the base path the web interface is served under.
 	Path string `json:"path,omitempty"`
 
+	// Services is what each supporting container is doing, for an application
+	// made of more than one. Reported because "Immich is not running" and
+	// "Immich's database is not running" need different answers, and without
+	// this they produce the same one.
+	Services []ServiceState `json:"services,omitempty"`
+
 	// AfterInstall is what is still left for a person to do — carried on the
 	// status rather than only on the install result, so that somebody who
 	// closed the terminal can still find out.
@@ -405,6 +411,7 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 	}
 
 	status.Installed = boolPtr(true)
+	status.Services = s.serviceStates(ctx, manifest)
 	if manifest.Network.InternalPort > 0 {
 		_, status.HostPort = state.publishedPort(manifest.Network.InternalPort)
 		status.URL = appURL(manifest, status.HostPort)
@@ -521,6 +528,14 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 		return nil, err
 	}
 
+	// Everything the application needs, before the application. A database that
+	// comes up after the thing using it produces a crash loop whose reason is
+	// visible only in a log nobody is reading — and the network has to exist
+	// before a container can be created on it at all.
+	if err := s.startServices(ctx, manifest, as); err != nil {
+		return nil, err
+	}
+
 	config := s.buildContainer(manifest, binds, as)
 	if _, err := s.docker.createContainer(ctx, name, config); err != nil {
 		return nil, wrapDockerError(err,
@@ -611,6 +626,14 @@ func (s *AppServices) restart(ctx context.Context, params AppRef) (any, error) {
 		return nil, err
 	}
 
+	// The supporting containers first, and idempotently: a restart is also how
+	// somebody recovers an application whose database stopped.
+	if as, err := ensureAppOwner(s.stateDir, manifest.ID); err == nil {
+		if err := s.startServices(ctx, manifest, as); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := s.docker.restartContainer(ctx, containerName(manifest.ID), stopGraceSeconds); err != nil {
 		return nil, wrapDockerError(err, "restart_failed",
 			manifest.Name+" would not restart.",
@@ -644,6 +667,16 @@ func (s *AppServices) uninstall(ctx context.Context, params AppRef) (any, error)
 			"Homebase could not remove "+manifest.Name+".", "")
 	}
 
+	// Everything the application needed, and the network they shared. After the
+	// application, because a network with a container still attached cannot be
+	// removed — and Docker reports that as the network being in use by
+	// something else, which sends somebody looking in the wrong place.
+	//
+	// Failures here are reported and not fatal: the application is already
+	// gone, and refusing to say so because a database container lingered would
+	// leave somebody unable to tell what state their machine is in.
+	leftBehind := s.removeServices(ctx, manifest)
+
 	// The container is gone, so there is no state left to describe. Leaving the
 	// marker would make a fresh install of the same application report itself as
 	// stopped before anybody had stopped it.
@@ -658,8 +691,12 @@ func (s *AppServices) uninstall(ctx context.Context, params AppRef) (any, error)
 	return map[string]any{
 		"id":        manifest.ID,
 		"installed": false,
-		"data_kept": kept,
-		"data_path": dataPath,
+		// Reported rather than fatal. The application is gone either way, and
+		// refusing to say so because a database container lingered would leave
+		// somebody unable to tell what state their machine is in.
+		"left_behind": leftBehind,
+		"data_kept":   kept,
+		"data_path":   dataPath,
 		"message": manifest.Name + " has been removed. Its data has been kept, so " +
 			"reinstalling will pick up where you left off.",
 	}, nil
@@ -812,6 +849,18 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 	}
 
 	config.HostConfig.GroupAdd = supplementaryGroups(manifest)
+
+	// The application's own network, when it has supporting containers to
+	// reach. Named rather than the default bridge so that "database" resolves
+	// to its database and to nothing else on the machine.
+	if len(manifest.Services) > 0 {
+		config.HostConfig.NetworkMode = networkName(manifest.ID)
+		config.NetworkingConfig = &networkingConfig{
+			EndpointsConfig: map[string]endpointConfig{
+				networkName(manifest.ID): {Aliases: []string{manifest.ID}},
+			},
+		}
+	}
 
 	if manifest.Network.InternalPort > 0 && !manifest.Network.HostNetwork {
 		port := fmt.Sprintf("%d/tcp", manifest.Network.InternalPort)
@@ -1514,6 +1563,13 @@ func (s *AppServices) rebuildContainer(ctx context.Context, manifest Manifest) (
 	// failure here leaves the application exactly as it was.
 	binds, err := s.prepareStorage(manifest, as)
 	if err != nil {
+		return false, err
+	}
+
+	// The network and the supporting containers, which a rebuild must not lose:
+	// removing the application does not remove them, but a machine that has
+	// been restarted since may not have them running.
+	if err := s.startServices(ctx, manifest, as); err != nil {
 		return false, err
 	}
 

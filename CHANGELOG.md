@@ -500,6 +500,11 @@ and Windows on it:
   on the first real laptop, full load reached 89 °C with the fan still climbing,
   past the 84 °C its processor throttles at, and a manual setting on a machine
   like that is a way to cook one that is already struggling
+- **Applications made of more than one container.** A manifest declares
+  supporting containers — a database, a cache — and each joins a private network
+  of the application's own, publishes no port on any interface, and cannot ask
+  for one. Started before the application and stopped after it; removed with it,
+  network and all
 - **qBittorrent**, downloading into a folder the media server reads. Pointed at
   the same storage location as the shared folders, so a finished file is renamed
   into place rather than copied — a 40 GB film moved between disks is minutes and

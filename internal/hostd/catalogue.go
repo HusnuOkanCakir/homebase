@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -56,7 +57,17 @@ type Manifest struct {
 	// applications it is the difference between working and usable: one that is
 	// running, reachable, and asking for a password nobody was given is
 	// indistinguishable from one that is broken.
-	AfterInstall    string               `json:"after_install,omitempty"`
+	AfterInstall string `json:"after_install,omitempty"`
+
+	// Services are the supporting containers this application cannot run
+	// without — a database, a cache.
+	//
+	// Never reachable from anywhere but the application: each joins a private
+	// network of the application's own and publishes no port on any interface.
+	// What the application connects to is the service's name, which is its
+	// address on that network.
+	Services []ManifestService `json:"services,omitempty"`
+
 	Capabilities    []ManifestCapability `json:"capabilities,omitempty"`
 	Events          []ManifestEvent      `json:"events,omitempty"`
 	SensitiveFields []string             `json:"sensitive_fields,omitempty"`
@@ -86,6 +97,44 @@ func (c ManifestContainer) Reference() string {
 	}
 	return c.Image
 }
+
+// ManifestService is one supporting container.
+type ManifestService struct {
+	// Name is what the application connects to it as — it becomes a hostname on
+	// the private network, and the container is named after it.
+	Name string `json:"name"`
+
+	Image       string            `json:"image"`
+	Version     string            `json:"version,omitempty"`
+	Digest      string            `json:"digest,omitempty"`
+	Environment map[string]string `json:"environment,omitempty"`
+
+	// Storage here is always private. A database on a disk somebody can unplug
+	// is a database that vanishes, and unlike a media folder there is nothing
+	// sensible for the application to do about its absence.
+	Storage []ManifestServiceStorage `json:"storage,omitempty"`
+}
+
+type ManifestServiceStorage struct {
+	ID        string `json:"id"`
+	MountPath string `json:"mount_path"`
+	Backup    bool   `json:"backup,omitempty"`
+}
+
+// Reference is the image to pull, pinned the same way the application's own is.
+func (s ManifestService) Reference() string {
+	if s.Digest != "" {
+		return s.Image + "@" + s.Digest
+	}
+	if s.Version != "" {
+		return s.Image + ":" + s.Version
+	}
+	return s.Image
+}
+
+// validServiceName is what a supporting container may be called. It becomes a
+// hostname on the private network, so it is held to what a hostname may be.
+var validServiceName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,20}[a-z0-9]$`)
 
 type ManifestNetwork struct {
 	InternalPort int    `json:"internal_port,omitempty"`
@@ -419,6 +468,36 @@ func (m Manifest) Validate() error {
 		if reserved := reservedHostPorts[m.Network.PublishedPort()]; reserved != "" {
 			return fmt.Errorf("network.host_port %d is %s; choose another",
 				m.Network.PublishedPort(), reserved)
+		}
+	}
+
+	// Supporting containers are checked as hard as the application's own, and
+	// on one point harder: they may not be published, and there is deliberately
+	// no field with which to ask.
+	names := map[string]bool{}
+	for _, service := range m.Services {
+		switch {
+		case !validServiceName.MatchString(service.Name):
+			return fmt.Errorf("service name %q is not usable as a hostname", service.Name)
+		case names[service.Name]:
+			return fmt.Errorf("duplicate service %q", service.Name)
+		case service.Name == m.ID:
+			// Both would answer to that name on the private network, and which
+			// one answered would be a matter of chance.
+			return fmt.Errorf("service %q has the same name as the application", service.Name)
+		case service.Image == "":
+			return fmt.Errorf("service %q has no image", service.Name)
+		case service.Version == "latest":
+			return fmt.Errorf(`service %q must not use "latest"`, service.Name)
+		case service.Version == "" && service.Digest == "":
+			return fmt.Errorf("service %q needs a version or a digest", service.Name)
+		}
+		names[service.Name] = true
+
+		for _, storage := range service.Storage {
+			if storage.ID == "" || !strings.HasPrefix(storage.MountPath, "/") {
+				return fmt.Errorf("service %q has an unusable storage entry", service.Name)
+			}
 		}
 	}
 

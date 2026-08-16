@@ -494,6 +494,73 @@
           ]
         }
       }
+    },
+    "services": {
+      "description": "Supporting containers this application cannot run without \u2014 a database, a cache. The application itself is `container`; these are everything it talks to.\n\nThey are **never reachable from anywhere but this application**. Each one joins a private network of the application's own and publishes no port at all, on any interface, ever \u2014 a database that a manifest could publish is a database somebody publishes. What the application connects to is the service's `name`, which is its address on that network.\n\nStorage here is always private. A database on a disk somebody can unplug is a database that vanishes, and unlike a media folder there is nothing sensible to do about its absence.",
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "image"
+        ],
+        "properties": {
+          "name": {
+            "description": "What the application connects to it as, and what its container is named after. It becomes a hostname on the private network.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,20}[a-z0-9]$"
+          },
+          "image": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+([._/-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)*$"
+          },
+          "version": {
+            "description": "Image tag. 'latest' is not permitted, for the same reason as the application's own.",
+            "type": "string",
+            "pattern": "^(?!latest$)[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "environment": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "storage": {
+            "description": "Private directories for this service. Never user-selected.",
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "mount_path"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                },
+                "mount_path": {
+                  "type": "string",
+                  "pattern": "^/"
+                },
+                "backup": {
+                  "description": "Whether a backup copies it. A database's files are usually the wrong thing to copy while it is running; prefer an export.",
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

@@ -543,3 +543,81 @@ func TestApplicationsOnLoopbackDoNotCollide(t *testing.T) {
 		t.Errorf("two loopback applications were treated as a collision: %v", reasons)
 	}
 }
+
+// --- Applications made of more than one container --------------------------------
+
+// A supporting container is never reachable from anywhere but its application.
+// There is deliberately no manifest field with which to ask for a port on one:
+// a database a manifest *could* publish is a database somebody publishes.
+func TestASupportingContainerCannotBePublished(t *testing.T) {
+	manifest := validManifest()
+	manifest["services"] = []any{
+		map[string]any{
+			"name": "database", "image": "docker.io/postgres", "version": "16-alpine",
+		},
+	}
+	catalogue := writeCatalogue(t, map[string]any{"test-app.json": manifest})
+	app, ok := catalogue.Lookup("test-app")
+	if !ok {
+		t.Fatalf("rejected: %v", catalogue.Rejected())
+	}
+	if len(app.Services) != 1 {
+		t.Fatalf("got %d services", len(app.Services))
+	}
+
+	// The schema is the enforcement, and this is the assertion that it stays
+	// that way: nothing on a service describes a port.
+	encoded, err := json.Marshal(app.Services[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"port", "host_port", "reachable"} {
+		if strings.Contains(strings.ToLower(string(encoded)), forbidden) {
+			t.Errorf("a service can describe %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+// The name becomes a hostname on the private network, so two of them cannot be
+// the same and neither can be the application's — both would answer, and which
+// one answered would be a matter of chance.
+func TestServiceNamesMustBeDistinctAndUsableAsHostnames(t *testing.T) {
+	for what, services := range map[string][]any{
+		"duplicates": {
+			map[string]any{"name": "database", "image": "docker.io/postgres", "version": "16"},
+			map[string]any{"name": "database", "image": "docker.io/redis", "version": "7"},
+		},
+		"the application's own name": {
+			map[string]any{"name": "test-app", "image": "docker.io/postgres", "version": "16"},
+		},
+		"a floating tag": {
+			map[string]any{"name": "database", "image": "docker.io/postgres", "version": "latest"},
+		},
+		"no version at all": {
+			map[string]any{"name": "database", "image": "docker.io/postgres"},
+		},
+	} {
+		manifest := validManifest()
+		manifest["services"] = services
+		catalogue := writeCatalogue(t, map[string]any{"test-app.json": manifest})
+		if _, ok := catalogue.Lookup("test-app"); ok {
+			t.Errorf("a manifest with %s was accepted", what)
+		}
+	}
+}
+
+// An application and its supporting containers share a network of their own, and
+// the names are derived rather than taken from anywhere a caller could reach.
+func TestTheNetworkAndContainersAreNamedAfterTheApplication(t *testing.T) {
+	if got := networkName("immich"); got != "homebase-immich" {
+		t.Errorf("network name %q", got)
+	}
+	if got := serviceContainerName("immich", "database"); got != "homebase-immich-database" {
+		t.Errorf("service container name %q", got)
+	}
+	// Everything belonging to one application sorts together, which is what
+	// somebody scanning `docker ps` is relying on.
+	if !strings.HasPrefix(serviceContainerName("immich", "database"), containerName("immich")) {
+		t.Error("a service container does not sort with its application")
+	}
+}

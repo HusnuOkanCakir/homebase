@@ -393,6 +393,23 @@ type containerConfig struct {
 	Labels       map[string]string   `json:"Labels,omitempty"`
 	ExposedPorts map[string]struct{} `json:"ExposedPorts,omitempty"`
 	HostConfig   hostConfig          `json:"HostConfig"`
+
+	NetworkingConfig *networkingConfig `json:"NetworkingConfig,omitempty"`
+}
+
+// networkingConfig attaches a container to a network at creation, with the
+// aliases it answers to on it.
+//
+// At creation rather than by connecting afterwards: a container that starts
+// before it is on the network fails its first connection, and an application
+// whose database is briefly unreachable at startup is one that crash-loops for
+// reasons nobody can see.
+type networkingConfig struct {
+	EndpointsConfig map[string]endpointConfig `json:"EndpointsConfig,omitempty"`
+}
+
+type endpointConfig struct {
+	Aliases []string `json:"Aliases,omitempty"`
 }
 
 type hostConfig struct {
@@ -558,6 +575,57 @@ func (c *containerState) publishedPort(internal int) (hostIP string, hostPort in
 // inspectContainer returns the container's state, or (nil, nil) when there is no
 // such container — which is an ordinary answer for an application that is not
 // installed.
+// --- Networks ------------------------------------------------------------------
+//
+// One per application that has supporting services, and nothing else is on it.
+//
+// The alternative — putting a database on the default bridge — makes it
+// reachable by every other container on the machine, which is every other
+// application. A private network is what makes "this database belongs to this
+// application" a property of the machine rather than an intention.
+
+type networkConfig struct {
+	Name string `json:"Name"`
+	// Bridge, explicitly. The default would also be bridge; saying so means a
+	// change of Docker's default is not a change to what Homebase creates.
+	Driver string `json:"Driver"`
+	// Internal cuts the network off from the world outside this machine.
+	// Deliberately false: a database needs no route out, but the applications
+	// on this network do — an image pull is not the only thing an application
+	// reaches the internet for, and a network flag is the wrong place to decide
+	// that. What keeps the database unreachable is that nothing publishes it.
+	Internal bool              `json:"Internal"`
+	Labels   map[string]string `json:"Labels,omitempty"`
+}
+
+// createNetwork makes an application's private network, or does nothing if it
+// is already there.
+func (d *docker) createNetwork(ctx context.Context, name string) error {
+	err := d.do(ctx, http.MethodPost, "/networks/create", networkConfig{
+		Name:   name,
+		Driver: "bridge",
+		Labels: map[string]string{"homebase.managed": "true"},
+	}, nil)
+	var dockerErr *dockerError
+	// 409 is "already exists", which is the ordinary case on every start after
+	// the first and is not a failure.
+	if asDockerError(err, &dockerErr) && dockerErr.Status == http.StatusConflict {
+		return nil
+	}
+	return err
+}
+
+// removeNetwork deletes it. A network with something still attached cannot be
+// removed, which is why this runs after the containers are gone.
+func (d *docker) removeNetwork(ctx context.Context, name string) error {
+	err := d.do(ctx, http.MethodDelete, "/networks/"+url.PathEscape(name), nil, nil)
+	var dockerErr *dockerError
+	if asDockerError(err, &dockerErr) && dockerErr.NotFound() {
+		return nil
+	}
+	return err
+}
+
 func (d *docker) inspectContainer(ctx context.Context, name string) (*containerState, error) {
 	var state containerState
 	err := d.do(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/json", nil, &state)

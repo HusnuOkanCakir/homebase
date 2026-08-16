@@ -1032,13 +1032,51 @@ fit the model.
 - [ ] **Nextcloud** — deliberately last of these four. It overlaps with what SMB
       already does, needs a database and a cache, and is the heaviest thing in the
       catalogue by a distance
-- [ ] **Multi-container applications** in the manifest schema. Immich, Paperless
-      and Nextcloud all need one, and inventing it three times separately is how
-      the catalogue becomes unreviewable
+- [x] **Multi-container applications** in the manifest schema. A manifest
+      declares supporting containers; each joins a private network of the
+      application's own, publishes no port on any interface, and there is
+      deliberately no field with which to ask for one — a database a manifest
+      *could* publish is a database somebody publishes. Proven with Postgres and
+      Redis: both running, reachable by the application under the names it
+      expects, and invisible to the machine (`ss` finds nothing listening).
+      Uninstalling removes the set and the network with it
 - [ ] **A per-application initial password**, generated and reported once. File
       Browser ships `admin`/`admin`; qBittorrent ships `admin`/`adminadmin`. An
       application published onto the network with a documented default password is
       an open door, and the manifest must be able to say so
+
+#### The wall the multi-container work hit
+
+Building it found something larger than it, and it is not about databases.
+
+**A great many popular images cannot run under Homebase's container model.**
+Paperless was the first one tried. Its entrypoint starts as root, `chown`s the
+directories it was given, and drops to its own account with `gosu`. Under
+Homebase every application runs as a uid of its own with all capabilities dropped
+and `no-new-privileges`, so all three steps fail:
+
+```
+chown: changing ownership of '/config/data': Operation not permitted
+error: failed switching to "paperless": operation not permitted
+```
+
+That pattern is not unusual — it is what every linuxserver.io image does, and
+many others. So the choice is real and has to be made deliberately rather than
+one manifest at a time:
+
+- Grant `CAP_CHOWN`, `CAP_DAC_OVERRIDE`, `CAP_FOWNER`, `CAP_SETUID` and
+  `CAP_SETGID` to applications that declare they need them. The container still
+  cannot escape, but it can rewrite ownership across its bind mounts and become
+  any user inside itself — which is most of what the model was protecting.
+- Or keep the model and accept a catalogue restricted to images that support
+  running as an arbitrary user, which excludes a large part of what people
+  actually want to run.
+
+Neither is obviously right, and it is exactly the decision Milestone 14 exists to
+make for Home Assistant — so it is the same milestone's problem, arriving early
+and from a different direction. **Paperless is not in the catalogue** and will
+not be until this is settled: shipping an application that installs and
+crash-loops is worse than not shipping it.
 
 **Done when:** installing any application in the catalogue produces something
 reachable, with no default credentials left in it, and a folder somebody can put
