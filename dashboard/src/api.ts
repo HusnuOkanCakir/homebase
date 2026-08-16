@@ -287,11 +287,24 @@ export interface SystemInfo {
 }
 
 /** One reading from the record. */
+/**
+ * One reading.
+ *
+ * Everything measurable is nullable, and null is not zero. A machine with no
+ * thermal sensor, a reading taken before there was a previous one to subtract
+ * from, a counter that reset across a reboot — all of those are "not measured",
+ * and a zero would draw as a cold, idle, silent server that was doing nothing.
+ */
 export interface ThermalSample {
   time: string;
   celsius: number | null;
   fan_rpm: number | null;
   fan_percent: number | null;
+  /** Busy time between this reading and the one before it. */
+  cpu_percent: number | null;
+  memory_percent: number | null;
+  download_bytes_per_second: number | null;
+  upload_bytes_per_second: number | null;
   state?: string;
   load?: number;
 }

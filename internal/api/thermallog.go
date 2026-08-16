@@ -50,7 +50,15 @@ const (
 	// a diagnostic.
 	thermalMaxBytes = 4 << 20
 
-	thermalHeader = "time,celsius,state,fan_rpm,fan_percent,fan_control,load"
+	// Columns are only ever appended, never reordered or removed.
+	//
+	// A record that spans months is read by software newer than the software
+	// that wrote it, so every row in the file is a row some earlier version
+	// produced. The reader indexes by position and tolerates a short row, which
+	// makes adding a column free and moving one silently catastrophic — every
+	// historical reading would be read as the wrong measurement.
+	thermalHeader = "time,celsius,state,fan_rpm,fan_percent,fan_control,load," +
+		"mem_used,mem_total,cpu_busy,cpu_total,net_rx,net_tx"
 
 	// DefaultThermalLogPath is where the record is kept: a directory core
 	// already owns, beside the other things somebody diagnosing this machine
@@ -115,6 +123,12 @@ func (t *ThermalLog) Sample(ctx context.Context) {
 		optionalInt(resources.Fan.Percent),
 		resources.Fan.Controlled,
 		strconv.FormatFloat(resources.LoadAverage[0], 'f', 2, 64),
+		strconv.FormatUint(resources.Memory.TotalBytes-resources.Memory.AvailableBytes, 10),
+		strconv.FormatUint(resources.Memory.TotalBytes, 10),
+		strconv.FormatUint(resources.Counters.CPUBusy, 10),
+		strconv.FormatUint(resources.Counters.CPUTotal, 10),
+		strconv.FormatUint(resources.Counters.NetworkRx, 10),
+		strconv.FormatUint(resources.Counters.NetworkTx, 10),
 	}
 
 	if err := t.append(record); err != nil {
@@ -173,6 +187,31 @@ type ThermalSample struct {
 	Percent *int   `json:"fan_percent"`
 	Control string `json:"fan_control,omitempty"`
 	Load    *float64
+
+	// Memory in use, as a percentage of what the machine has. A percentage
+	// rather than bytes because the question is always "how much is left", and
+	// bytes need the total beside them to answer it.
+	MemoryPercent *int `json:"memory_percent"`
+
+	// CPU busy and network throughput, computed from the difference between
+	// this row's counters and the one before it. Absent on the first row of a
+	// file and on the first row after a reboot, where there is no previous
+	// reading to subtract — which is honest, and is why they are pointers.
+	CPUPercent *int `json:"cpu_percent"`
+	Download   *int `json:"download_bytes_per_second"`
+	Upload     *int `json:"upload_bytes_per_second"`
+
+	// The raw counters, kept only long enough for the reader to difference
+	// them. Never sent.
+	counters rowCounters
+}
+
+// rowCounters are the running totals a row carries, before differencing.
+type rowCounters struct {
+	when                 time.Time
+	cpuBusy, cpuTotal    uint64
+	networkRx, networkTx uint64
+	present              bool
 }
 
 // ThermalHistory is the record, plus what it adds up to.
@@ -232,6 +271,11 @@ func readThermalHistory(path string, within time.Duration, limit int) ThermalHis
 		return history.Samples[i].Time < history.Samples[j].Time
 	})
 
+	// Before thinning, always. Differencing afterwards would compute each rate
+	// across whatever gap the thinning happened to leave — so a month's chart
+	// would average away exactly the bursts it is being drawn to show.
+	differenceCounters(history.Samples)
+
 	// Thinned rather than truncated. Keeping the most recent N would answer
 	// "the last six hours" to somebody who asked about the last month, which is
 	// a different question with a very different answer.
@@ -268,7 +312,77 @@ func parseThermalRow(line string) (ThermalSample, time.Time, bool) {
 			sample.Load = &load
 		}
 	}
+
+	// Everything below was added after the first rows were written, so a short
+	// row is ordinary rather than corrupt. Indexed by position, which is why
+	// columns are only ever appended.
+	if used, total := parseUint(at(fields, 7)), parseUint(at(fields, 8)); total > 0 {
+		percent := int(used * 100 / total)
+		sample.MemoryPercent = &percent
+	}
+	sample.counters = rowCounters{
+		when:      when,
+		cpuBusy:   parseUint(at(fields, 9)),
+		cpuTotal:  parseUint(at(fields, 10)),
+		networkRx: parseUint(at(fields, 11)),
+		networkTx: parseUint(at(fields, 12)),
+	}
+	sample.counters.present = sample.counters.cpuTotal > 0
+
 	return sample, when, true
+}
+
+func at(fields []string, i int) string {
+	if i < len(fields) {
+		return fields[i]
+	}
+	return ""
+}
+
+func parseUint(field string) uint64 {
+	value, err := strconv.ParseUint(strings.TrimSpace(field), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+// differenceCounters turns running totals into rates.
+//
+// Done here rather than where the readings are taken, because a rate is a
+// difference between two moments and this is the only place that has both. It
+// also means a rate can be recomputed from a record written years ago, at
+// whatever resolution somebody asks for.
+//
+// A counter that has gone *down* is a reboot, or a 32-bit interface counter
+// wrapping. Either way the difference is not traffic and the honest answer is
+// that this interval has none — which is why these are pointers and not zeroes.
+func differenceCounters(samples []ThermalSample) {
+	for i := 1; i < len(samples); i++ {
+		previous, current := samples[i-1].counters, samples[i].counters
+		if !previous.present || !current.present {
+			continue
+		}
+		seconds := current.when.Sub(previous.when).Seconds()
+		if seconds <= 0 {
+			continue
+		}
+
+		if current.cpuTotal > previous.cpuTotal && current.cpuBusy >= previous.cpuBusy {
+			busy := current.cpuBusy - previous.cpuBusy
+			total := current.cpuTotal - previous.cpuTotal
+			percent := int(busy * 100 / total)
+			samples[i].CPUPercent = &percent
+		}
+		if current.networkRx >= previous.networkRx {
+			rate := int(float64(current.networkRx-previous.networkRx) / seconds)
+			samples[i].Download = &rate
+		}
+		if current.networkTx >= previous.networkTx {
+			rate := int(float64(current.networkTx-previous.networkTx) / seconds)
+			samples[i].Upload = &rate
+		}
+	}
 }
 
 func parseOptionalInt(field string) *int {
@@ -339,6 +453,10 @@ func (s ThermalSample) MarshalJSON() ([]byte, error) {
 		fmt.Sprintf("%q:%s", "celsius", jsonOptionalInt(s.Celsius)),
 		fmt.Sprintf("%q:%s", "fan_rpm", jsonOptionalInt(s.FanRPM)),
 		fmt.Sprintf("%q:%s", "fan_percent", jsonOptionalInt(s.Percent)),
+		fmt.Sprintf("%q:%s", "cpu_percent", jsonOptionalInt(s.CPUPercent)),
+		fmt.Sprintf("%q:%s", "memory_percent", jsonOptionalInt(s.MemoryPercent)),
+		fmt.Sprintf("%q:%s", "download_bytes_per_second", jsonOptionalInt(s.Download)),
+		fmt.Sprintf("%q:%s", "upload_bytes_per_second", jsonOptionalInt(s.Upload)),
 	}
 	if s.State != "" {
 		fields = append(fields, fmt.Sprintf("%q:%q", "state", s.State))

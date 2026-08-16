@@ -231,6 +231,24 @@ milestone passes, use it as a person would, on the machine somebody actually
 has, and write down every point at which you had to already know something.**
 Each of those is a bug even when the code is correct.
 
+### A chart that passes its checks and still cannot be read
+
+The colour of a chart is computable — lightness band, chroma floor, separation
+under three kinds of colour blindness, contrast against the surface it is drawn
+on — so it is computed rather than judged. The palette in the dashboard was run
+through a validator, and an ordering that looked more sensible was the one that
+failed it.
+
+That check says nothing about layout. Rendering the same charts with a day of
+realistic readings and looking at the picture found five things no assertion had:
+the card was capped at a width that squeezed five plots into half a screen, the
+axis labels ran off the left edge, temperature was drawn from 0 °C so forty
+degrees of range lived in the top tenth, the legend keys ran together as one
+word, and an axis read `10279k` where it meant `9.8 MB`.
+
+**Render it and look at it.** A screenshot of the real markup with plausible data
+is a minute's work and is the only thing that catches geometry.
+
 ### Tests that depend on chance
 
 `vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.

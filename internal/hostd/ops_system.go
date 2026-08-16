@@ -136,6 +136,11 @@ type SystemResources struct {
 	// loud one at 50 °C has a fan problem, and a loud one at 90 °C has a dust
 	// problem. The number alone cannot tell those apart.
 	Fan Fan `json:"fan"`
+
+	// Counters are running totals since boot — processor time and network
+	// bytes. Totals rather than rates, because a rate is a difference between
+	// two moments and only whoever keeps the record knows both. See counters.go.
+	Counters Counters `json:"counters"`
 }
 
 type Memory struct {
@@ -174,6 +179,7 @@ func systemGetResources(ctx context.Context, _ NoParams) (any, error) {
 		Power:         readPower(),
 		Temperature:   readTemperature(sysThermal),
 		Fan:           readFan(sysHwmon),
+		Counters:      readCounters(procStat, sysClassNet),
 	}, nil
 }
 

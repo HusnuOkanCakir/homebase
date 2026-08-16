@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-import { api, NetworkError, type Job, type SystemInfo, type ThermalHistory } from "../api";
+import { useState } from "react";
+import { api, NetworkError, type Job, type SystemInfo } from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
 import { RenameServer } from "../components/RenameServer";
-import { ThermalChart } from "../components/ThermalChart";
+import { Health } from "./Health";
 import { bytes, duration, percentage } from "../format";
 
 interface Props {
@@ -151,7 +151,7 @@ function SystemCard({ system, renaming, onRename }: SystemCardProps) {
         />
       ) : null}
 
-      <ThermalHistorySection />
+      <Health system={system} />
 
       <details className="details">
         <summary>Technical details</summary>
@@ -296,70 +296,6 @@ function DangerCard({ hostname, open, onOpen, onCancel, onConfirmed }: DangerPro
           {busy ? "Restarting…" : "Restart now"}
         </button>
       </div>
-    </section>
-  );
-}
-
-/**
- * How hot the machine has been.
- *
- * Its own component with its own fetch, because it is the slowest thing on this
- * page and the least urgent: the overview must render the moment the system
- * call returns, rather than waiting on a week of readings being parsed. A chart
- * that arrives a beat later is fine; an overview that does is not.
- */
-function ThermalHistorySection() {
-  const [history, setHistory] = useState<ThermalHistory | null>(null);
-  const [days, setDays] = useState(7);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let current = true;
-    setFailed(false);
-    api
-      .systemHistory(days)
-      .then((result) => {
-        if (current) setHistory(result);
-      })
-      .catch(() => {
-        if (current) setFailed(true);
-      });
-    return () => {
-      current = false;
-    };
-  }, [days]);
-
-  // Nothing at all rather than an empty box. This is a diagnostic, and a server
-  // that has been running for ten minutes has nothing to say — the alternative
-  // is an apologetic placeholder on every fresh installation.
-  if (failed || !history || history.samples.length < 6) {
-    return null;
-  }
-
-  return (
-    <section className="card">
-      <div className="row row-spread">
-        <h3>Temperature and fan</h3>
-        <div className="row">
-          {[1, 7, 30].map((option) => (
-            <button
-              key={option}
-              className={option === days ? "quiet selected" : "quiet"}
-              onClick={() => setDays(option)}
-            >
-              {option === 1 ? "Day" : option === 7 ? "Week" : "Month"}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <ThermalChart samples={history.samples} field="celsius" unit="°C" label="Temperature" />
-      <ThermalChart samples={history.samples} field="fan_rpm" unit="rpm" label="Fan" />
-
-      <p className="muted">
-        A reading every five minutes. The full record is a plain CSV at{" "}
-        <code>/var/log/homebase/thermal.csv</code>, readable without Homebase.
-      </p>
     </section>
   );
 }

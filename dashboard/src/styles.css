@@ -21,6 +21,28 @@
   --warning: #8a6100;
   --radius: 10px;
   --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 4%);
+
+  /*
+   * Chart colours, and they are not the same thing as interface colours.
+   *
+   * --accent is chosen to look right on a button. A series colour has to clear
+   * a lightness band, a chroma floor, and a separation floor under three kinds
+   * of colour blindness against the surface it is drawn on — which are
+   * measurable properties, so they were measured rather than judged.
+   *
+   * Only two are needed. Every chart here plots one series except network,
+   * which plots two, so this is the two-slot case: one series takes slot 1, and
+   * the chart's own title says what it is. Adding a hue per metric would be a
+   * rainbow carrying no information the titles do not already carry.
+   *
+   * Validated against #ffffff light and #1e2126 dark — the card, not the page:
+   * worst pair 33.6 normal-vision, 24.7 under protanopia, both well clear, and
+   * both above 3:1 against their surface.
+   */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --chart-grid: #e8eaed;
+  --chart-axis: #c3c2b7;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,6 +58,14 @@
     --danger-bg: #2a1d1c;
     --warning: #e0b050;
     --shadow: none;
+
+    /* Stepped for the dark surface and validated against it, not lightened
+       automatically from the light values — an automatic flip lands outside the
+       band at one end or the other. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --chart-grid: #2f343b;
+    --chart-axis: #383835;
   }
 }
 
@@ -135,6 +165,12 @@ code {
 
 .app-main .card {
   max-width: none;
+}
+
+/* Five stacked time-series need horizontal room to be readable; nothing else
+   on the dashboard does, so this widens one card rather than the layout. */
+.card-wide {
+  max-width: 48rem;
 }
 
 .card-quiet {
@@ -679,47 +715,141 @@ ul.plain li {
   padding: 0.35rem 0;
 }
 
-/* The temperature and fan charts.
-
-   Inline SVG and no charting library: the dashboard has a bundle-size gate and
-   no UI framework by choice, so importing three hundred kilobytes to draw a
-   polyline would be the largest dependency in the product for its simplest
-   picture. */
+/* Charts.
+ *
+ * Inline SVG, no charting library: the bundle has a size gate and no UI
+ * framework by choice, so importing a chart library to draw a polyline would be
+ * the largest dependency in the product for its simplest picture.
+ */
 .chart {
-  margin: 0 0 1rem;
+  margin: 0 0 1.25rem;
 }
 
 .chart figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
   font-size: 0.875rem;
   font-weight: 500;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.375rem;
 }
 
 .chart svg {
   width: 100%;
   height: auto;
   display: block;
+  touch-action: pan-y;
 }
 
-.chart-line {
+.chart-empty {
+  font-size: 0.875rem;
+  margin: 0.25rem 0 0;
+}
+
+/* 2px, and the same weight for every series: a thicker line reads as more
+   important, which is information the data does not contain. */
+.line {
   fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.5;
+  stroke-width: 2;
   stroke-linejoin: round;
+  stroke-linecap: round;
   vector-effect: non-scaling-stroke;
 }
 
-.chart-area {
-  fill: var(--accent);
-  opacity: 0.12;
-  stroke: none;
+.line-1,
+.dot-1 {
+  stroke: var(--series-1);
+}
+
+.line-2,
+.dot-2 {
+  stroke: var(--series-2);
+}
+
+/* A 2px ring in the surface colour, so a marker sitting on a line stays
+   readable where they overlap. */
+.dot {
+  fill: var(--surface);
+  stroke-width: 2;
+}
+
+.chart-grid-line {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-axis-line {
+  stroke: var(--chart-axis);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-crosshair {
+  stroke: var(--chart-axis);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
 }
 
 .chart-tick {
-  font-size: 9px;
+  font-size: 10px;
   fill: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
+/* The reading, under the chart rather than floating over it: a tooltip that
+   follows the pointer covers the line it describes, and a touch screen has no
+   pointer to follow. */
+.chart-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  min-height: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Identity is a mark beside the text, never the text itself — a coloured label
+   is unreadable at the contrast a series colour is chosen for. */
+/* The legend is one flex item inside the caption, so it needs its own gap —
+   without it the keys run together as "DownUp". */
+.legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.chart-unit {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+}
+
+.key::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentcolor;
+}
+
+.key-1::before {
+  background: var(--series-1);
+}
+
+.key-2::before {
+  background: var(--series-2);
+}
+
+/* A heading with its controls pushed to the far end. */
 .row-spread {
   justify-content: space-between;
   align-items: baseline;
@@ -728,6 +858,38 @@ ul.plain li {
 .selected {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Current values, above the charts. The number is the answer; the chart behind
+   it is the context. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.tile {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+}
+
+.tile dt {
+  font-size: 0.8125rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.tile dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.35rem;
+  line-height: 1.2;
+}
+
+.tile .unit {
+  font-size: 0.875rem;
+  color: var(--muted);
 }
 
 /* A device's configuration, shown exactly once.

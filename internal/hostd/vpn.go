@@ -410,9 +410,15 @@ func addDevice(ctx context.Context, name string) (*NewDevice, error) {
 		Config:    client,
 		QRCode:    qrCode(client),
 		QRImage:   qrImage(client),
-		Message: "This is the only time this configuration can be shown. Save it, or " +
-			"scan the code, before closing this. If it is lost, remove the device " +
-			"and add it again.",
+		// "Scan the code" is not enough, and the first person to use this found
+		// out how: a phone's camera decodes a QR code to text, so pointing it at
+		// this one displays the private key on screen and does nothing else.
+		// The scanner that matters is inside the Wireguard app, and saying which
+		// app costs one sentence.
+		Message: "Scan this from inside the Wireguard app — Add tunnel, then " +
+			"Scan from QR code. A phone's own camera will only show you the text. " +
+			"This is the only time the configuration can be shown; if it is lost, " +
+			"remove the device and add it again.",
 	}, nil
 }
 

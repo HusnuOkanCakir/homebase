@@ -216,6 +216,15 @@ type SystemResources struct {
 
 	// Temperature, with a nil reading meaning "this machine cannot tell" rather
 	// than "cold". Every VM is in that state and so is some real hardware.
+	// Counters are running totals since boot. Rates are computed from the
+	// difference between two readings, by whoever has both.
+	Counters struct {
+		CPUBusy   uint64 `json:"cpu_busy"`
+		CPUTotal  uint64 `json:"cpu_total"`
+		NetworkRx uint64 `json:"network_rx"`
+		NetworkTx uint64 `json:"network_tx"`
+	} `json:"counters"`
+
 	Fan struct {
 		RPM        *int   `json:"rpm"`
 		Percent    *int   `json:"percent"`

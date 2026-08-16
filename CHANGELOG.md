@@ -500,6 +500,11 @@ and Windows on it:
   on the first real laptop, full load reached 89 °C with the fan still climbing,
   past the 84 °C its processor throttles at, and a manual setting on a machine
   like that is a way to cook one that is already struggling
+- **Processor, memory and network on the dashboard**, beside the temperature and
+  fan, as charts over a day, a week or a month. Counters are recorded as running
+  totals and differenced on the way out, so a rate can be recomputed years later
+  at whatever resolution somebody asks for — and a counter that has gone
+  backwards is a reboot, not negative traffic
 - **A record of how hot it has been**, sampled every five minutes into a plain
   CSV at `/var/log/homebase/thermal.csv`, with `homebasectl system history` and a
   chart on the dashboard. One reading tells you almost nothing: 58 °C is fine, or

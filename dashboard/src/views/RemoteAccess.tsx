@@ -164,8 +164,8 @@ export function RemoteAccess({ canManage }: { canManage: boolean }) {
           <h4>Devices</h4>
           {status.devices.length === 0 ? (
             <p className="muted">
-              No devices yet. Add one, and scan the code it gives you with the
-              Wireguard app.
+              No devices yet. Add one, then scan the code from inside the Wireguard
+              app — not with the phone's camera, which only shows you the text.
             </p>
           ) : (
             <ul className="list">

@@ -91,6 +91,10 @@ sudo homebasectl vpn add-device phone
 The last one prints a QR code **once**. It contains the device's private key, which is
 stored nowhere — losing it means removing the device and adding it again.
 
+**Scan it from inside the Wireguard app** — Add tunnel, then Scan from QR code. A phone's
+own camera decodes a QR code to text, so pointing it at this one displays the private key
+on screen and does nothing useful with it.
+
 Three things are worth knowing before you rely on it.
 
 **It opens a port.** UDP 51820, to the whole internet rather than to private addresses
