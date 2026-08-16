@@ -249,6 +249,26 @@ word, and an axis read `10279k` where it meant `9.8 MB`.
 **Render it and look at it.** A screenshot of the real markup with plausible data
 is a minute's work and is the only thing that catches geometry.
 
+### A health check that passes while nobody can get in
+
+qBittorrent installed, started, passed its health check and reported itself
+running. Every request to it — its own login page included — was answered with a
+bare `401 Unauthorized`, with nothing in its log to say why.
+
+The cause was that Homebase published it on 8081 while it listened on 8080.
+qBittorrent validates the Host header against the port it is serving on, and
+rejects anything else. Its health check passed because that check asks the
+container whether it answers, and it did: it answered 401.
+
+**A health check answers "is this process alive", not "can somebody use this".**
+Where the two can differ, only using it finds out — and the way this one was
+found was a person opening the address in a browser and reading the word
+"Unauthorized".
+
+The general lesson is in the schema now: publish an application on the port it
+listens on. Where the two must differ, something has to be told, and the thing
+that gets told is usually the application.
+
 ### Tests that depend on chance
 
 `vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.

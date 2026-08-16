@@ -12,17 +12,16 @@
     "version": "5.2.3-1",
     "environment": {
       "QBT_LEGAL_NOTICE": "confirm",
-      "QBT_WEBUI_PORT": "8080",
+      "QBT_WEBUI_PORT": "8081",
       "QBT_TORRENTING_PORT": "6881",
       "UMASK": "0002"
     }
   },
   "network": {
-    "internal_port": 8080,
+    "internal_port": 8081,
     "protocol": "http",
     "path": "/",
-    "reachable_from": "network",
-    "host_port": 8081
+    "reachable_from": "network"
   },
   "storage": [
     {

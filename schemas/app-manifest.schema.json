@@ -129,7 +129,7 @@
           "default": "server"
         },
         "host_port": {
-          "description": "Port on the server this application answers on, when reachable_from is \"network\". Defaults to internal_port. Stated explicitly when the port inside the container is one the server already uses \u2014 a container listening on 80 cannot be published on 80, because Homebase itself is there.",
+          "description": "Port on the server this application answers on, when reachable_from is \"network\". Defaults to internal_port, and **matching them is strongly preferred**.\n\nAn application that differs sees a Host header naming a port it is not listening on, and some reject every request for it. qBittorrent does: published on 8081 while listening on 8080 it answered a bare `401 Unauthorized` to everything, including its own login page, with nothing in its log to say why. Where an application can be told which port to listen on, tell it \u2014 and only state this when it cannot.",
           "type": "integer",
           "minimum": 1024,
           "maximum": 65535
