@@ -979,9 +979,24 @@ It does not *control* the fan, and that is a decision rather than a gap. On a
 machine already at 89 °C with the fan still climbing, a manual setting is a way
 to cook a computer that is struggling — and the `asus_wmi` driver refuses to
 report a speed at all while under manual control, so it cannot even say what was
-done. Worse, testing it found that the setting is not cleanly reversible: writing
-the mode back to automatic did not restore the curve, and neither did reloading
-the driver. It took a reboot.
+done.
+
+**A correction, from watching the same machine a day later.** This originally
+recorded that a manual setting was not cleanly reversible — that switching back
+to automatic left the fan fast, and that it took a reboot. That was wrong, and
+wrong in the way this document keeps warning about: a cause inferred from a
+symptom, measured once, minutes after a stress test.
+
+What the fan actually does is decay very slowly. From full it takes about ten
+minutes to come back down, and it does so on its own. Every earlier reading that
+looked like a stuck fan was taken shortly after something CPU-heavy — a package
+build, an install, the boot itself — and was simply on the way down.
+
+It also hunts. At 44 °C, held flat with no load, it fell to 2400 rpm and climbed
+back to 4200 over the following two minutes. That is the controller oscillating
+across a step boundary with no hysteresis, which is a firmware quirk and not
+something software here can fix. It is worth recording because it is the reason a
+single fan reading means so little, and therefore the reason the history exists.
 
 - [x] Temperature and fan recorded every five minutes, to a plain CSV
 - [x] `homebasectl system history`, with a chart that works over ssh
