@@ -1,6 +1,7 @@
 package hostd
 
 import (
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -121,3 +122,49 @@ func TestLinkLocalAddressesAreNotReportedAsBeingOnANetwork(t *testing.T) {
 // while never asking whether hostd could execute it — and passed for four
 // milestones. They are in internal/api now, next to the code, along with one
 // that dials for real.
+
+// A list field is an array or it is absent — never `null`.
+//
+// A nil slice in Go encodes as JSON `null`, so a field that is an array while
+// there is something in it and null when there is not is a trap laid for every
+// client. It went off exactly once and took a whole screen with it: removing
+// the last remote-access device made the network page unreachable, because the
+// page did `devices.length` on what had become null. The page was not the bug.
+func TestListFieldsAreNeverNull(t *testing.T) {
+	// A machine with nothing at all — no interfaces, no devices, no shares.
+	for name, encode := range map[string]func() ([]byte, error){
+		"network": func() ([]byte, error) {
+			// A machine with no interfaces at all — which is a VM with its
+			// network removed, and is the state that produced the bug.
+			return json.Marshal(netScanner{
+				classNet:   t.TempDir(),
+				routes:     "/nonexistent",
+				resolvConf: "/nonexistent",
+				hostname:   func() (string, error) { return "x", nil },
+				interfaces: func() ([]net.Interface, error) { return nil, nil },
+				addrsOf:    func(net.Interface) ([]net.Addr, error) { return nil, nil },
+			}.status())
+		},
+		"vpn": func() ([]byte, error) {
+			return json.Marshal(VPNStatus{Port: 51820, Devices: []VPNDevice{}})
+		},
+		"shares": func() ([]byte, error) {
+			return json.Marshal(ShareStatus{Users: []string{}, Shares: []ShareState{}})
+		},
+	} {
+		body, err := encode()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, field := range []string{"interfaces", "devices", "shares", "users"} {
+			value, present := decoded[field]
+			if present && value == nil {
+				t.Errorf("%s.%s is null; a client that indexes into it crashes", name, field)
+			}
+		}
+	}
+}

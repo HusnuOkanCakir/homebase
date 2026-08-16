@@ -52,6 +52,12 @@ export function RemoteAccess({ canManage }: { canManage: boolean }) {
     setBusy(false);
   };
 
+  // Defended rather than trusted. The server is fixed so this is an array, and
+  // it was not: removing the last device made it null and `.length` took the
+  // whole page down. A screen that cannot be opened is also the screen somebody
+  // would use to put the problem right.
+  const devices = status?.devices ?? [];
+
   if (!status) {
     return (
       <section className="card">
@@ -162,14 +168,14 @@ export function RemoteAccess({ canManage }: { canManage: boolean }) {
           ) : null}
 
           <h4>Devices</h4>
-          {status.devices.length === 0 ? (
+          {devices.length === 0 ? (
             <p className="muted">
               No devices yet. Add one, then scan the code from inside the Wireguard
               app — not with the phone's camera, which only shows you the text.
             </p>
           ) : (
             <ul className="list">
-              {status.devices.map((device) => (
+              {devices.map((device) => (
                 <li key={device.public_key}>
                   <div className="row row-spread">
                     <div>

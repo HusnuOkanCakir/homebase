@@ -177,11 +177,19 @@ func (s *ShareServices) save(shares []Share) error {
 // --- Reading the state of things -----------------------------------------------
 
 func (s *ShareServices) status(ctx context.Context) (ShareStatus, error) {
+	// Empty lists, never nil. A nil slice encodes as JSON `null`, and a field
+	// that is an array sometimes and null other times breaks the first client
+	// that indexes into it — see readVPNStatus, where that took a whole screen
+	// down the moment the last device was removed.
 	status := ShareStatus{
 		Installed:  sambaInstalled(),
 		Running:    unitIsActive(ctx, "smbd.service"),
 		ServerName: serverName(),
-		Users:      s.shareUsers(),
+		Users:      []string{},
+		Shares:     []ShareState{},
+	}
+	if users := s.shareUsers(); users != nil {
+		status.Users = users
 	}
 
 	shares, err := s.load()

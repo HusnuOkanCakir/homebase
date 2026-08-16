@@ -134,7 +134,9 @@ func systemNetScanner() netScanner {
 func ReadNetworkStatus() NetworkStatus { return systemNetScanner().status() }
 
 func (s netScanner) status() NetworkStatus {
-	status := NetworkStatus{}
+	// An empty list, never nil — a nil slice encodes as JSON `null` and breaks
+	// the first client that indexes into it. See readVPNStatus.
+	status := NetworkStatus{Interfaces: []NetworkInterface{}}
 
 	if name, err := s.hostname(); err == nil {
 		status.Hostname = strings.TrimSuffix(strings.ToLower(name), ".local")

@@ -138,7 +138,15 @@ type NewDevice struct {
 // --- Reading -----------------------------------------------------------------------
 
 func readVPNStatus(ctx context.Context) VPNStatus {
-	status := VPNStatus{Port: vpnPort}
+	// An empty list, never nil.
+	//
+	// A nil slice encodes as JSON `null`, and a field that is an array
+	// sometimes and null other times is a trap laid for every client of it:
+	// `status.devices.length` works until the last device is removed and then
+	// takes the whole page down. That is exactly what happened — removing a
+	// device made the network screen unreachable, and the screen was not the
+	// bug.
+	status := VPNStatus{Port: vpnPort, Devices: []VPNDevice{}}
 
 	raw, err := os.ReadFile(wireguardConf)
 	if err != nil {
@@ -150,7 +158,9 @@ func readVPNStatus(ctx context.Context) VPNStatus {
 	status.Hostname = configuredHostname(string(raw))
 	status.Running = unitIsActive(ctx, wireguardUnit)
 
-	status.Devices = devicesFromConfig(string(raw))
+	if devices := devicesFromConfig(string(raw)); devices != nil {
+		status.Devices = devices
+	}
 	applyLiveState(ctx, status.Devices)
 	status.DNS = readDDNSStatus(ctx)
 
