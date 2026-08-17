@@ -514,6 +514,11 @@ and Windows on it:
   perfectly, brought up no interface, obtained no address, and could not be
   reached at all. Matched on the kind of device now, and `homebasectl network`
   says so when a configuration asks for a card that is not there
+- **qBittorrent is pinned to 5.0.5.** 5.1 changed its login reply from `200 OK`
+  with the body `Ok.` to an empty `204`, and Sonarr checks the body — so the
+  newest version of each, both correct alone, report "Authentication Failure"
+  against credentials that are right. A catalogue is a tested combination, not a
+  set of latest versions
 - **Prowlarr, Sonarr, Radarr and Jellyseerr.** Ask for a film or an episode in
   Jellyseerr and it is found, downloaded, renamed and filed into Jellyfin
 - **An image may declare that it cannot run as an arbitrary user.** Every

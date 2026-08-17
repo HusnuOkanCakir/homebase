@@ -1168,6 +1168,25 @@ one exited. Two applications installed a minute apart came out configured
 differently, with nothing to say why. The package now stops the service so the
 next connection starts the new binary.
 
+#### A catalogue is a tested combination, not a set of latest versions
+
+Sonarr refused qBittorrent with "Authentication Failure" against credentials that
+were provably correct — a login from inside Sonarr's own container returned
+success while Sonarr's own test did not.
+
+qBittorrent 5.1 changed its login reply from `200 OK` with the body `Ok.` to an
+empty `204`. Sonarr checks the body. So the newest version of each, both correct
+on their own, do not work together — and the error names the username.
+
+**Nothing in the manifest schema could have caught that**, because neither
+manifest is wrong. It is a property of the pair. Which is the argument for a
+curated catalogue over a list of images: the value is not the manifests, it is
+that the versions in them have been run together. qBittorrent is pinned to 5.0.5
+with the reason written where the next person to bump it will read it.
+
+The general rule now recorded: **pin a version because it was tested with the
+others, and treat a version bump as a change to the combination.**
+
 ### Milestone 15 — the original plan
 
 qBittorrent alone means finding a file, adding it, waiting, and moving it into

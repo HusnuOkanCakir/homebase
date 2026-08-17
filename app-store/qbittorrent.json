@@ -4,12 +4,12 @@
   "id": "qbittorrent",
   "name": "qBittorrent",
   "summary": "Download files over BitTorrent, into a folder your media server reads.",
-  "after_install": "qBittorrent makes up a new password every time it starts, until you set one of your own. Find the current one with `homebasectl apps logs qbittorrent`, sign in as \"admin\", and set your own under Tools, Options, Web UI. Until you do, it changes on every restart.",
+  "after_install": "Set a password: the spanner icon, Web UI, tick Change current password. Until you do, qBittorrent invents a new one every time it starts \u2014 find the current one with `homebasectl apps logs qbittorrent`. The version here is pinned deliberately: 5.1 and later answer a login with an empty 204 rather than \"Ok.\", which Sonarr and Radarr read as a wrong password.",
   "homepage": "https://www.qbittorrent.org",
   "license": "GPL-2.0-or-later",
   "container": {
     "image": "qbittorrentofficial/qbittorrent-nox",
-    "version": "5.2.3-1",
+    "version": "5.0.5-1",
     "environment": {
       "QBT_LEGAL_NOTICE": "confirm",
       "QBT_WEBUI_PORT": "8081",
