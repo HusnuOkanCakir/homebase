@@ -4,7 +4,7 @@
   "id": "jellyfin",
   "name": "Jellyfin",
   "summary": "Watch your films, television and music on any device in your home.",
-  "after_install": "Open Jellyfin and work through its setup: it asks you to make an account, then where your films and programmes are. The folder you chose here is /media inside Jellyfin \u2014 add /media/films and /media/shows as libraries.",
+  "after_install": "Open Jellyfin and work through its setup: it asks you to make an account, then where your media is. Add /media/films as a Movies library and /media/shows as a Shows library \u2014 and set the type on each, because a library with no type makes Jellyfin guess and it guesses badly. Do not add the downloads folder: it holds half-finished files and release names nothing can identify, and one of those matched an episode of House of the Dragon to a Pearl Jam concert film.",
   "homepage": "https://jellyfin.org",
   "license": "GPL-2.0-only",
   "container": {
