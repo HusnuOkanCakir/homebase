@@ -518,7 +518,7 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 	// have somewhere to land. Owned by the service account, mode 0750.
 	// The account this application runs as, and which owns everything it can
 	// reach. Created on first install and reused afterwards.
-	as, err := ensureAppOwner(s.stateDir, manifest.ID)
+	as, err := s.effectiveOwner(manifest)
 	if err != nil {
 		return nil, internalError("preparing an account for " + manifest.Name + ": " + err.Error())
 	}
@@ -628,7 +628,7 @@ func (s *AppServices) restart(ctx context.Context, params AppRef) (any, error) {
 
 	// The supporting containers first, and idempotently: a restart is also how
 	// somebody recovers an application whose database stopped.
-	if as, err := ensureAppOwner(s.stateDir, manifest.ID); err == nil {
+	if as, err := s.effectiveOwner(manifest); err == nil {
 		if err := s.startServices(ctx, manifest, as); err != nil {
 			return nil, err
 		}
@@ -928,6 +928,48 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 	}
 
 	return config
+}
+
+// effectiveOwner is the account an application runs as.
+//
+// The primary group is the service group for an application that has been given
+// a folder somebody else also writes into — and that is the difference between
+// sharing a folder and merely being able to read one.
+//
+// A supplementary group lets a process *read* what the group owns. It does not
+// change what the process *creates*: a new file takes the writer's primary
+// group, so qBittorrent writing into the shared downloads folder produced files
+// owned by qBittorrent's own group, which Jellyfin could read and not delete,
+// and the file server could read and not replace. The error was
+// "Access to the path '/media/downloads/shows' is denied", from an application
+// that had been given that path.
+//
+// The set-group-id bit on the directory is the usual remedy and is unavailable:
+// hostd's unit sets RestrictSUIDSGID=yes and the kernel refuses it. Making the
+// group primary achieves the same thing and needs no bit.
+//
+// An application with only private storage keeps a group of its own, because
+// nothing else has any business in its files.
+func (s *AppServices) effectiveOwner(manifest Manifest) (owner, error) {
+	as, err := ensureAppOwner(s.stateDir, manifest.ID)
+	if err != nil {
+		return owner{}, err
+	}
+	for _, storage := range manifest.Storage {
+		if storage.Type != "user-selected" {
+			continue
+		}
+		gid, err := serviceGroupID()
+		if err != nil {
+			// The group is created by the package, so its absence means a
+			// broken installation rather than a machine without sharing. The
+			// application still runs; it simply cannot share.
+			break
+		}
+		as.gid = gid
+		break
+	}
+	return as, nil
 }
 
 // supplementaryGroups are the host groups an application's process joins.
@@ -1555,7 +1597,7 @@ func (s *AppServices) rebuildContainer(ctx context.Context, manifest Manifest) (
 	}
 	wasRunning := state.State.Running
 
-	as, err := ensureAppOwner(s.stateDir, manifest.ID)
+	as, err := s.effectiveOwner(manifest)
 	if err != nil {
 		return false, internalError("preparing an account for " + manifest.Name + ": " + err.Error())
 	}

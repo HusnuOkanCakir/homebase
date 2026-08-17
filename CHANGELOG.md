@@ -500,6 +500,12 @@ and Windows on it:
   on the first real laptop, full load reached 89 °C with the fan still climbing,
   past the 84 °C its processor throttles at, and a manual setting on a machine
   like that is a way to cook one that is already struggling
+- **An application sharing a folder now creates files the rest of the machine can
+  use.** The service group is its *primary* group, not a supplementary one — a
+  supplementary group governs what a process can read, never what it creates, so
+  qBittorrent's downloads came out owned by qBittorrent's own group and the file
+  server could read but not replace them. The set-group-id bit is the usual
+  remedy and `RestrictSUIDSGID=yes` forbids it
 - **The network configuration no longer names an interface.** subiquity writes the
   name it saw at install time, and that name is not a property of the card — the
   kernel derives it from the PCI slot. On the first real laptop a wireless card

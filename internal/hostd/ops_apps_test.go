@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -737,5 +738,67 @@ func TestAnApplicationWithASharedFolderJoinsTheServiceGroup(t *testing.T) {
 	if !slices.Contains(groups, service.Gid) {
 		t.Errorf("got %v, which does not include the %s group (%s)",
 			groups, serviceAccount, service.Gid)
+	}
+}
+
+// An application given a folder somebody else also writes into runs with the
+// service group as its *primary* group, not merely as a supplementary one.
+//
+// The difference is what a new file gets. A supplementary group lets a process
+// read what the group owns; it does not change what the process creates, because
+// a new file takes the writer's primary group. So qBittorrent writing into the
+// shared downloads folder produced files owned by qBittorrent's own group —
+// which Jellyfin could read and not delete, and the file server could read and
+// not replace. The error was "Access to the path '/media/downloads/shows' is
+// denied", from an application that had been given exactly that path.
+func TestAnApplicationSharingAFolderCreatesFilesInTheServiceGroup(t *testing.T) {
+	group, err := user.LookupGroup(serviceAccount)
+	if err != nil {
+		t.Skip("no " + serviceAccount + " group on this machine")
+	}
+	gid, err := strconv.Atoi(group.Gid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	services := &AppServices{stateDir: t.TempDir()}
+
+	shared, err := services.effectiveOwner(Manifest{
+		ID:      "sharing-app",
+		Storage: []ManifestStorage{{ID: "media", Type: "user-selected"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shared.gid != gid {
+		t.Errorf("primary group %d, want the service group %d — anything else and "+
+			"files it creates are unreachable by everything else that shares the folder",
+			shared.gid, gid)
+	}
+
+	// And an application with nothing shared keeps a group of its own, because
+	// nothing else has any business in its files.
+	private, err := services.effectiveOwner(Manifest{
+		ID:      "private-app",
+		Storage: []ManifestStorage{{ID: "config", Type: "private"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if private.gid == gid {
+		t.Error("an application with only private storage was put in the shared group")
+	}
+	if private.gid != private.uid {
+		t.Errorf("private application group %d, want its own %d", private.gid, private.uid)
+	}
+
+	// Two applications still have distinct accounts — the shared group is a
+	// group, not a shared identity.
+	other, _ := services.effectiveOwner(Manifest{
+		ID:      "another-app",
+		Storage: []ManifestStorage{{ID: "media", Type: "user-selected"}},
+	})
+	if other.uid == shared.uid {
+		t.Error("two applications were given the same account")
 	}
 }
