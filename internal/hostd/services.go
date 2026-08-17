@@ -57,19 +57,84 @@ func (s *AppServices) serviceDataDir(app, service, id string) string {
 	return filepath.Join(s.appDataDir(app), "services", service, id)
 }
 
+// joinedNetworks are the networks an application's own container attaches to.
+//
+// Its own, always — that is where its supporting containers live and where other
+// applications find it. Plus one for each application it declared it reaches, so
+// the name resolves.
+//
+// Attached at creation rather than connected afterwards, for the same reason the
+// supporting containers are: a container that starts before it is on the network
+// fails its first connection, and an application whose download client is
+// briefly unreachable at startup is one that logs a failure nobody reads.
+func (s *AppServices) joinedNetworks(manifest Manifest) map[string]endpointConfig {
+	networks := map[string]endpointConfig{
+		networkName(manifest.ID): {Aliases: []string{manifest.ID}},
+	}
+	for _, other := range manifest.Network.Reaches {
+		if other == manifest.ID {
+			continue
+		}
+		// The alias is this application's own id on the other's network, so that
+		// the traffic is identifiable from either end.
+		networks[networkName(other)] = endpointConfig{Aliases: []string{manifest.ID}}
+	}
+	return networks
+}
+
+// ensureNetworks creates every network an application needs to be on.
+//
+// Including the ones belonging to applications it reaches, which may not be
+// installed yet — creating an empty network costs nothing and means the order
+// applications are installed in does not matter. Sonarr set up before qBittorrent
+// otherwise fails at creation with a message about a missing network, which is
+// true and useless.
+func (s *AppServices) ensureNetworks(ctx context.Context, manifest Manifest) error {
+	for name := range s.joinedNetworks(manifest) {
+		if err := s.docker.createNetwork(ctx, name); err != nil {
+			return wrapDockerError(err, "network_failed",
+				"Homebase could not set up the network "+manifest.Name+" needs.",
+				"Try again. If it keeps failing, check that Docker is healthy.")
+		}
+	}
+	return nil
+}
+
+// connectExtraNetworks attaches an application to the networks of the
+// applications it reaches, after its container exists and before it starts.
+//
+// Failures are returned rather than logged. An application that cannot reach its
+// download client is not working, and reporting it as installed would leave
+// somebody configuring a connection that cannot succeed.
+func (s *AppServices) connectExtraNetworks(ctx context.Context, manifest Manifest) error {
+	own := networkName(manifest.ID)
+	for name, endpoint := range s.joinedNetworks(manifest) {
+		if name == own {
+			continue
+		}
+		if err := s.docker.connectNetwork(ctx, name,
+			containerName(manifest.ID), endpoint.Aliases); err != nil {
+			return wrapDockerError(err, "network_failed",
+				"Homebase could not connect "+manifest.Name+" to the applications it needs.",
+				"Try installing it again.")
+		}
+	}
+	return nil
+}
+
 // startServices brings up everything an application needs before it starts.
 //
 // Idempotent: a container that is already there is left alone and started, so
 // this runs on every start rather than only on the first.
 func (s *AppServices) startServices(ctx context.Context, manifest Manifest, as owner) error {
+	// The networks first, and always — an application with no supporting
+	// containers still needs its own, because that is where other applications
+	// find it.
+	if err := s.ensureNetworks(ctx, manifest); err != nil {
+		return err
+	}
 	if len(manifest.Services) == 0 {
 		return nil
-	}
-
-	if err := s.docker.createNetwork(ctx, networkName(manifest.ID)); err != nil {
-		return wrapDockerError(err, "network_failed",
-			"Homebase could not set up "+manifest.Name+"'s own network.",
-			"Try again. If it keeps failing, check that Docker is healthy.")
 	}
 
 	for _, service := range manifest.Services {

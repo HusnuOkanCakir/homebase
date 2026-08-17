@@ -615,6 +615,29 @@ func (d *docker) createNetwork(ctx context.Context, name string) error {
 	return err
 }
 
+// connectNetwork attaches an existing container to another network.
+//
+// Docker attaches only one network when a container is created, so an
+// application that reaches others is put on its own at creation and connected to
+// theirs immediately afterwards — before it is started, so its first connection
+// already resolves.
+func (d *docker) connectNetwork(ctx context.Context, network, container string, aliases []string) error {
+	body := struct {
+		Container      string         `json:"Container"`
+		EndpointConfig endpointConfig `json:"EndpointConfig"`
+	}{container, endpointConfig{Aliases: aliases}}
+
+	err := d.do(ctx, http.MethodPost,
+		"/networks/"+url.PathEscape(network)+"/connect", body, nil)
+	var dockerErr *dockerError
+	// Already connected, which is the ordinary case on every start after the
+	// first.
+	if asDockerError(err, &dockerErr) && dockerErr.Status == http.StatusForbidden {
+		return nil
+	}
+	return err
+}
+
 // removeNetwork deletes it. A network with something still attached cannot be
 // removed, which is why this runs after the containers are gone.
 func (d *docker) removeNetwork(ctx context.Context, name string) error {

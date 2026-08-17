@@ -514,6 +514,20 @@ and Windows on it:
   perfectly, brought up no interface, obtained no address, and could not be
   reached at all. Matched on the kind of device now, and `homebasectl network`
   says so when a configuration asks for a card that is not there
+- **Prowlarr, Sonarr, Radarr and Jellyseerr.** Ask for a film or an episode in
+  Jellyseerr and it is found, downloaded, renamed and filed into Jellyfin
+- **An image may declare that it cannot run as an arbitrary user.** Every
+  linuxserver.io entrypoint starts as root, corrects ownership of what it was
+  given, and drops to the account in `PUID`/`PGID`. Granting it means uid 0 with
+  five named capabilities — CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID — and a
+  written reason a reviewer can check. The alternative, holding every application
+  to an unprivileged uid, excludes most of what people want on a home server
+- **An application can declare which others it must reach**, and Homebase puts
+  them on a network they share. None of the obvious routes work: containers on
+  Docker's default bridge cannot resolve each other, the server's `.local` name
+  does not resolve inside a container, and the bridge gateway is the host where
+  the firewall drops it — correctly, since a rule letting containers reach the
+  host's ports would let every container reach every one of them
 - **Applications made of more than one container.** A manifest declares
   supporting containers — a database, a cache — and each joins a private network
   of the application's own, publishes no port on any interface, and cannot ask

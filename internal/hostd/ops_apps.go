@@ -544,6 +544,11 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 			"Try installing it again. If it keeps failing, check the server logs.")
 	}
 
+	// Before it starts, so its first connection already resolves.
+	if err := s.connectExtraNetworks(ctx, manifest); err != nil {
+		return nil, err
+	}
+
 	if err := s.docker.startContainer(ctx, name); err != nil {
 		return nil, wrapDockerError(err,
 			"start_failed",
@@ -816,6 +821,9 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 		// The application's own account, which is also what owns every file it
 		// can reach. Without this the container runs as root with no
 		// CAP_DAC_OVERRIDE and cannot write its own data directory.
+		//
+		// Left empty for an image that starts as root, which is the whole point
+		// of that declaration — see below.
 		User: as.String(),
 		Cmd:  manifest.Container.Command,
 		Labels: map[string]string{
@@ -850,16 +858,39 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 
 	config.HostConfig.GroupAdd = supplementaryGroups(manifest)
 
+	// An image that cannot run as an arbitrary user.
+	//
+	// It starts as root, corrects ownership of what it was given, and drops to
+	// its own account. Homebase tells it which account that is, through PUID and
+	// PGID — so the files it ends up creating belong to the same uid and the same
+	// shared group everything else here uses, and the elevation lasts only as
+	// long as the entrypoint.
+	//
+	// Five capabilities, named, and nothing else: CapDrop=ALL still runs first.
+	// An image granted this can rewrite ownership anywhere in its own bind mounts
+	// and become any user inside itself; it cannot reach a path that is not
+	// mounted into it, which is what bounds the grant.
+	if manifest.Permissions.StartsAsRoot != nil {
+		config.User = ""
+		config.HostConfig.CapAdd = append(config.HostConfig.CapAdd, rootCapabilities...)
+		config.Env = append(config.Env,
+			"PUID="+strconv.Itoa(as.uid),
+			"PGID="+strconv.Itoa(as.gid),
+		)
+	}
+
 	// The application's own network, when it has supporting containers to
 	// reach. Named rather than the default bridge so that "database" resolves
 	// to its database and to nothing else on the machine.
-	if len(manifest.Services) > 0 {
-		config.HostConfig.NetworkMode = networkName(manifest.ID)
-		config.NetworkingConfig = &networkingConfig{
-			EndpointsConfig: map[string]endpointConfig{
-				networkName(manifest.ID): {Aliases: []string{manifest.ID}},
-			},
-		}
+	// Its own network always, plus one for each application it reaches.
+	//
+	// Docker attaches only the first network at creation, so the primary one is
+	// named in NetworkMode and the rest are connected once the container exists.
+	config.HostConfig.NetworkMode = networkName(manifest.ID)
+	config.NetworkingConfig = &networkingConfig{
+		EndpointsConfig: map[string]endpointConfig{
+			networkName(manifest.ID): {Aliases: []string{manifest.ID}},
+		},
 	}
 
 	if manifest.Network.InternalPort > 0 && !manifest.Network.HostNetwork {
@@ -1634,6 +1665,9 @@ func (s *AppServices) rebuildContainer(ctx context.Context, manifest Manifest) (
 	// files is not a reason to start something somebody had turned off.
 	if !wasRunning {
 		return true, nil
+	}
+	if err := s.connectExtraNetworks(ctx, manifest); err != nil {
+		return false, err
 	}
 	if err := s.docker.startContainer(ctx, name); err != nil {
 		return false, wrapDockerError(err, "rebuild_failed",

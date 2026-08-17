@@ -134,6 +134,16 @@
           "minimum": 1024,
           "maximum": 65535
         },
+        "reaches": {
+          "description": "Other applications this one must be able to connect to, by id.\n\nHomebase joins both to a network they share, and the address is the other application's id \u2014 Sonarr reaches qBittorrent at `qbittorrent:8081`, the port being the one that application listens on inside its container.\n\nIt exists because none of the obvious routes work. Containers on Docker's default bridge cannot resolve each other at all; the server's own `.local` name does not resolve inside a container; and the bridge gateway is the host, where the firewall drops it \u2014 correctly, since a rule permitting containers to reach the host's ports would permit every container to reach every one of them.\n\nA declaration here is not a grant of anything the other application would not otherwise give: it is reachable on that port by whatever is on that network, and nothing joins it without saying so here.",
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+          },
+          "uniqueItems": true
+        },
         "host_network": {
           "description": "Share the host network namespace. This removes network isolation and requires written justification in review \u2014 it is not a convenience setting.",
           "type": "boolean",
@@ -311,6 +321,22 @@
             ]
           },
           "uniqueItems": true
+        },
+        "starts_as_root": {
+          "description": "This image cannot run as an arbitrary user: its entrypoint starts as root, corrects ownership of the folders it was given, and drops to its own account. Every linuxserver.io image works this way, and so do many others.\n\nGranting it means the container runs as uid 0 with five capabilities it would otherwise not have \u2014 CHOWN, DAC_OVERRIDE, FOWNER, SETUID and SETGID \u2014 which together let it rewrite ownership anywhere in its own bind mounts and become any user inside itself. It cannot escape the container, and it is still a real relaxation of the default: what protects the rest of the machine is that the mounts are the only paths it can reach.\n\n**The alternative was considered and rejected**: holding every application to running as an unprivileged uid excludes most of what people want to run on a home server. So this exists, is declared per application, is shown to whoever installs it, and requires the reason to be written down here.\n\nHomebase passes PUID and PGID so the entrypoint drops to the account Homebase chose. An image that honours neither must not be granted this.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reason"
+          ],
+          "properties": {
+            "reason": {
+              "description": "Why this image cannot run unprivileged, in words a reviewer can check against the image's own entrypoint.",
+              "type": "string",
+              "minLength": 40,
+              "maxLength": 400
+            }
+          }
         },
         "privileged": {
           "description": "Reserved so that a manifest cannot set it silently. It must be false; a privileged container is a root shell on the host, and no catalogue application will be granted one.",

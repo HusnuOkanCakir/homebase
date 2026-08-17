@@ -1,0 +1,54 @@
+{
+  "manifest_version": 1,
+  "revision": 1,
+  "id": "prowlarr",
+  "name": "Prowlarr",
+  "summary": "Manages the sites Sonarr and Radarr search, so you configure them once.",
+  "after_install": "Prowlarr is where you add the sites to search. Open it, set a password, then Indexers, Add Indexer. Afterwards go to Settings, Apps and add Sonarr at http://sonarr:8989 and Radarr at http://radarr:7878 \u2014 it then pushes your indexers to both, so you never configure them twice.",
+  "homepage": "https://wiki.servarr.com",
+  "license": "GPL-3.0-only",
+  "container": {
+    "image": "lscr.io/linuxserver/prowlarr",
+    "version": "1.30.2",
+    "environment": {
+      "TZ": "Etc/UTC"
+    }
+  },
+  "network": {
+    "internal_port": 9696,
+    "protocol": "http",
+    "path": "/",
+    "reachable_from": "network",
+    "reaches": [
+      "sonarr",
+      "radarr"
+    ]
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config",
+      "access": "read-write",
+      "description": "Prowlarr's own settings and database.",
+      "backup": true
+    }
+  ],
+  "health": {
+    "type": "http",
+    "path": "/",
+    "interval_seconds": 30,
+    "start_period_seconds": 60
+  },
+  "permissions": {
+    "read_only_root": false,
+    "starts_as_root": {
+      "reason": "The linuxserver.io entrypoint starts as root, corrects ownership of its configuration and media folders, then drops to the account given in PUID and PGID using s6. It has no option to run as an arbitrary user."
+    }
+  },
+  "resources": {
+    "memory_limit_bytes": 1073741824,
+    "memory_minimum_bytes": 268435456,
+    "disk_minimum_bytes": 536870912
+  }
+}

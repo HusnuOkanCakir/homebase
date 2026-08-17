@@ -1136,7 +1136,39 @@ application working and not existing.
 **Done when:** Home Assistant runs, finds a device on the network, and the
 dashboard says plainly what it was allowed to do that other applications are not.
 
-### Milestone 15 — The media loop closes itself
+### Milestone 15 — The media loop closes itself ✅
+
+- [x] Prowlarr, Radarr, Sonarr and Jellyseerr as manifests
+- [x] Applications that declare they need to reach another application, so the
+      addresses are Homebase's to arrange rather than a user's to look up
+- [x] The whole flow on one storage location, so a completed download becomes a
+      film in the library by being linked rather than copied
+
+**The capability question got answered by hitting it three times.** An image may
+now declare that it cannot run as an arbitrary user, which grants uid 0 and five
+named capabilities and requires a written reason. Every linuxserver.io entrypoint
+needs it; the alternative was a catalogue that excluded most of what people want.
+What bounds it is that the bind mounts are the only paths the container can reach,
+and that `PUID`/`PGID` mean the elevation lasts only as long as the entrypoint —
+verified on the ASUS, where the Radarr process itself runs as an unprivileged uid
+Homebase chose.
+
+**Reaching another application needed inventing, because every obvious route
+fails.** Containers on Docker's default bridge cannot resolve each other at all.
+The server's own `.local` name does not resolve inside a container. And the bridge
+gateway is the host, where the firewall drops it — which is correct, since a rule
+permitting containers to reach the host's published ports would permit every
+container to reach every one of them. So a manifest names the applications it must
+reach and Homebase puts them on a shared network.
+
+**An upgrade served two applications from two different versions of hostd.** It is
+socket-activated, so replacing the binary leaves any running process alone, and
+whether a request gets the old code or the new one depends on when the previous
+one exited. Two applications installed a minute apart came out configured
+differently, with nothing to say why. The package now stops the service so the
+next connection starts the new binary.
+
+### Milestone 15 — the original plan
 
 qBittorrent alone means finding a file, adding it, waiting, and moving it into
 the right folder by hand. The applications that automate that — Prowlarr, Radarr,

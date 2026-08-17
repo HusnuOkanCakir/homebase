@@ -112,6 +112,20 @@ if [ "$1" = "configure" ]; then
     if [ -d /run/systemd/system ]; then
         systemctl enable --now homebase-hostd.socket >/dev/null 2>&1 || true
 
+        # Stop the running service, so the next request starts the new binary.
+        #
+        # hostd is socket-activated: systemd owns the socket and the process
+        # comes and goes. An upgrade replaces the binary on disk and leaves any
+        # already-running process alone, so whether a request is served by the
+        # old code or the new one depends on when the previous one happened to
+        # exit. That produced an upgrade where two applications installed
+        # minutes apart were built by different versions — one got the new
+        # networking and one did not, with nothing to say why.
+        #
+        # Stopped rather than restarted: the socket brings it back on the next
+        # connection, and stopping cannot fail because nothing is listening.
+        systemctl stop homebase-hostd.service >/dev/null 2>&1 || true
+
         # Looking for updates on its own. The unit it starts does nothing at
         # all until an update source is configured, so enabling it here is
         # safe on a machine that has never been pointed at a channel — and it

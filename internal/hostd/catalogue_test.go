@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -619,5 +620,83 @@ func TestTheNetworkAndContainersAreNamedAfterTheApplication(t *testing.T) {
 	// somebody scanning `docker ps` is relying on.
 	if !strings.HasPrefix(serviceContainerName("immich", "database"), containerName("immich")) {
 		t.Error("a service container does not sort with its application")
+	}
+}
+
+// --- Images that cannot run as an arbitrary user -----------------------------------
+
+// The reason must be substantial enough for a reviewer to check against the
+// image's own entrypoint. A blank one is how a relaxation becomes the default:
+// the field spreads by copying and nobody can tell which applications genuinely
+// need it.
+func TestStartingAsRootNeedsAWrittenReason(t *testing.T) {
+	for what, reason := range map[string]string{
+		"empty":      "",
+		"too short":  "needs root",
+		"whitespace": "                                                    ",
+	} {
+		manifest := validManifest()
+		manifest["permissions"] = map[string]any{
+			"starts_as_root": map[string]any{"reason": reason},
+		}
+		catalogue := writeCatalogue(t, map[string]any{"test-app.json": manifest})
+		if _, ok := catalogue.Lookup("test-app"); ok {
+			t.Errorf("a %s reason was accepted", what)
+		}
+	}
+
+	manifest := validManifest()
+	manifest["permissions"] = map[string]any{
+		"starts_as_root": map[string]any{
+			"reason": "The entrypoint runs as root to chown the configuration " +
+				"directory, then drops to its own account with s6. It has no " +
+				"option to run as an arbitrary user.",
+		},
+	}
+	catalogue := writeCatalogue(t, map[string]any{"test-app.json": manifest})
+	app, ok := catalogue.Lookup("test-app")
+	if !ok {
+		t.Fatalf("a proper reason was rejected: %v", catalogue.Rejected())
+	}
+	if app.Permissions.StartsAsRoot == nil {
+		t.Error("the declaration did not survive loading")
+	}
+}
+
+// The grant is exactly five capabilities and they are named. Whatever else this
+// mechanism becomes, it must not become a way to reach NET_ADMIN or SYS_ADMIN —
+// which are what a container would need to start interfering with the machine
+// rather than with its own files.
+func TestStartingAsRootGrantsOnlyTheFiveItNeeds(t *testing.T) {
+	want := map[string]bool{
+		"CHOWN": true, "DAC_OVERRIDE": true, "FOWNER": true,
+		"SETUID": true, "SETGID": true,
+	}
+	if len(rootCapabilities) != len(want) {
+		t.Fatalf("granted %v, want exactly the five", rootCapabilities)
+	}
+	for _, capability := range rootCapabilities {
+		if !want[capability] {
+			t.Errorf("%q is granted and should not be", capability)
+		}
+	}
+	for _, forbidden := range []string{"SYS_ADMIN", "NET_ADMIN", "NET_RAW", "SYS_PTRACE"} {
+		if slices.Contains(rootCapabilities, forbidden) {
+			t.Errorf("%q is reachable through starts_as_root", forbidden)
+		}
+	}
+}
+
+// An application that does not declare it keeps the default: its own uid, no
+// capabilities at all.
+func TestAnApplicationThatDoesNotAskStaysUnprivileged(t *testing.T) {
+	manifest := validManifest()
+	catalogue := writeCatalogue(t, map[string]any{"test-app.json": manifest})
+	app, ok := catalogue.Lookup("test-app")
+	if !ok {
+		t.Fatal(catalogue.Rejected())
+	}
+	if app.Permissions.StartsAsRoot != nil {
+		t.Error("an application that asked for nothing was given the elevation")
 	}
 }

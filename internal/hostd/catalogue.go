@@ -167,6 +167,17 @@ type ManifestNetwork struct {
 	// port is one the server already uses.
 	HostPort int `json:"host_port,omitempty"`
 
+	// Reaches are other applications this one must connect to, by id.
+	//
+	// Homebase joins both to a network they share, and the address is the other
+	// application's id. It exists because none of the obvious routes work:
+	// containers on Docker's default bridge cannot resolve each other, the
+	// server's .local name does not resolve inside a container, and the bridge
+	// gateway is the host where the firewall drops it — correctly, since a rule
+	// letting containers reach the host's ports would let every container reach
+	// every one of them.
+	Reaches []string `json:"reaches,omitempty"`
+
 	Discovery []string `json:"discovery,omitempty"`
 }
 
@@ -212,6 +223,40 @@ type ManifestPermissions struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 	Privileged   bool     `json:"privileged,omitempty"`
 	ReadOnlyRoot *bool    `json:"read_only_root,omitempty"`
+
+	// StartsAsRoot marks an image that cannot run as an arbitrary user.
+	//
+	// Its entrypoint starts as root, corrects ownership of the folders it was
+	// given, and drops to its own account. Every linuxserver.io image works that
+	// way, and Homebase's default — a uid of its own with every capability
+	// dropped — makes all three steps fail.
+	//
+	// The alternative was considered and rejected. Holding every application to
+	// an unprivileged uid excludes most of what people want on a home server:
+	// Paperless, Immich, Nextcloud, Home Assistant and the whole Sonarr family.
+	// So this exists, is declared per application, and requires a written reason
+	// a reviewer can check against the image's own entrypoint.
+	StartsAsRoot *ManifestElevation `json:"starts_as_root,omitempty"`
+}
+
+// ManifestElevation is why an image needs to begin as root.
+type ManifestElevation struct {
+	Reason string `json:"reason"`
+}
+
+// rootCapabilities are what an image that starts as root is given, and nothing
+// more.
+//
+// Exactly the five its entrypoint needs: change ownership, bypass permission
+// checks to do so, act as the owner of files it does not own, and become another
+// user. Together they let it rewrite ownership anywhere in its own bind mounts
+// and become any user inside itself — which is a real relaxation, and is bounded
+// by the mounts being the only paths it can reach.
+//
+// Everything else stays dropped. NET_ADMIN, SYS_ADMIN and the rest are not on
+// this list and are not reachable through it.
+var rootCapabilities = []string{
+	"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID",
 }
 
 type ManifestResources struct {
@@ -429,6 +474,16 @@ func (m Manifest) Validate() error {
 		return fmt.Errorf("privileged containers are not permitted")
 	}
 
+	// An image that starts as root must say why, in enough words to be checked
+	// against its entrypoint. A blank reason is how a relaxation becomes the
+	// default: the field would spread by copying, and nobody would be able to
+	// tell which applications genuinely need it.
+	if elevation := m.Permissions.StartsAsRoot; elevation != nil {
+		if len(strings.TrimSpace(elevation.Reason)) < 40 {
+			return fmt.Errorf("starts_as_root needs a reason a reviewer can check")
+		}
+	}
+
 	// "latest" moves. An application that silently changes version underneath a
 	// user is an application that silently breaks, and the user has no way to
 	// know why.
@@ -498,6 +553,15 @@ func (m Manifest) Validate() error {
 			if storage.ID == "" || !strings.HasPrefix(storage.MountPath, "/") {
 				return fmt.Errorf("service %q has an unusable storage entry", service.Name)
 			}
+		}
+	}
+
+	for _, other := range m.Network.Reaches {
+		switch {
+		case !validAppID(other):
+			return fmt.Errorf("%q is not an application id", other)
+		case other == m.ID:
+			return fmt.Errorf("an application cannot declare it reaches itself")
 		}
 	}
 
