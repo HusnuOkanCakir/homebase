@@ -237,6 +237,47 @@ autoinstall:
     - rm -f /target/etc/update-motd.d/50-motd-news
     - rm -f /target/etc/update-motd.d/00-header
 
+    # The network configuration must not name an interface.
+    #
+    # subiquity writes the name it saw during installation — enp5s0, and that
+    # name is not a property of the card. The kernel derives it from the PCI
+    # slot, and a slot number moves whenever the enumeration does.
+    #
+    # The first real laptop demonstrated it. Its wireless card was not detected
+    # on one boot, the ethernet moved from slot 5 to slot 4, and a configuration
+    # naming enp5s0 produced a server that booted perfectly, brought no
+    # interface up, obtained no address, and could not be reached at all. The
+    # card was fine; it came back on the next boot with its old name. Anybody
+    # without a keyboard and a screen to hand would have called that a dead
+    # server.
+    #
+    # Matched on the kind of device instead. Two entries because a machine with
+    # predictable naming switched off calls them eth0, and `optional` so a boot
+    # with no cable in does not wait ninety seconds for one.
+    - rm -f /target/etc/netplan/50-cloud-init.yaml
+    - |
+      cat > /target/etc/netplan/50-homebase.yaml <<'NETPLAN'
+      # Written by the Homebase installer.
+      #
+      # Any wired device, rather than the name one happened to have at install
+      # time — a name comes from the PCI slot order and changes when the
+      # hardware enumeration does.
+      network:
+        version: 2
+        ethernets:
+          wired:
+            match:
+              name: "en*"
+            dhcp4: true
+            optional: true
+          wired-legacy:
+            match:
+              name: "eth*"
+            dhcp4: true
+            optional: true
+      NETPLAN
+    - chmod 600 /target/etc/netplan/50-homebase.yaml
+
     # A firewall that allows what the dashboard needs and nothing else. The
     # server sits on a home network with a smart television and a doorbell
     # camera on it, and the threat model assumes that network is hostile.

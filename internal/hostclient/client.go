@@ -343,6 +343,13 @@ type NetworkStatus struct {
 	Gateway     string             `json:"gateway,omitempty"`
 	Nameservers []string           `json:"nameservers,omitempty"`
 
+	// MissingInterfaces are named by the network configuration and are not on
+	// this machine — almost always a card that was renamed rather than removed,
+	// because the name comes from the PCI slot and a slot number moves when the
+	// enumeration does. Reported because the symptom otherwise is a server that
+	// boots perfectly and cannot be reached, with nothing to say why.
+	MissingInterfaces []string `json:"missing_interfaces,omitempty"`
+
 	// Online and Reachable are separate on purpose. A server with an address on
 	// a network whose broadband is down is a different problem from a server
 	// with no address, and they look identical from a browser that will not

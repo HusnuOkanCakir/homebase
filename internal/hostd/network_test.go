@@ -168,3 +168,64 @@ func TestListFieldsAreNeverNull(t *testing.T) {
 		}
 	}
 }
+
+// --- A configuration naming a card that is not there ------------------------------
+
+// The failure this catches took a working server off the network for an evening.
+//
+// A wireless card was not detected on one boot, which moved the ethernet from PCI
+// slot 5 to slot 4 and renamed it. The configuration named the old name, so
+// nothing was brought up and no address was obtained. The machine booted
+// perfectly, the card was fine, and the only way to find out was a keyboard, a
+// screen, and knowing to compare two names.
+func TestAConfiguredInterfaceThatIsNotThereIsReported(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "50-cloud-init.yaml"), []byte(
+		"network:\n  version: 2\n  ethernets:\n    enp5s0:\n      dhcp4: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	missing := configuredButAbsent(dir, []NetworkInterface{{Name: "enp4s0"}, {Name: "lo"}})
+	if len(missing) != 1 || missing[0] != "enp5s0" {
+		t.Fatalf("got %v, want [enp5s0]", missing)
+	}
+
+	// And says nothing once the card is there under that name.
+	if got := configuredButAbsent(dir, []NetworkInterface{{Name: "enp5s0"}}); len(got) != 0 {
+		t.Errorf("reported %v about an interface that exists", got)
+	}
+}
+
+// A name inside `match:` is a pattern, not a device. `name: "en*"` is the fix for
+// this whole class of problem, and reporting it as a missing card would turn the
+// remedy into a permanent warning.
+func TestAMatchPatternIsNotReportedAsMissing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "50-homebase.yaml"), []byte(
+		"network:\n  version: 2\n  ethernets:\n    wired:\n      match:\n"+
+			"        name: \"en*\"\n      dhcp4: true\n      optional: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := configuredButAbsent(dir, []NetworkInterface{{Name: "enp4s0"}}); len(got) != 0 {
+		t.Errorf("the configuration Homebase writes reported %v as missing", got)
+	}
+}
+
+// Ordinary netplan keys are not interface names. "ethernets" is the one that
+// would otherwise be reported on every machine for ever.
+func TestNetplanKeysAreNotMistakenForInterfaces(t *testing.T) {
+	for _, key := range []string{
+		"network", "version", "ethernets", "wifis", "dhcp4", "match", "name",
+		"optional", "renderer", "wired", "en", "eth",
+	} {
+		if looksLikeInterface(key) {
+			t.Errorf("%q was taken for an interface name", key)
+		}
+	}
+	for _, key := range []string{"enp5s0", "enp4s0", "eth0", "eno1", "ens18", "wlp4s0"} {
+		if !looksLikeInterface(key) {
+			t.Errorf("%q was not recognised as an interface name", key)
+		}
+	}
+}

@@ -607,6 +607,39 @@ the test application does not and is not.
 text and failed on every application with a Go type error. Both existed as API
 endpoints. Neither had ever been run against a server.
 
+#### A name is not a property of a card
+
+The worst outage this project has had, and it took an evening with a keyboard to
+diagnose.
+
+The server was woken with a magic packet, booted, and could not be reached. No
+address, no ARP entry, no mDNS — a sweep of all 254 addresses on the network found
+six devices and none of them was the server. From outside it was indistinguishable
+from a machine that had not started.
+
+It had started perfectly. Its **wireless card was not detected on that one boot**,
+which moved the ethernet controller from PCI slot 5 to slot 4, and Ubuntu's
+predictable naming renamed it `enp4s0`. The network configuration named `enp5s0`,
+so nothing was brought up. The card came back with its old name on the next boot;
+nothing was broken and nothing needed replacing.
+
+**Homebase wrote that configuration.** The installer left subiquity's
+`50-cloud-init.yaml`, which names whatever interface existed during
+installation — and that name comes from the slot order, so it changes when the
+hardware enumeration does. Adding a card, removing one, or a card failing to be
+detected once is enough.
+
+Fixed by matching on the kind of device rather than the name, and
+`homebasectl network` now says plainly when a configuration asks for a card the
+machine does not have — which is the message that would have turned an evening
+into a minute.
+
+It is the second time this week that a name derived from device enumeration has
+been wrong in a way that looked like broken hardware. The GPU render node was the
+first: every guide says `renderD128` and on this machine that is the NVIDIA card,
+because the Intel one enumerated second. **Anything the kernel numbers by
+discovery order is a fact about one boot, not about the machine.**
+
 #### Secure Boot, which is the one that would have failed silently
 
 Every laptop bought in the last decade has Secure Boot on and Microsoft's keys enrolled from
@@ -1055,7 +1088,7 @@ directories it was given, and drops to its own account with `gosu`. Under
 Homebase every application runs as a uid of its own with all capabilities dropped
 and `no-new-privileges`, so all three steps fail:
 
-```
+```text
 chown: changing ownership of '/config/data': Operation not permitted
 error: failed switching to "paperless": operation not permitted
 ```

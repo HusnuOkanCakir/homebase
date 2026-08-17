@@ -1128,13 +1128,14 @@ func wakeOnLANCommand(args []string, stdout io.Writer) error {
 
 func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
 	var status struct {
-		Hostname   string `json:"hostname"`
-		MDNSName   string `json:"mdns_name"`
-		MDNSWorks  bool   `json:"mdns_works"`
-		Gateway    string `json:"gateway"`
-		Online     bool   `json:"online"`
-		Reachable  bool   `json:"reachable"`
-		Interfaces []struct {
+		Hostname          string   `json:"hostname"`
+		MDNSName          string   `json:"mdns_name"`
+		MDNSWorks         bool     `json:"mdns_works"`
+		Gateway           string   `json:"gateway"`
+		Online            bool     `json:"online"`
+		Reachable         bool     `json:"reachable"`
+		MissingInterfaces []string `json:"missing_interfaces"`
+		Interfaces        []struct {
 			Name               string   `json:"name"`
 			Kind               string   `json:"kind"`
 			Up                 bool     `json:"up"`
@@ -1164,6 +1165,18 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 		fmt.Fprintln(w, "Network:  connected, but the internet is not reachable")
 	default:
 		fmt.Fprintln(w, "Network:  connected")
+	}
+
+	// Said before the list, because it is the reason the list may be missing the
+	// card somebody is looking for.
+	if len(status.MissingInterfaces) > 0 {
+		fmt.Fprintf(w, "\nThe network configuration asks for %s, which this machine\n",
+			strings.Join(status.MissingInterfaces, " and "))
+		fmt.Fprintln(w, "does not have. That is usually a card that was renamed rather than")
+		fmt.Fprintln(w, "removed — the name comes from its slot, and a slot number moves when")
+		fmt.Fprintln(w, "other hardware is added or stops being detected.")
+		fmt.Fprintln(w, "\nMatch on the kind of device instead of the name, in /etc/netplan:")
+		fmt.Fprint(w, "\n    match:\n      name: \"en*\"\n\n")
 	}
 
 	for _, iface := range status.Interfaces {

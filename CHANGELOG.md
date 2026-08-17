@@ -500,6 +500,14 @@ and Windows on it:
   on the first real laptop, full load reached 89 °C with the fan still climbing,
   past the 84 °C its processor throttles at, and a manual setting on a machine
   like that is a way to cook one that is already struggling
+- **The network configuration no longer names an interface.** subiquity writes the
+  name it saw at install time, and that name is not a property of the card — the
+  kernel derives it from the PCI slot. On the first real laptop a wireless card
+  was not detected on one boot, the ethernet moved from slot 5 to slot 4 and was
+  renamed, and a configuration naming the old name produced a server that booted
+  perfectly, brought up no interface, obtained no address, and could not be
+  reached at all. Matched on the kind of device now, and `homebasectl network`
+  says so when a configuration asks for a card that is not there
 - **Applications made of more than one container.** A manifest declares
   supporting containers — a database, a cache — and each joins a private network
   of the application's own, publishes no port on any interface, and cannot ask
