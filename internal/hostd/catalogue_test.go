@@ -788,3 +788,130 @@ func TestBothElevationsBuildTheSameContainer(t *testing.T) {
 		t.Error("an application declaring nothing was reported as elevated")
 	}
 }
+
+// Port 53 is reserved because the machine resolves names on it. Exactly one
+// application may take it, and only by saying that is what it is for.
+func TestOnlyANameServerMayTakePort53(t *testing.T) {
+	base := func() Manifest {
+		return Manifest{
+			ManifestVersion: 1,
+			ID:              "example",
+			Name:            "Example",
+			Container:       ManifestContainer{Image: "example/app", Version: "1.0.0"},
+			Health:          ManifestHealth{Type: "none"},
+			Storage:         []ManifestStorage{{ID: "config", Type: "private", MountPath: "/config"}},
+			Network: ManifestNetwork{
+				InternalPort:  3000,
+				HostPort:      3080,
+				Protocol:      "http",
+				ReachableFrom: "network",
+			},
+		}
+	}
+
+	t.Run("a name server may", func(t *testing.T) {
+		m := base()
+		m.Provides = "dns"
+		m.Network.ExtraPorts = []ManifestPort{
+			{InternalPort: 53, Protocol: "udp", Purpose: "the resolver itself"},
+		}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("a declared name server was refused port 53: %v", err)
+		}
+	})
+
+	t.Run("anything else may not", func(t *testing.T) {
+		m := base()
+		m.Network.ExtraPorts = []ManifestPort{
+			{InternalPort: 53, Protocol: "udp", Purpose: "no reason given at all"},
+		}
+		if err := m.Validate(); err == nil {
+			t.Fatal("an ordinary application took the port the machine resolves names on")
+		}
+	})
+
+	t.Run("the exception unlocks one port and not the list", func(t *testing.T) {
+		for _, port := range []int{22, 80, 443} {
+			m := base()
+			m.Provides = "dns"
+			m.Network.ExtraPorts = []ManifestPort{
+				{InternalPort: 53, Protocol: "udp", Purpose: "the resolver itself"},
+				{InternalPort: port, Purpose: "something it should not have"},
+			}
+			if err := m.Validate(); err == nil {
+				t.Errorf("a name server was also given port %d", port)
+			}
+		}
+	})
+
+	t.Run("claiming it without using it is refused", func(t *testing.T) {
+		m := base()
+		m.Provides = "dns"
+		if err := m.Validate(); err == nil {
+			t.Fatal("an application claimed to be the resolver while publishing nothing on 53")
+		}
+	})
+
+	t.Run("an extra port on a loopback application is not published", func(t *testing.T) {
+		m := base()
+		m.Network.ReachableFrom = ""
+		m.Network.ExtraPorts = []ManifestPort{
+			{InternalPort: 53, Protocol: "udp", Purpose: "the resolver itself"},
+		}
+		// Not an error — it is simply not published, and publishedPorts is what
+		// every check reads. An unpublished port cannot collide or be reserved.
+		if got := m.publishedPorts(); len(got) != 0 {
+			t.Errorf("a loopback application published %v", got)
+		}
+	})
+
+	t.Run("the same port on both protocols is two bindings, not a duplicate", func(t *testing.T) {
+		m := base()
+		m.Provides = "dns"
+		m.Network.ExtraPorts = []ManifestPort{
+			{InternalPort: 53, Protocol: "udp", Purpose: "the resolver itself"},
+			{InternalPort: 53, Protocol: "tcp", Purpose: "answers too large for a datagram"},
+		}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("53/udp and 53/tcp were read as the same port: %v", err)
+		}
+	})
+
+	t.Run("but the same port and protocol twice is", func(t *testing.T) {
+		m := base()
+		m.Provides = "dns"
+		m.Network.ExtraPorts = []ManifestPort{
+			{InternalPort: 53, Protocol: "udp", Purpose: "the resolver itself"},
+			{InternalPort: 53, Protocol: "udp", Purpose: "the resolver, again"},
+		}
+		if err := m.Validate(); err == nil {
+			t.Fatal("the same binding was accepted twice")
+		}
+	})
+}
+
+// A manifest may not name a capability that is not on the list, and hostd must
+// be the one refusing it — the schema is checked in CI, and CI is not what runs
+// on somebody's server.
+func TestCapabilitiesAreCheckedByHostdAndNotOnlyBySchema(t *testing.T) {
+	m := Manifest{
+		ManifestVersion: 1,
+		ID:              "example",
+		Name:            "Example",
+		Container:       ManifestContainer{Image: "example/app", Version: "1.0.0"},
+		Health:          ManifestHealth{Type: "none"},
+		Storage:         []ManifestStorage{{ID: "config", Type: "private", MountPath: "/config"}},
+	}
+
+	m.Permissions.Capabilities = []string{"NET_BIND_SERVICE"}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("the one capability an application is expected to need was refused: %v", err)
+	}
+
+	for _, capability := range []string{"ALL", "SYS_PTRACE", "SYS_MODULE", "", "cap_sys_admin"} {
+		m.Permissions.Capabilities = []string{capability}
+		if err := m.Validate(); err == nil {
+			t.Errorf("a manifest was granted %q", capability)
+		}
+	}
+}

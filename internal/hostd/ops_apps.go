@@ -1000,6 +1000,23 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 			}
 		}
 		config.HostConfig.PortBindings = map[string][]portBinding{port: {binding}}
+
+		// The rest, for an application that answers on more than one — a DNS
+		// server on 53 with a web interface somewhere else.
+		//
+		// Only when the application is published at all. An extra port on a
+		// loopback application would be a second random port nothing reports,
+		// which is the fault ReachableFrom was added to fix.
+		if manifest.Network.PublishedToNetwork() {
+			for _, extra := range manifest.Network.ExtraPorts {
+				key := fmt.Sprintf("%d/%s", extra.InternalPort, extra.Transport())
+				config.ExposedPorts[key] = struct{}{}
+				config.HostConfig.PortBindings[key] = []portBinding{{
+					HostIP:   "0.0.0.0",
+					HostPort: strconv.Itoa(extra.Published()),
+				}}
+			}
+		}
 	}
 	if manifest.Network.HostNetwork {
 		config.HostConfig.NetworkMode = "host"

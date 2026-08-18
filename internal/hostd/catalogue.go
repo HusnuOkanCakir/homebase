@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -67,6 +69,22 @@ type Manifest struct {
 	// What the application connects to is the service's name, which is its
 	// address on that network.
 	Services []ManifestService `json:"services,omitempty"`
+
+	// Provides is a service of the machine's own that this application takes
+	// over — at present only "dns".
+	//
+	// It exists to unlock exactly one thing: a port on the reserved list. Those
+	// ports are reserved because the machine itself uses them, and an
+	// application that quietly took one would break the machine in a way nobody
+	// would connect to having installed something. But name resolution is a
+	// thing an application can legitimately *become*, and refusing to let it
+	// would mean no ad blocker could ever exist here.
+	//
+	// So the reservation stays and the exception is declared, per application,
+	// in a root-owned file reviewed in a diff — the same shape as every other
+	// relaxation in this schema. It unlocks one port and no others, and only
+	// one application in the catalogue may claim it.
+	Provides string `json:"provides,omitempty"`
 
 	Capabilities    []ManifestCapability `json:"capabilities,omitempty"`
 	Events          []ManifestEvent      `json:"events,omitempty"`
@@ -178,7 +196,97 @@ type ManifestNetwork struct {
 	// every one of them.
 	Reaches []string `json:"reaches,omitempty"`
 
+	// ExtraPorts are further ports this application answers on.
+	//
+	// Most applications have one, which is why for a long time there was only
+	// one. A DNS server has two and they are not alike: the resolver on 53,
+	// which every device in the house talks to, and a web interface which one
+	// person opens occasionally. Serving both from one port is not something a
+	// manifest can arrange.
+	//
+	// Held to the same rules as the main one — reserved ports, collisions
+	// across the catalogue, and the requirement that publishing to the network
+	// is a decision made per application rather than per port.
+	ExtraPorts []ManifestPort `json:"extra_ports,omitempty"`
+
 	Discovery []string `json:"discovery,omitempty"`
+}
+
+// ManifestPort is one more port an application answers on.
+type ManifestPort struct {
+	InternalPort int `json:"internal_port"`
+
+	// HostPort defaults to InternalPort, as it does for the main one.
+	HostPort int `json:"host_port,omitempty"`
+
+	// Protocol is "tcp" or "udp"; empty means tcp. DNS needs both, which is two
+	// entries rather than a field meaning "and also".
+	Protocol string `json:"protocol,omitempty"`
+
+	// Purpose is what this port is for, in words. Not used by anything that
+	// runs — it is there so that a second port in a diff has to be explained.
+	Purpose string `json:"purpose,omitempty"`
+}
+
+// Published is the port on the server this answers on.
+func (p ManifestPort) Published() int {
+	if p.HostPort > 0 {
+		return p.HostPort
+	}
+	return p.InternalPort
+}
+
+// Transport is the protocol, defaulting to tcp.
+func (p ManifestPort) Transport() string {
+	if p.Protocol == "udp" {
+		return "udp"
+	}
+	return "tcp"
+}
+
+// boundPort is one address an application answers on: a port and a protocol.
+//
+// Both, because they are genuinely one thing. A name server needs 53/udp and
+// 53/tcp — the same number twice, two different bindings, and neither optional.
+// Treating a port as just a number made the first version of this refuse the
+// only manifest it was written for, which the shipped-catalogue test caught
+// before anything else did.
+type boundPort struct {
+	Port     int
+	Protocol string
+}
+
+func (b boundPort) String() string { return strconv.Itoa(b.Port) + "/" + b.Protocol }
+
+// publishedPorts is everything an application takes on the server, main and
+// extra, so that the checks which must apply to all of them are written once.
+func (m Manifest) publishedPorts() []boundPort {
+	if !m.Network.PublishedToNetwork() {
+		return nil
+	}
+	// The main port is always tcp: it is http or https or it is not published,
+	// which the validation above settles.
+	ports := []boundPort{}
+	if m.Network.PublishedPort() > 0 {
+		ports = append(ports, boundPort{m.Network.PublishedPort(), "tcp"})
+	}
+	for _, extra := range m.Network.ExtraPorts {
+		ports = append(ports, boundPort{extra.Published(), extra.Transport()})
+	}
+	return ports
+}
+
+// mayTakeReservedPort reports whether this application declared itself the
+// thing that port is reserved for.
+//
+// One port per service, named here rather than left to the manifest to assert.
+// "provides" is a claim about what the application is; which port that entitles
+// it to is a fact about the machine.
+func (m Manifest) mayTakeReservedPort(port boundPort) bool {
+	// Both protocols. A resolver that answered only over UDP would work until
+	// the first answer too large for a datagram, and then fail on exactly the
+	// lookups that matter most.
+	return m.Provides == "dns" && port.Port == 53
 }
 
 // PublishedPort is the port on the server an application answers on.
@@ -265,6 +373,27 @@ func (p ManifestPermissions) Elevated() bool {
 // ManifestElevation is why an image needs to begin as root.
 type ManifestElevation struct {
 	Reason string `json:"reason"`
+}
+
+// grantableCapabilities are the Linux capabilities a manifest may ask for.
+//
+// The schema has the same list, and this is not redundant: the schema is a
+// contract checked in CI, and hostd is the thing that actually builds the
+// container on somebody's machine. Until this existed a manifest could name any
+// capability at all — SYS_ADMIN, or a string the kernel reads as everything —
+// and hostd passed it to Docker without looking. Manifests are root-owned and
+// reviewed, which is a reason to expect the list to be short, not a reason for
+// the enforcer to take it on trust.
+var grantableCapabilities = map[string]string{
+	// The mildest of them: permission to bind a port below 1024, and nothing
+	// else. It is what lets a name server have port 53 without being given a
+	// root elevation, which is what the alternative would have been.
+	"NET_BIND_SERVICE": "bind a port below 1024",
+	"NET_ADMIN":        "configure networking",
+	"NET_RAW":          "use raw sockets",
+	"SYS_ADMIN":        "a very large amount; avoid",
+	"SYS_NICE":         "change scheduling priority",
+	"DAC_READ_SEARCH":  "bypass file read permission checks",
 }
 
 // rootCapabilities are what an image that starts as root is given, and nothing
@@ -357,8 +486,9 @@ func (c *Catalogue) Load() error {
 
 	manifests := make(map[string]Manifest)
 	rejected := make(map[string]string)
+	provided := make(map[string]string)
 	// Published ports, so that two applications cannot claim the same one.
-	ports := make(map[int]string)
+	ports := make(map[boundPort]string)
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
@@ -399,14 +529,23 @@ func (c *Catalogue) Load() error {
 		//
 		// The reserved-port list is the same idea for the ports the machine
 		// itself uses; this is for the ports the catalogue hands out.
-		if manifest.Network.PublishedToNetwork() {
-			if taken, clash := ports[manifest.Network.PublishedPort()]; clash {
+		if clash := firstClash(manifest, ports); clash != "" {
+			rejected[entry.Name()] = clash
+			continue
+		}
+		// Only one application may be the machine's resolver. Two would both
+		// try for port 53; the first to start would win and the second would
+		// fail in a way that reads as the image being broken.
+		if manifest.Provides != "" {
+			if taken := provided[manifest.Provides]; taken != "" {
 				rejected[entry.Name()] = fmt.Sprintf(
-					"port %d is already published by %s",
-					manifest.Network.PublishedPort(), taken)
+					"%s already provides %s", taken, manifest.Provides)
 				continue
 			}
-			ports[manifest.Network.PublishedPort()] = manifest.Name
+			provided[manifest.Provides] = manifest.Name
+		}
+		for _, port := range manifest.publishedPorts() {
+			ports[port] = manifest.Name
 		}
 
 		manifests[manifest.ID] = manifest
@@ -418,6 +557,23 @@ func (c *Catalogue) Load() error {
 	c.mu.Unlock()
 
 	return nil
+}
+
+// firstClash reports the first port this manifest wants that another already
+// has, or empty if none.
+//
+// Recorded rather than refused at validation, because a collision is not a
+// property of either manifest — both are correct and the clash exists only once
+// they are in the same catalogue. Without this the second one fails at
+// container creation with a message from Docker about an address already in
+// use, on a machine where the *first* application is the one that stops working.
+func firstClash(manifest Manifest, taken map[boundPort]string) string {
+	for _, port := range manifest.publishedPorts() {
+		if other, clash := taken[port]; clash {
+			return fmt.Sprintf("port %s is already published by %s", port, other)
+		}
+	}
+	return ""
 }
 
 // loadManifest reads and validates one manifest file.
@@ -567,10 +723,49 @@ func (m Manifest) Validate() error {
 		// dashboard is served on — which would put an application where people
 		// expect Homebase and lock everybody out of the thing that could undo
 		// it.
-		if reserved := reservedHostPorts[m.Network.PublishedPort()]; reserved != "" {
-			return fmt.Errorf("network.host_port %d is %s; choose another",
-				m.Network.PublishedPort(), reserved)
+		//
+		// Checked over every port, main and extra. A second port that skipped
+		// this would be a way to take 443 by writing it one line further down.
+		seen := map[boundPort]bool{}
+		for _, port := range m.publishedPorts() {
+			if port.Port < 1 || port.Port > 65535 {
+				return fmt.Errorf("port %d is not a port", port.Port)
+			}
+			if seen[port] {
+				return fmt.Errorf("port %s is published twice by this application", port)
+			}
+			seen[port] = true
+
+			if reserved := reservedHostPorts[port.Port]; reserved != "" && !m.mayTakeReservedPort(port) {
+				return fmt.Errorf("network.host_port %d is %s; choose another",
+					port.Port, reserved)
+			}
 		}
+	}
+
+	// Capabilities are checked against a list here as well as in the schema.
+	// hostd is what hands them to Docker, so hostd is where refusing one has to
+	// happen — a manifest that reached this machine unreviewed is exactly the
+	// case the schema cannot help with.
+	for _, capability := range m.Permissions.Capabilities {
+		if _, grantable := grantableCapabilities[capability]; !grantable {
+			return fmt.Errorf("capability %q is not one an application may ask for",
+				capability)
+		}
+	}
+
+	// "provides" is only meaningful alongside a port it unlocks, and it unlocks
+	// exactly one. A manifest claiming to be the machine's resolver while
+	// publishing nothing on 53 has claimed an exception it is not using, which
+	// is the state a later edit turns into one it is.
+	switch m.Provides {
+	case "":
+	case "dns":
+		if !slices.Contains(m.publishedPorts(), boundPort{53, "udp"}) {
+			return fmt.Errorf(`provides is "dns" but nothing is published on port 53`)
+		}
+	default:
+		return fmt.Errorf("unknown provides %q", m.Provides)
 	}
 
 	// Supporting containers are checked as hard as the application's own, and

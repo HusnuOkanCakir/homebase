@@ -383,13 +383,17 @@ def build_hostd(version: str, binaries: Path) -> Path:
     install_file(REPO_ROOT / "packaging/firewall",
                  root / "usr/libexec/homebase/firewall", 0o755)
 
+    install_file(REPO_ROOT / "packaging/dns-resolver",
+                 root / "usr/libexec/homebase/dns-resolver", 0o755)
+
     for unit in ("homebase-hostd.service", "homebase-hostd.socket",
                  "homebase-update-check.service", "homebase-update-apply.service",
                  "homebase-update-check.timer", "homebase-repair.service",
                  "homebase-ddns.service", "homebase-ddns.timer",
                  "homebase-install-samba.service",
                  "homebase-share-account.service",
-                 "homebase-firewall.service"):
+                 "homebase-firewall.service",
+                 "homebase-dns-resolver.service"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,

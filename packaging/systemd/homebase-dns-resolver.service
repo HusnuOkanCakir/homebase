@@ -1,0 +1,25 @@
+[Unit]
+Description=Homebase — point this machine's resolver at an encrypted upstream
+ConditionPathExists=/etc/homebase/dns-resolver
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+
+# A fixed command with no arguments. Which resolvers this machine trusts is
+# written in the script the package installs, not in anything a caller sends —
+# the request file says only whether to switch it on or off.
+#
+# hostd does not do this itself because it writes /etc/systemd and restarts a
+# system service, and homebase-hostd.service's ProtectSystem=strict allows
+# neither. A root service that can rewrite name resolution can point every
+# lookup on the machine at a server of somebody else's choosing.
+ExecStart=/usr/libexec/homebase/dns-resolver
+
+User=root
+# Longer than the firewall's: it restarts systemd-resolved twice in the failing
+# case, and waits to see whether a name resolves in between.
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

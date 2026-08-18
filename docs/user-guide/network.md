@@ -131,3 +131,56 @@ afterwards to fix it.
 public internet. When it arrives it will be private and something you switch on deliberately.
 
 Both are tracked in the [roadmap](https://github.com/HusnuOkanCakir/homebase/blob/main/ROADMAP.md).
+
+## Ad blocking, and your provider's answers
+
+Homebase can run [AdGuard Home](https://adguard.com/adguard-home.html), which does two
+separate things. The second matters more than the first.
+
+**It blocks adverts and trackers** for any device you point at it — including televisions
+and phones, where you cannot install anything.
+
+**It stops your provider reading and rewriting your lookups.** Every name your server
+looks up used to go to your router in plain text, and on some connections the answer that
+comes back is not true. On the connection Homebase was developed against,
+`thepiratebay.org` resolved to `85.111.6.83` — a block page — while the real answer is
+`162.159.136.6`. Applications are told the site is down, and report it that way.
+
+### What Homebase changes to make room for it
+
+Ubuntu's `systemd-resolved` listens on port 53, which is the port a name server needs.
+Homebase moves it aside and points the machine's own resolver straight at an encrypted
+upstream:
+
+```
+/etc/systemd/resolved.conf.d/homebase-encrypted.conf
+    DNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net
+    DNSOverTLS=yes
+    DNSStubListener=no
+```
+
+The server talks to the internet over TLS and never depends on anything Homebase installs —
+otherwise it could not resolve the name of the image it needs in order to start the thing
+that resolves names. Containers inherit this, so applications stop being lied to whether or
+not you ever install a blocker.
+
+Delete that file and restart `systemd-resolved` to undo it.
+
+### Pointing devices at it
+
+**Nothing is blocked until you do this.** Installing AdGuard changes nothing by itself.
+
+Start with one machine: set its DNS server to your server's address by hand, and live with
+it for a day. Only then consider changing your router, and understand the trade before you
+do — a router that hands out your server as everyone's DNS means that when the server is
+off, **the whole house has no internet**. The connection is fine; nothing can look up a
+name. The undo is thirty seconds at the router, but only if you know that is what is wrong.
+
+Give the server a fixed address in your router first, or the day it changes is the day the
+house goes quiet.
+
+### It must never be reachable from outside
+
+A name server open to the internet is used to amplify attacks on other people, and it will
+be found within days. Do not forward port 53. Under AdGuard's Settings, DNS settings,
+**Access settings**, allow only your own network.

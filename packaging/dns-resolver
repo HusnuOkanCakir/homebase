@@ -1,0 +1,141 @@
+#!/bin/sh
+#
+# Point this machine's own resolver at an encrypted upstream, and get the stub
+# listener off port 53.
+#
+# Two jobs that turn out to be one edit, and both are worth having on their own.
+#
+# **The stub listener.** systemd-resolved binds 127.0.0.53:53 on every Ubuntu.
+# Nothing else can then bind 0.0.0.0:53, so a DNS server in a container cannot
+# be published — which is the whole of what a name-blocking application is. This
+# was measured rather than assumed: binding 0.0.0.0:53/tcp fails with "address
+# already in use" while 192.168.x.x:53 succeeds.
+#
+# **The upstream.** Left alone, this machine asks the router, the router asks
+# the ISP, and on the connection this was written for the ISP answers with a
+# block page: thepiratebay.org resolves to 85.111.6.83 over the router and to
+# 162.159.136.6 over 1.1.1.1. That is not an abstract privacy point. Every
+# container inherits the host's resolver, so an application looking up an
+# address is told a lie by a machine it has no reason to distrust, and reports
+# it as the site being down.
+#
+# Fixing the second is what makes the first safe. With the stub gone, something
+# has to answer for the host, and it must not be the container we are freeing
+# the port for: a server that cannot resolve a name until its DNS container is
+# running cannot pull the image for its DNS container.
+#
+# So the host talks to the internet directly, over TLS, and never depends on
+# anything Homebase installs. The blocking application, when there is one, is
+# for the rest of the house.
+#
+# Not done by hostd: this writes /etc and restarts a system service, neither of
+# which is in homebase-hostd.service's ProtectSystem=strict allowance. A root
+# service that can rewrite name resolution is one that can point the machine at
+# a resolver of somebody else's choosing.
+
+set -eu
+
+REQUEST=/etc/homebase/dns-resolver
+DROPIN_DIR=/etc/systemd/resolved.conf.d
+DROPIN="$DROPIN_DIR/homebase-encrypted.conf"
+
+# The upstreams are here, in a file the package installs, rather than in the
+# request. Which resolver this machine trusts is the security decision in the
+# whole file, and it is not one a caller gets to make.
+#
+# Two operators, both validating, both reachable over TLS on 853 — checked on
+# the connection this was written for, because an ISP that rewrites answers is
+# an ISP that might also block the port that stops it. Cloudflare first for
+# speed, Quad9 second because it refuses known-malicious names, which is a small
+# free improvement over doing nothing.
+UPSTREAMS='1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net'
+
+# A name that has to keep resolving. Short, stable, and not one anybody blocks.
+CANARY=example.com
+
+[ -r "$REQUEST" ] || { echo "dns-resolver: no request" >&2; exit 1; }
+action=$(sed -n 's/^action=//p' "$REQUEST" | head -1)
+
+restart_resolved() {
+    systemctl restart systemd-resolved
+    # It answers before it is finished setting up its sockets; a check that runs
+    # too early reports a failure that fixes itself a moment later.
+    sleep 2
+}
+
+resolves() {
+    # Asked of the stack the rest of the machine will use, not of a server
+    # directly — the question is whether *this host* can resolve a name, and a
+    # working upstream reached through a broken configuration is still broken.
+    getent hosts "$CANARY" >/dev/null 2>&1
+}
+
+case "$action" in
+encrypt)
+    mkdir -p "$DROPIN_DIR"
+
+    # Kept, so that restoring puts back what was actually there rather than what
+    # Ubuntu ships. Somebody may have pointed /etc/resolv.conf somewhere of
+    # their own, and this is not the place to overrule that permanently.
+    previous_resolv=$(readlink /etc/resolv.conf || echo "")
+
+    cat > "$DROPIN" <<EOF
+# Written by Homebase. Remove this file and restart systemd-resolved to undo it,
+# or run: homebasectl dns plain
+[Resolve]
+DNS=$UPSTREAMS
+# Strict, not opportunistic. Opportunistic falls back to cleartext when the
+# encrypted connection fails, which an ISP that rewrites answers can arrange —
+# so the setting meant to defend against them would be switched off by them.
+DNSOverTLS=yes
+# The reason the rest of this exists: with the stub gone, 53 is free.
+DNSStubListener=no
+EOF
+    chmod 0644 "$DROPIN"
+
+    # With no stub listener, the old symlink points at a file naming a resolver
+    # that is no longer listening. resolved writes the real one beside it.
+    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+
+    restart_resolved
+
+    # Verified, then rolled back if it did not work.
+    #
+    # This is the part that matters. Every other failure in Homebase leaves a
+    # feature not working; this one can leave a machine that cannot resolve a
+    # name — including the name of wherever its updates come from, and including
+    # for whoever is trying to log in and fix it.
+    if ! resolves; then
+        echo "dns-resolver: $CANARY did not resolve afterwards; putting it back" >&2
+        rm -f "$DROPIN"
+        if [ -n "$previous_resolv" ]; then
+            ln -sf "$previous_resolv" /etc/resolv.conf
+        fi
+        restart_resolved
+        exit 1
+    fi
+
+    echo "dns-resolver: encrypted, and port 53 is free" >&2
+    ;;
+
+restore)
+    rm -f "$DROPIN"
+    ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    restart_resolved
+
+    # Reported, not enforced. Undoing this must succeed even on a machine whose
+    # DNS is broken for some other reason — refusing to put the default back
+    # because the default is also not working would be the worst moment to be
+    # strict.
+    if ! resolves; then
+        echo "dns-resolver: restored, but $CANARY still does not resolve" >&2
+    else
+        echo "dns-resolver: back to the network's own resolver" >&2
+    fi
+    ;;
+
+*)
+    echo "dns-resolver: unknown action '$action'" >&2
+    exit 1
+    ;;
+esac

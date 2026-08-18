@@ -161,6 +161,46 @@
             ]
           },
           "uniqueItems": true
+        },
+        "extra_ports": {
+          "description": "Further ports this application answers on, beyond `internal_port`.\n\nMost applications have one. A DNS server has two and they are not alike: the resolver every device in the house talks to, and a web interface one person opens occasionally. Serving both from one port is not something a manifest can arrange.\n\nHeld to the same rules as the main port — reserved ports, collisions across the catalogue, and the rule that reaching the network is decided per application rather than per port. An application on loopback may not declare them.",
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "internal_port",
+              "purpose"
+            ],
+            "properties": {
+              "internal_port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "host_port": {
+                "description": "The port on the server. Defaults to internal_port.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "protocol": {
+                "description": "tcp unless stated. DNS needs both, which is two entries rather than a field meaning “and also”.",
+                "type": "string",
+                "enum": [
+                  "tcp",
+                  "udp"
+                ]
+              },
+              "purpose": {
+                "description": "What this port is for, in words. Nothing reads it at runtime — it is required so that a second port appearing in a diff has to be explained.",
+                "type": "string",
+                "minLength": 10,
+                "maxLength": 200
+              }
+            }
+          }
         }
       }
     },
@@ -309,10 +349,11 @@
           "uniqueItems": true
         },
         "capabilities": {
-          "description": "Linux capabilities to add. All are dropped by default. Adding one is a security review.",
+          "description": "Linux capabilities to add. All are dropped by default. Adding one is a security review.\n\nNET_BIND_SERVICE is the mildest and is what a name server needs: it permits binding a port below 1024 and nothing else. It exists here so that an application needing port 53 can have it without being given a root elevation, which is what the alternative would have been.",
           "type": "array",
           "items": {
             "enum": [
+              "NET_BIND_SERVICE",
               "NET_ADMIN",
               "NET_RAW",
               "SYS_ADMIN",
@@ -609,6 +650,13 @@
           }
         }
       }
+    },
+    "provides": {
+      "description": "A service of the machine's own that this application takes over. It unlocks exactly one thing: a port on the reserved list.\n\nThose ports are reserved because the machine itself uses them, and an application that quietly took one would break the machine in a way nobody would connect to having installed something. But name resolution is a thing an application can legitimately *become*, and refusing that outright would mean no name-blocking application could exist here.\n\nSo the reservation stays and the exception is declared, in a root-owned file reviewed in a diff. \"dns\" unlocks port 53 and no other port, only one application in the catalogue may claim it, and claiming it without publishing on 53 is an error.",
+      "type": "string",
+      "enum": [
+        "dns"
+      ]
     }
   }
 }
