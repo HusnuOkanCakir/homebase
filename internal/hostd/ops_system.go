@@ -67,6 +67,24 @@ func RegisterSystemOperations(r *Registry) {
 		Rollback:    "", // Cannot be undone. Stated, not implied.
 		Handler:     Typed(systemReboot),
 	})
+
+	r.MustRegister(Operation{
+		Name:    "system.shutdown",
+		Summary: "Switch the machine off.",
+		// The same grade as a restart, for the same reason: it interrupts
+		// whatever was being written. Not higher for coming back slower — that
+		// is a question of how somebody switches it on again, which the result
+		// answers, rather than of what is lost.
+		Risk:        RiskHigh,
+		Permissions: []string{"system.manage"},
+		Confirm:     ConfirmExplicit,
+		Timeout:     30 * time.Second,
+		// Deliberately not "system.start". Nothing running on a machine that is
+		// off can be asked to switch it on, which is the honest answer and the
+		// whole reason wake-on-LAN is worth having.
+		Rollback: "",
+		Handler:  Typed(systemShutdown),
+	})
 }
 
 // --- system.get_info ---------------------------------------------------------
@@ -183,11 +201,22 @@ func systemGetResources(ctx context.Context, _ NoParams) (any, error) {
 	}, nil
 }
 
-// --- system.reboot -----------------------------------------------------------
+// --- system.reboot and system.shutdown ---------------------------------------
 
-type RebootParams struct {
-	// Reason is recorded in the audit log. Not required, but a reboot with no
-	// stated reason is one nobody can explain afterwards.
+// Restarting and switching off are one operation with one word changed, so they
+// are one function with one word changed. Everything that makes them dangerous —
+// naming the target, refusing to run anywhere but a real server, letting systemd
+// stop units in order — is identical between them, and two copies of that is two
+// places for a guard to go missing from.
+//
+// What genuinely differs is one sentence about afterwards: a machine that
+// restarts comes back on its own, and one that is switched off waits to be
+// woken. Only the words know the difference.
+
+// PowerParams names the machine being restarted or switched off.
+type PowerParams struct {
+	// Reason is recorded in the audit log. Not required, but a machine that
+	// went away for no stated reason is one nobody can explain afterwards.
 	Reason string `json:"reason,omitempty"`
 
 	// Confirm must equal the machine's hostname.
@@ -200,12 +229,81 @@ type RebootParams struct {
 	Confirm string `json:"confirm"`
 }
 
-type RebootResult struct {
+// The two names the rest of the code uses. Aliases rather than copies: a
+// confirmation that means one thing for a restart and another for a shutdown is
+// exactly the bug the field exists to prevent.
+type (
+	RebootParams   = PowerParams
+	ShutdownParams = PowerParams
+)
+
+type PowerResult struct {
 	Scheduled bool   `json:"scheduled"`
 	Message   string `json:"message"`
 }
 
+type (
+	RebootResult   = PowerResult
+	ShutdownResult = PowerResult
+)
+
+// The two, side by side, so that the one field which is not a sentence — the
+// systemd verb — can be seen to differ, and asserted to.
+var (
+	rebootAction = powerAction{
+		verb:       "reboot",
+		participle: "restarted",
+		code:       "system.reboot_failed",
+		failure:    "The server could not be restarted.",
+		recovery:   "Try again. If it keeps failing, restart the machine by hand.",
+		succeeded:  "The server is restarting. It will be back in a minute or two.",
+		refusal: "hostd is not running as root, so this is a development " +
+			"instance rather than a real server. Refusing, because the " +
+			"machine it would restart is the one you are working on.",
+	}
+
+	shutdownAction = powerAction{
+		verb:       "poweroff",
+		participle: "switched off",
+		code:       "system.shutdown_failed",
+		failure:    "The server could not be switched off.",
+		recovery: "Try again. If it keeps failing, hold its power button down " +
+			"until it goes quiet.",
+		// What happens next, said now — because after this there is no screen
+		// left to say it on.
+		succeeded: "The server is switching off. It will not come back on its " +
+			"own: press its power button, or wake it over the network.",
+		refusal: "hostd is not running as root, so this is a development " +
+			"instance rather than a real server. Refusing, because the " +
+			"machine it would switch off is the one you are working on.",
+	}
+)
+
 func systemReboot(ctx context.Context, params RebootParams) (any, error) {
+	return power(ctx, params, rebootAction)
+}
+
+func systemShutdown(ctx context.Context, params ShutdownParams) (any, error) {
+	return power(ctx, params, shutdownAction)
+}
+
+// powerAction is the handful of words that differ between the two.
+//
+// verb is the only field that acts. Every other one is something said to a
+// person, which is the proportion this operation actually has: the dangerous
+// part is one word long and the part that decides whether somebody understands
+// what just happened is all the rest.
+type powerAction struct {
+	verb       string // the systemd verb
+	participle string // "restarted" or "switched off"
+	code       string
+	failure    string
+	recovery   string
+	succeeded  string
+	refusal    string
+}
+
+func power(ctx context.Context, params PowerParams, action powerAction) (any, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		return nil, internalError("hostname: " + err.Error())
@@ -213,11 +311,12 @@ func systemReboot(ctx context.Context, params RebootParams) (any, error) {
 
 	if params.Confirm != hostname {
 		return nil, &Error{
-			Code:        "system.confirmation_mismatch",
-			Message:     "The confirmation did not match this server's name.",
-			Detail:      "confirm must equal the hostname of the machine being restarted",
+			Code:    "system.confirmation_mismatch",
+			Message: "The confirmation did not match this server's name.",
+			Detail: "confirm must equal the hostname of the machine being " +
+				action.participle,
 			Recoverable: true,
-			Recovery:    "Confirm the restart again, naming this server.",
+			Recovery:    "Confirm again, naming this server.",
 			Status:      428,
 		}
 	}
@@ -233,11 +332,9 @@ func systemReboot(ctx context.Context, params RebootParams) (any, error) {
 	// warning.
 	if os.Geteuid() != 0 {
 		return nil, &Error{
-			Code:    "system.not_privileged",
-			Message: "This server cannot be restarted from here.",
-			Detail: "hostd is not running as root, so this is a development " +
-				"instance rather than a real server. Refusing, because the " +
-				"machine it would restart is the one you are working on.",
+			Code:        "system.not_privileged",
+			Message:     "This server cannot be switched off or restarted from here.",
+			Detail:      action.refusal,
 			Recoverable: false,
 			Status:      501,
 		}
@@ -249,8 +346,9 @@ func systemReboot(ctx context.Context, params RebootParams) (any, error) {
 	// that was in flight.
 	//
 	// This is a fixed argument vector with no caller-supplied content, which is
-	// what keeps it inside ADR-0006. Nothing from params reaches it.
-	cmd := exec.CommandContext(ctx, "/usr/bin/systemctl", "reboot")
+	// what keeps it inside ADR-0006. Nothing from params reaches it — the verb
+	// comes from the two literals above and from nowhere else.
+	cmd := exec.CommandContext(ctx, "/usr/bin/systemctl", action.verb)
 
 	// Strip the variables systemd used to talk to *us*. A child that inherits
 	// NOTIFY_SOCKET can send readiness messages systemd attributes to this
@@ -261,19 +359,16 @@ func systemReboot(ctx context.Context, params RebootParams) (any, error) {
 
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, &Error{
-			Code:        "system.reboot_failed",
-			Message:     "The server could not be restarted.",
+			Code:        action.code,
+			Message:     action.failure,
 			Detail:      strings.TrimSpace(string(out)) + " (" + err.Error() + ")",
 			Recoverable: true,
-			Recovery:    "Try again. If it keeps failing, restart the machine by hand.",
+			Recovery:    action.recovery,
 			Status:      500,
 		}
 	}
 
-	return RebootResult{
-		Scheduled: true,
-		Message:   "The server is restarting. It will be back in a minute or two.",
-	}, nil
+	return PowerResult{Scheduled: true, Message: action.succeeded}, nil
 }
 
 // withoutSystemdVariables removes the service-manager handshake variables from

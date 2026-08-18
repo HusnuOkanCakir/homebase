@@ -122,6 +122,7 @@ nav:
       - First steps: user-guide/first-steps.md
       - Applications: user-guide/applications.md
       - Storage: user-guide/storage.md
+      - Sharing files: user-guide/sharing.md
       - Backup and restore: user-guide/backup.md
       - Finding your server: user-guide/network.md
       - Using Wi-Fi: user-guide/wifi.md

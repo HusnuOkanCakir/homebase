@@ -257,14 +257,6 @@ func (c *Client) SystemResources(ctx context.Context) (*SystemResources, error) 
 	return &res, nil
 }
 
-// Reboot restarts the machine.
-//
-// confirm must be the hostname: hostd requires the target to be named so a
-// confirmation cannot be replayed against a different server.
-//
-// A successful return means the reboot was *accepted*, not that it finished.
-// Nothing can observe it finishing — the connection dies with the machine. See
-// the job system for how that is resolved afterwards.
 // Rename changes what the machine calls itself.
 func (c *Client) Rename(ctx context.Context, name string) (RenameResult, error) {
 	params := struct {
@@ -285,13 +277,35 @@ type RenameResult struct {
 	Message  string `json:"message"`
 }
 
+// Reboot restarts the machine.
+//
+// confirm must be the hostname: hostd requires the target to be named so a
+// confirmation cannot be replayed against a different server.
+//
+// A successful return means the reboot was *accepted*, not that it finished.
+// Nothing can observe it finishing — the connection dies with the machine. See
+// the job system for how that is resolved afterwards.
+
 func (c *Client) Reboot(ctx context.Context, confirm, reason string) error {
+	return c.power(ctx, "system.reboot", confirm, reason)
+}
+
+// Shutdown switches the machine off.
+//
+// The same contract as Reboot in every respect except one that no code here can
+// see: nothing brings the machine back. Whatever calls this is the last thing
+// that will be able to say so, so it had better have said it already.
+func (c *Client) Shutdown(ctx context.Context, confirm, reason string) error {
+	return c.power(ctx, "system.shutdown", confirm, reason)
+}
+
+func (c *Client) power(ctx context.Context, operation, confirm, reason string) error {
 	params := struct {
 		Confirm string `json:"confirm"`
 		Reason  string `json:"reason,omitempty"`
 	}{Confirm: confirm, Reason: reason}
 
-	err := c.Call(ctx, "system.reboot", params, true, nil)
+	err := c.Call(ctx, operation, params, true, nil)
 	// The machine may go down before the response arrives, which is success
 	// rather than failure. Distinguishing the two is impossible from here, so
 	// the job system settles it on the next boot instead of guessing now.

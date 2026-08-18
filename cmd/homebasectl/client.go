@@ -263,14 +263,26 @@ func (c *Client) do(ctx context.Context, method, path string, body, into any) er
 	return json.Unmarshal(raw, into)
 }
 
+// errUnreachable marks a request that never got an answer.
+//
+// Worth telling apart from every other failure because for one operation it is
+// success rather than failure: a machine asked to switch itself off, which then
+// stops answering, did what it was told. Reporting that as an error would have
+// somebody trying again on a server that is already off.
+var errUnreachable = errors.New("Homebase is not answering on this machine")
+
+// connectionLost reports whether a request died on the wire rather than being
+// refused by the server.
+func connectionLost(err error) bool { return errors.Is(err, errUnreachable) }
+
 // notRunning turns a connection failure into something that says what to do.
 //
 // "connection refused" is accurate and useless. The machine this runs on is the
 // machine the server is on, so a refused connection means one specific thing.
 func notRunning(err error) error {
-	return fmt.Errorf("Homebase is not answering on this machine.\n    %v\n\n"+
+	return fmt.Errorf("%w.\n    %v\n\n"+
 		"Check it is running:  systemctl status homebase-core\n"+
-		"Then try:             sudo homebasectl repair", err)
+		"Then try:             sudo homebasectl repair", errUnreachable, err)
 }
 
 func decodeError(status int, raw []byte) error {

@@ -59,6 +59,26 @@ everything on it.
 
 See [Backup and restore](backup.md).
 
+## Switching it off, and restarting it
+
+At the bottom of **This server** there are two buttons, and both make you type the server's
+name first — a click by accident should not be able to take a machine down.
+
+**Restart** takes a minute or two and the server comes back by itself. The page waits and
+tells you when it has.
+
+**Switch off** does not come back. Before you confirm, Homebase says how you would switch it
+on again: pressing the power button on the machine itself, always, and — if waking over the
+network is enabled on this server — a command you can run from any other computer in the
+house.
+
+It is worth reading that line before you press the button rather than after. Once the machine
+is off, every page in Homebase is off with it, including the one that would have told you.
+
+Waking over the network needs three things: it enabled in the machine's BIOS, the network
+card set to listen, and the machine left plugged in. `homebasectl network` reports the middle
+one. A laptop running on its battery has nothing listening once it is off.
+
 ## Updates
 
 There is no update mechanism yet. Homebase does not check for new versions, and will not

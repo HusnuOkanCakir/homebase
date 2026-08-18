@@ -191,17 +191,11 @@ paths:
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              properties:
-                reason:
-                  type: string
-                  maxLength: 500
-                  description: Recorded in the audit log.
+              $ref: "#/components/schemas/PowerRequest"
       responses:
         "202":
           $ref: "#/components/responses/JobAccepted"
@@ -211,6 +205,56 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           description: An exclusive job is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "428":
+          description: |
+            `confirm` did not name this server. Deliberately not a 400: the request was
+            well formed and was refused for naming a different machine.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /system/shutdown:
+    post:
+      tags: [system]
+      summary: Switch the server off
+      description: |
+        Requires `system.manage`. The same contract as `/system/reboot` in every respect
+        the API can express — a job that will not complete in the usual sense, and a
+        confirmation naming this machine.
+
+        What differs is not in the response. Nothing brings the machine back: a client
+        calling this is the last thing that will be able to tell somebody how to switch it
+        on again, and should have said so before it was called rather than after.
+      operationId: shutdownSystem
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PowerRequest"
+      responses:
+        "202":
+          $ref: "#/components/responses/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: An exclusive job is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "428":
+          description: |
+            `confirm` did not name this server.
           content:
             application/json:
               schema:
@@ -2831,6 +2875,26 @@ components:
             $ref: "#/components/schemas/Error"
 
   schemas:
+    PowerRequest:
+      type: object
+      description: |
+        Naming the machine that is about to stop being available.
+
+        `confirm` must equal this server's hostname. A confirmation that is just "yes" is
+        one that can be obtained for one machine and spent on another — which matters more
+        as soon as something other than a person is proposing the operation.
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm:
+          type: string
+          maxLength: 63
+          description: This server's hostname, exactly.
+        reason:
+          type: string
+          maxLength: 500
+          description: Recorded in the audit log.
+
     ShareStatus:
       type: object
       description: |

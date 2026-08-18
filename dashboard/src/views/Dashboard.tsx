@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Job, type SystemInfo, type User } from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
-import { Overview } from "./Overview";
+import { Overview, type PowerChoice } from "./Overview";
 import { Applications } from "./Applications";
 import { Storage } from "./Storage";
 import { Backup } from "./Backup";
@@ -11,7 +11,8 @@ import { Network } from "./Network";
 import { Updates } from "./Updates";
 import { Repair } from "./Repair";
 import { FirstSteps } from "./FirstSteps";
-import { Restarting } from "./Restarting";
+import { Leaving } from "./Leaving";
+import { Shares } from "./Shares";
 
 /**
  * The signed-in shell.
@@ -28,6 +29,7 @@ type Tab =
   | "overview"
   | "applications"
   | "storage"
+  | "files"
   | "backup"
   | "network"
   | "updates"
@@ -43,7 +45,10 @@ export function Dashboard({ user, onSignOut }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [error, setError] = useState<ReturnType<typeof describeError> | null>(null);
-  const [rebooting, setRebooting] = useState<Job | null>(null);
+  // What the machine is doing instead of serving this page. Held here rather
+  // than in Overview because a server that is going away takes every screen with
+  // it, not only the one the button was on.
+  const [leaving, setLeaving] = useState<{ choice: PowerChoice; job: Job } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -66,11 +71,12 @@ export function Dashboard({ user, onSignOut }: Props) {
     return () => clearInterval(timer);
   }, [refresh]);
 
-  if (rebooting) {
+  if (leaving) {
     return (
-      <Restarting
-        job={rebooting}
-        onBack={() => void refresh().then(() => setRebooting(null))}
+      <Leaving
+        choice={leaving.choice}
+        job={leaving.job}
+        onBack={() => void refresh().then(() => setLeaving(null))}
       />
     );
   }
@@ -108,6 +114,16 @@ export function Dashboard({ user, onSignOut }: Props) {
           onClick={() => setTab("storage")}
         >
           Storage
+        </button>
+        {/* Named for the thing rather than the protocol. Nobody in a house
+            looks for "SMB", and the question they arrive with is how to get at
+            their files from the computer they are sitting at. */}
+        <button
+          className={tab === "files" ? "tab tab-current" : "tab"}
+          aria-current={tab === "files" ? "page" : undefined}
+          onClick={() => setTab("files")}
+        >
+          Files
         </button>
         <button
           className={tab === "backup" ? "tab tab-current" : "tab"}
@@ -168,7 +184,10 @@ export function Dashboard({ user, onSignOut }: Props) {
                 how much memory is free.
               */}
               <FirstSteps system={system} onGo={setTab} />
-              <Overview system={system} onRebootStarted={setRebooting} />
+              <Overview
+                system={system}
+                onLeaving={(choice, job) => setLeaving({ choice, job })}
+              />
             </>
           ) : (
             !error && <p className="muted">Reading your server…</p>
@@ -177,6 +196,11 @@ export function Dashboard({ user, onSignOut }: Props) {
           <Applications canManage={user.permissions.includes("apps.manage")} />
         ) : tab === "storage" ? (
           <Storage canManage={user.permissions.includes("storage.modify")} />
+        ) : tab === "files" ? (
+          <Shares
+            canManage={user.permissions.includes("network.modify")}
+            serverName={system?.hostname ?? ""}
+          />
         ) : tab === "backup" ? (
           <Backup canManage={user.permissions.includes("backup.run")} />
         ) : tab === "network" ? (

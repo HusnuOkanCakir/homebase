@@ -221,6 +221,17 @@ export interface NetworkInterface {
   up: boolean;
   addresses?: string[];
   mac?: string;
+  /**
+   * Whether a magic packet will switch this machine on.
+   *
+   * Three states, not two. `wake_on_lan_known: false` means the card would not
+   * say — which is different from a card that said no, and a screen that
+   * offered "wake it over the network" on the strength of a guess would be
+   * telling somebody their server can be switched back on when it cannot.
+   */
+  wake_on_lan?: boolean;
+  wake_on_lan_supported?: boolean;
+  wake_on_lan_known?: boolean;
 }
 
 /**
@@ -239,6 +250,41 @@ export interface NetworkStatus {
   nameservers?: string[];
   online: boolean;
   reachable: boolean;
+}
+
+/**
+ * A folder published onto the local network over SMB.
+ *
+ * `available` and being shared are separate: a share whose disk has been
+ * unplugged is still configured and still listed, it simply has nothing behind
+ * it. Hiding it would be reporting the configuration wrongly to fix a disk.
+ */
+export interface SharedFolder {
+  name: string;
+  location: string;
+  read_only: boolean;
+  added_at: string;
+  path: string;
+  available: boolean;
+  /** What to type on Windows, composed by the server: \\name\share. */
+  address: string;
+}
+
+export interface ShareStatus {
+  /** Whether the file server is on this machine at all. It is not part of the
+   *  base installation — a listening service that is off until asked for is one
+   *  that cannot be misconfigured. */
+  installed: boolean;
+  /** Whether it is actually serving. Separate from being installed and from
+   *  there being shares: "configured but not running" is a real state, and the
+   *  one worth saying loudly, because from the other end it looks identical to
+   *  a share that was never made. */
+  running: boolean;
+  shares: SharedFolder[];
+  /** The accounts that may connect. Names only — Homebase cannot read a
+   *  password back and would not report one if it could. */
+  users: string[];
+  server_name: string;
 }
 
 export interface SystemInfo {
@@ -410,6 +456,25 @@ export interface Application {
   exit_code: number | null;
   /** Where its data lives, so a user can be told what uninstalling leaves behind. */
   data_path: string;
+  /**
+   * A privilege this application holds that most do not — absent for the ones
+   * that need none.
+   *
+   * Shown before it is installed, not after. The point of declaring a
+   * relaxation per application is that somebody can decline it, and a
+   * disclosure that arrives once the container is running is a notification
+   * rather than a choice.
+   */
+  elevation?: AppElevation;
+}
+
+export interface AppElevation {
+  /** "starts_as_root" or "runs_as_root" — one gives root up, the other does not. */
+  kind: string;
+  /** One sentence, composed by the server rather than by the manifest's author. */
+  summary: string;
+  /** The manifest's own words, for somebody who wants them. */
+  reason: string;
 }
 
 export interface ApplicationList {
@@ -818,6 +883,18 @@ export const api = {
   reboot: (confirm: string, reason?: string) =>
     post<Job>("/system/reboot", reason === undefined ? { confirm } : { confirm, reason }),
 
+  /**
+   * Switch the server off.
+   *
+   * The same shape as a reboot and the same confirmation, because to the API
+   * they are the same operation. The difference is entirely in what the caller
+   * must have said first: a restart explains itself by ending, and this does
+   * not — so whatever calls this is the last thing that will be able to tell
+   * somebody how to switch the machine on again.
+   */
+  shutdown: (confirm: string, reason?: string) =>
+    post<Job>("/system/shutdown", reason === undefined ? { confirm } : { confirm, reason }),
+
   job: (id: string) => get<Job>(`/jobs/${encodeURIComponent(id)}`),
 
   jobs: () => get<{ items: Job[]; total: number }>("/jobs"),
@@ -923,6 +1000,24 @@ export const api = {
 
   createBackup: (location: string, includeData: boolean) =>
     post<Job>("/backups", { location, include_data: includeData }),
+
+  // --- File sharing ---------------------------------------------------------
+
+  shares: () => get<ShareStatus>("/shares"),
+
+  /** Long: the first share installs the file server, which is a download. */
+  addShare: (name: string, location: string, readOnly: boolean) =>
+    post<ShareStatus>("/shares", { name, location, read_only: readOnly }, 600_000),
+
+  /** Stops publishing it. The files stay exactly where they are. */
+  removeShare: (name: string) =>
+    post<ShareStatus>("/shares/remove", { name }, 120_000),
+
+  setSharePassword: (username: string, password: string) =>
+    post<ShareStatus>("/shares/users", { username, password }, 120_000),
+
+  removeShareUser: (username: string) =>
+    post<ShareStatus>("/shares/users/remove", { username }, 60_000),
 
   // --- Remote access ------------------------------------------------------------
 

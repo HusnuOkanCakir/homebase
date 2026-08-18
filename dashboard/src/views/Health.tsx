@@ -32,11 +32,16 @@ export function Health({ system }: { system: SystemInfo }) {
 
   useEffect(() => {
     let current = true;
-    setFailed(false);
+    // Cleared when the new range arrives rather than when it is asked for.
+    // Clearing it up front shows the previous chart with no error for as long as
+    // the request takes, and then puts the error back — which reads as a fault
+    // that comes and goes rather than one that never went away.
     api
       .systemHistory(days)
       .then((result) => {
-        if (current) setHistory(result);
+        if (!current) return;
+        setHistory(result);
+        setFailed(false);
       })
       .catch(() => {
         if (current) setFailed(true);

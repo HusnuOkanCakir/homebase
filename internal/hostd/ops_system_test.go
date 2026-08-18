@@ -180,28 +180,33 @@ func TestRebootRejectsMisspelledParameters(t *testing.T) {
 	}
 }
 
-// system.reboot is the only operation here that changes anything, so its
-// declared metadata is worth asserting directly.
-func TestRebootIsDeclaredDangerous(t *testing.T) {
+// Restarting and switching off are the only operations here that change
+// anything, so their declared metadata is worth asserting directly. Both, and
+// identically: they share an implementation, and a registration that graded one
+// of them lower would be a way past every guard in it.
+func TestPowerOperationsAreDeclaredDangerous(t *testing.T) {
 	r := NewRegistry()
 	RegisterSystemOperations(r)
 
-	op, found := r.Lookup("system.reboot")
-	if !found {
-		t.Fatal("system.reboot is not registered")
-	}
+	for _, name := range []string{"system.reboot", "system.shutdown"} {
+		op, found := r.Lookup(name)
+		if !found {
+			t.Fatalf("%s is not registered", name)
+		}
 
-	if op.Risk != RiskHigh && op.Risk != RiskCritical {
-		t.Errorf("risk = %q; restarting a machine holding somebody's data is not low risk", op.Risk)
-	}
-	if op.Confirm != ConfirmExplicit {
-		t.Errorf("confirmation = %q, want explicit", op.Confirm)
-	}
-	if len(op.Permissions) == 0 {
-		t.Error("no permission required to reboot the machine")
-	}
-	if op.Rollback != "" {
-		t.Errorf("rollback = %q; a reboot cannot be undone", op.Rollback)
+		if op.Risk != RiskHigh && op.Risk != RiskCritical {
+			t.Errorf("%s: risk = %q; taking away a machine holding somebody's "+
+				"data is not low risk", name, op.Risk)
+		}
+		if op.Confirm != ConfirmExplicit {
+			t.Errorf("%s: confirmation = %q, want explicit", name, op.Confirm)
+		}
+		if len(op.Permissions) == 0 {
+			t.Errorf("%s: no permission required", name)
+		}
+		if op.Rollback != "" {
+			t.Errorf("%s: rollback = %q; neither can be undone", name, op.Rollback)
+		}
 	}
 }
 
@@ -321,5 +326,98 @@ func TestRenameAddsAHostsEntryWhenThereIsNone(t *testing.T) {
 	}
 	if !strings.Contains(rewritten, "localhost") {
 		t.Error("the existing entry was lost")
+	}
+}
+
+// Everything asserted about rebooting must hold for switching off.
+//
+// The two are one function with one word changed, which is exactly the shape
+// that acquires a difference nobody meant. So the guards are checked through
+// both entry points rather than through the shared one: a handler wired to the
+// wrong powerAction, or a shutdown that skipped the root check, is a bug this
+// catches and a test of power() alone would not.
+func TestShutdownIsGuardedLikeReboot(t *testing.T) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("refuses when not root", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root, where switching off is the intended behaviour")
+		}
+
+		// A *correct* confirmation, so the only thing between this test and the
+		// machine running it going dark is the guard.
+		_, err := systemShutdown(context.Background(), ShutdownParams{Confirm: hostname})
+		if err == nil {
+			t.Fatal("shutdown was accepted while unprivileged; THIS MACHINE WOULD HAVE SWITCHED OFF")
+		}
+		var e *Error
+		if !asError(err, &e) {
+			t.Fatalf("unexpected error type: %T", err)
+		}
+		if e.Code != "system.not_privileged" {
+			t.Errorf("code = %q, want system.not_privileged", e.Code)
+		}
+		if e.Recoverable {
+			t.Error("this is not recoverable by retrying — hostd will still not be root")
+		}
+	})
+
+	t.Run("requires the hostname", func(t *testing.T) {
+		for _, confirm := range []string{"", "yes", "true", "confirm",
+			strings.ToUpper(hostname), hostname + " "} {
+			_, err := systemShutdown(context.Background(), ShutdownParams{Confirm: confirm})
+			if err == nil {
+				t.Fatalf("confirmation %q was accepted; THIS MACHINE WOULD HAVE SWITCHED OFF", confirm)
+			}
+			var e *Error
+			if !asError(err, &e) {
+				t.Fatalf("unexpected error type for %q: %T", confirm, err)
+			}
+			if e.Code != "system.confirmation_mismatch" {
+				t.Errorf("confirmation %q rejected with %q, want system.confirmation_mismatch",
+					confirm, e.Code)
+			}
+		}
+	})
+
+	t.Run("rejects a misspelled parameter", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"confrim": hostname})
+		if _, err := Typed(systemShutdown)(context.Background(), body); err == nil {
+			t.Fatal("a misspelled confirmation was ignored rather than rejected")
+		}
+	})
+}
+
+// The two must not be interchangeable by accident.
+//
+// They share PowerParams, so one confirmation is valid for either — deliberate
+// and safe, because it names the *machine* and both act on the same one. What
+// must never be shared is the verb. If the shutdown path ever ends up asking
+// systemd to reboot, somebody who chose "switch off" gets a machine that comes
+// back, and nothing in the confirmation would have hinted at it.
+//
+// Asserted against the literal strings rather than only against each other: two
+// identical wrong verbs and two different wrong verbs are both possible, and
+// only one of those a difference test would catch.
+func TestTheTwoPowerActionsDoNotShareAVerb(t *testing.T) {
+	if rebootAction.verb == shutdownAction.verb {
+		t.Fatalf("both power actions run `systemctl %s`; one of them is doing "+
+			"the wrong thing to the machine", rebootAction.verb)
+	}
+	if rebootAction.verb != "reboot" {
+		t.Errorf("reboot runs `systemctl %s`, want reboot", rebootAction.verb)
+	}
+	if shutdownAction.verb != "poweroff" {
+		t.Errorf("shutdown runs `systemctl %s`, want poweroff", shutdownAction.verb)
+	}
+
+	// Said to a person and therefore worth being different too — a shutdown
+	// that reports "it will be back in a minute or two" is a lie somebody would
+	// wait out.
+	if rebootAction.succeeded == shutdownAction.succeeded {
+		t.Error("both say the same thing afterwards, so neither says which happened")
 	}
 }

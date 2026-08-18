@@ -69,6 +69,8 @@ homebasectl apps storage jellyfin           # where an application keeps its fil
 homebasectl apps open jellyfin              # the address, and open it if there is a desktop
 homebasectl system history 7                # how hot it has been, as a chart
 homebasectl wake AA:BB:CC:DD:EE:FF          # start a sleeping machine
+homebasectl shutdown                        # switch this server off
+homebasectl restart                         # restart it
 homebasectl repair                          # fix what a power cut left broken
 homebasectl diagnostics                     # a file safe to send to somebody
 ```
@@ -76,6 +78,38 @@ homebasectl diagnostics                     # a file safe to send to somebody
 Anything that takes a while — installing an application, making a backup — waits and reports
 how it ended, rather than handing back a job number for you to poll. The polling loop would
 otherwise be written once per caller, slightly differently each time.
+
+## Switching it off
+
+```sh
+sudo homebasectl shutdown
+```
+
+It says which machine this is, what stops, and — before asking you to confirm — whether this
+server can be switched **on** again without walking to it:
+
+```
+It can be switched on again from here:
+    homebasectl wake 40:16:7E:01:F3:F5
+```
+
+or, if waking over the network is not enabled:
+
+```
+Nothing here can switch it on again. Waking it over the network
+is not enabled, so somebody has to press its power button.
+```
+
+That is the whole reason this exists rather than `sudo poweroff`. A server in a cupboard,
+switched off from a laptop in another room, is a mistake that costs a trip up a ladder — and
+it is entirely avoidable if the last screen that can say so says so first.
+
+Confirming means typing the server's name. There is no `--yes`; from a script, pass
+`--confirm <name>`.
+
+Waking needs the machine left plugged in. A laptop running on its battery has nothing
+listening once it is off, and most machines also need it enabled in the BIOS —
+`homebasectl network` reports whether the card is set to.
 
 ## Reaching it from outside the house
 

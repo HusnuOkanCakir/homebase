@@ -353,11 +353,21 @@ a.button {
 
 /* --- Tabs ----------------------------------------------------------------- */
 
+/*
+ * Wrapping, and the full width of the page.
+ *
+ * It was neither, and held six tabs comfortably. At nine they are squeezed into
+ * thirty rem until the words touch, which is the point where a navigation bar
+ * stops looking like one. Wrapping to a second line is the cheaper of the two
+ * bad options: the alternative is hiding sections behind a menu, and a section
+ * nobody can see is a section nobody uses.
+ */
 .tabs {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 0.25rem;
   width: 100%;
-  max-width: 30rem;
   margin: 0 auto 1.25rem;
   border-bottom: 1px solid var(--border);
 }
@@ -929,4 +939,41 @@ ul.plain li {
   padding: 0.75rem;
   border-radius: 6px;
   overflow-x: auto;
+}
+
+/* --- File sharing --------------------------------------------------------- */
+
+/*
+ * The address somebody has to type on another computer.
+ *
+ * Bigger than ordinary inline code and given a line of its own, because it is
+ * the one thing on the screen that leaves it: it gets copied into a Windows
+ * dialog, or read out to somebody across a room. `user-select: all` makes one
+ * click select the whole path — a UNC path broken by a double-click that
+ * stopped at a backslash is a path that silently does not work.
+ */
+.address {
+  display: inline-block;
+  padding: 0.35rem 0.6rem;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* Matched to the inputs beside it rather than left as the browser's control,
+   which on a form of five styled fields reads as the one that is broken. */
+select {
+  width: 100%;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
