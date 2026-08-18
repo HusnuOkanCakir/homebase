@@ -37,7 +37,7 @@
       "maxLength": 200
     },
     "after_install": {
-      "description": "What the person who installed this still has to do, shown once when it finishes. Plain prose, never a template and never a command Homebase runs \u2014 it is a sentence, and the only thing that reads it is a human being.\n\nFor the applications that need it this is the difference between working and usable: an application that is running, reachable, and asking for a password nobody was given is indistinguishable from one that is broken.",
+      "description": "What the person who installed this still has to do, shown once when it finishes. Plain prose, never a template and never a command Homebase runs — it is a sentence, and the only thing that reads it is a human being.\n\nFor the applications that need it this is the difference between working and usable: an application that is running, reachable, and asking for a password nobody was given is indistinguishable from one that is broken.",
       "type": "string",
       "maxLength": 600
     },
@@ -79,7 +79,7 @@
           }
         },
         "environment": {
-          "description": "Environment variables. Values must never contain a secret \u2014 reference one with credential_ref instead. Names allow mixed case: the all-caps convention is a convention, and real applications do not follow it \u2014 Jellyfin uses JELLYFIN_PublishedServerUrl. The pattern still excludes anything a shell would treat specially.",
+          "description": "Environment variables. Values must never contain a secret — reference one with credential_ref instead. Names allow mixed case: the all-caps convention is a convention, and real applications do not follow it — Jellyfin uses JELLYFIN_PublishedServerUrl. The pattern still excludes anything a shell would treat specially.",
           "type": "object",
           "patternProperties": {
             "^[A-Za-z_][A-Za-z0-9_]*$": {
@@ -91,7 +91,7 @@
       }
     },
     "revision": {
-      "description": "Revision of this manifest, independent of the application version. Incremented whenever this file changes. Named 'revision' rather than 'version' because three fields called version \u2014 schema, manifest, image tag \u2014 would be one too many.",
+      "description": "Revision of this manifest, independent of the application version. Incremented whenever this file changes. Named 'revision' rather than 'version' because three fields called version — schema, manifest, image tag — would be one too many.",
       "type": "integer",
       "minimum": 1
     },
@@ -121,7 +121,7 @@
           "default": "/"
         },
         "reachable_from": {
-          "description": "Who can open this application directly. \"server\" publishes it on loopback only, so nothing outside the machine can reach it. \"network\" publishes it on the local network at a fixed port. \"network\" is only for applications that authenticate their own users, and saying so is a review decision about that specific application \u2014 an application with no login of its own, published here, is one that nothing is guarding.",
+          "description": "Who can open this application directly. \"server\" publishes it on loopback only, so nothing outside the machine can reach it. \"network\" publishes it on the local network at a fixed port. \"network\" is only for applications that authenticate their own users, and saying so is a review decision about that specific application — an application with no login of its own, published here, is one that nothing is guarding.",
           "enum": [
             "server",
             "network"
@@ -129,13 +129,13 @@
           "default": "server"
         },
         "host_port": {
-          "description": "Port on the server this application answers on, when reachable_from is \"network\". Defaults to internal_port, and **matching them is strongly preferred**.\n\nAn application that differs sees a Host header naming a port it is not listening on, and some reject every request for it. qBittorrent does: published on 8081 while listening on 8080 it answered a bare `401 Unauthorized` to everything, including its own login page, with nothing in its log to say why. Where an application can be told which port to listen on, tell it \u2014 and only state this when it cannot.",
+          "description": "Port on the server this application answers on, when reachable_from is \"network\". Defaults to internal_port, and **matching them is strongly preferred**.\n\nAn application that differs sees a Host header naming a port it is not listening on, and some reject every request for it. qBittorrent does: published on 8081 while listening on 8080 it answered a bare `401 Unauthorized` to everything, including its own login page, with nothing in its log to say why. Where an application can be told which port to listen on, tell it — and only state this when it cannot.",
           "type": "integer",
           "minimum": 1024,
           "maximum": 65535
         },
         "reaches": {
-          "description": "Other applications this one must be able to connect to, by id.\n\nHomebase joins both to a network they share, and the address is the other application's id \u2014 Sonarr reaches qBittorrent at `qbittorrent:8081`, the port being the one that application listens on inside its container.\n\nIt exists because none of the obvious routes work. Containers on Docker's default bridge cannot resolve each other at all; the server's own `.local` name does not resolve inside a container; and the bridge gateway is the host, where the firewall drops it \u2014 correctly, since a rule permitting containers to reach the host's ports would permit every container to reach every one of them.\n\nA declaration here is not a grant of anything the other application would not otherwise give: it is reachable on that port by whatever is on that network, and nothing joins it without saying so here.",
+          "description": "Other applications this one must be able to connect to, by id.\n\nHomebase joins both to a network they share, and the address is the other application's id — Sonarr reaches qBittorrent at `qbittorrent:8081`, the port being the one that application listens on inside its container.\n\nIt exists because none of the obvious routes work. Containers on Docker's default bridge cannot resolve each other at all; the server's own `.local` name does not resolve inside a container; and the bridge gateway is the host, where the firewall drops it — correctly, since a rule permitting containers to reach the host's ports would permit every container to reach every one of them.\n\nA declaration here is not a grant of anything the other application would not otherwise give: it is reachable on that port by whatever is on that network, and nothing joins it without saying so here.",
           "type": "array",
           "maxItems": 8,
           "items": {
@@ -145,7 +145,7 @@
           "uniqueItems": true
         },
         "host_network": {
-          "description": "Share the host network namespace. This removes network isolation and requires written justification in review \u2014 it is not a convenience setting.",
+          "description": "Share the host network namespace. This removes network isolation and requires written justification in review — it is not a convenience setting.",
           "type": "boolean",
           "default": false
         },
@@ -323,7 +323,7 @@
           "uniqueItems": true
         },
         "starts_as_root": {
-          "description": "This image cannot run as an arbitrary user: its entrypoint starts as root, corrects ownership of the folders it was given, and drops to its own account. Every linuxserver.io image works this way, and so do many others.\n\nGranting it means the container runs as uid 0 with five capabilities it would otherwise not have \u2014 CHOWN, DAC_OVERRIDE, FOWNER, SETUID and SETGID \u2014 which together let it rewrite ownership anywhere in its own bind mounts and become any user inside itself. It cannot escape the container, and it is still a real relaxation of the default: what protects the rest of the machine is that the mounts are the only paths it can reach.\n\n**The alternative was considered and rejected**: holding every application to running as an unprivileged uid excludes most of what people want to run on a home server. So this exists, is declared per application, is shown to whoever installs it, and requires the reason to be written down here.\n\nHomebase passes PUID and PGID so the entrypoint drops to the account Homebase chose. An image that honours neither must not be granted this.",
+          "description": "This image cannot run as an arbitrary user: its entrypoint starts as root, corrects ownership of the folders it was given, and drops to its own account. Every linuxserver.io image works this way, and so do many others.\n\nGranting it means the container runs as uid 0 with five capabilities it would otherwise not have — CHOWN, DAC_OVERRIDE, FOWNER, SETUID and SETGID — which together let it rewrite ownership anywhere in its own bind mounts and become any user inside itself. It cannot escape the container, and it is still a real relaxation of the default: what protects the rest of the machine is that the mounts are the only paths it can reach.\n\n**The alternative was considered and rejected**: holding every application to running as an unprivileged uid excludes most of what people want to run on a home server. So this exists, is declared per application, is shown to whoever installs it, and requires the reason to be written down here.\n\nHomebase passes PUID and PGID so the entrypoint drops to the account Homebase chose. An image that honours neither must not be granted this.",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -347,7 +347,29 @@
           "description": "Run with a read-only root filesystem. Should be true wherever the image tolerates it.",
           "type": "boolean",
           "default": true
+        },
+        "runs_as_root": {
+          "description": "This image is root for its whole life. It never drops privileges, and it does not honour PUID or PGID.\n\nDistinct from `starts_as_root`, which is granted on the promise that the entrypoint drops to the account Homebase chose. An image that honours neither and is granted that anyway runs as root for ever under a label saying it does not — so the other case is named rather than smuggled through the first.\n\nNeither is strictly safer. Root lasts longer here; what makes it acceptable is the constraint that comes with it, which hostd enforces and which is not negotiable: **every storage slot must be `private`.** The dangerous form of permanent root is the one holding DAC_OVERRIDE over somebody's photographs, and an application that can only reach a directory Homebase created for it cannot get there.\n\nThe capabilities granted are the same five as `starts_as_root`. Declaring both is an error: it says the entrypoint does and does not drop privileges.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reason"
+          ],
+          "properties": {
+            "reason": {
+              "description": "Why this image cannot run unprivileged and cannot drop, in words a reviewer can check against the image's own entrypoint.",
+              "type": "string",
+              "minLength": 40,
+              "maxLength": 400
+            }
+          }
         }
+      },
+      "not": {
+        "required": [
+          "starts_as_root",
+          "runs_as_root"
+        ]
       }
     },
     "resources": {
@@ -522,7 +544,7 @@
       }
     },
     "services": {
-      "description": "Supporting containers this application cannot run without \u2014 a database, a cache. The application itself is `container`; these are everything it talks to.\n\nThey are **never reachable from anywhere but this application**. Each one joins a private network of the application's own and publishes no port at all, on any interface, ever \u2014 a database that a manifest could publish is a database somebody publishes. What the application connects to is the service's `name`, which is its address on that network.\n\nStorage here is always private. A database on a disk somebody can unplug is a database that vanishes, and unlike a media folder there is nothing sensible to do about its absence.",
+      "description": "Supporting containers this application cannot run without — a database, a cache. The application itself is `container`; these are everything it talks to.\n\nThey are **never reachable from anywhere but this application**. Each one joins a private network of the application's own and publishes no port at all, on any interface, ever — a database that a manifest could publish is a database somebody publishes. What the application connects to is the service's `name`, which is its address on that network.\n\nStorage here is always private. A database on a disk somebody can unplug is a database that vanishes, and unlike a media folder there is nothing sensible to do about its absence.",
       "type": "array",
       "maxItems": 6,
       "items": {

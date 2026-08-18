@@ -312,6 +312,54 @@ type AppStatus struct {
 	// than one per interface. Empty until the application is running and has a
 	// port, because an address that is not yet listening is worse than none.
 	URL string `json:"url,omitempty"`
+
+	// Elevation is the privilege this application was granted beyond the
+	// default, and why — empty for the ones that need none.
+	//
+	// Reported because the schema says it is. Both root permissions justify
+	// themselves partly on being "declared per application and shown to whoever
+	// installs it", and for a while the second half of that was not true of any
+	// of them: the reason was written in a manifest nobody reading the
+	// dashboard could see. A relaxation that is only visible in a file the user
+	// does not have is not a disclosure.
+	Elevation *AppElevation `json:"elevation,omitempty"`
+}
+
+// AppElevation is a privilege an application holds that most do not.
+type AppElevation struct {
+	// Kind is "starts_as_root" or "runs_as_root". The distinction is the whole
+	// point: one gives up root as soon as it has started, the other never does.
+	Kind string `json:"kind"`
+
+	// Summary is one sentence, written here rather than in the manifest, so
+	// that what a person is told does not depend on how carefully a manifest
+	// author phrased it.
+	Summary string `json:"summary"`
+
+	// Reason is the manifest's own words, for somebody who wants them.
+	Reason string `json:"reason"`
+}
+
+// describeElevation turns a manifest's declaration into something worth showing.
+func describeElevation(permissions ManifestPermissions) *AppElevation {
+	switch {
+	case permissions.StartsAsRoot != nil:
+		return &AppElevation{
+			Kind: "starts_as_root",
+			Summary: "Starts with administrator rights inside its container, then gives " +
+				"them up. It can only ever reach the folders Homebase gives it.",
+			Reason: permissions.StartsAsRoot.Reason,
+		}
+	case permissions.RunsAsRoot != nil:
+		return &AppElevation{
+			Kind: "runs_as_root",
+			Summary: "Keeps administrator rights inside its container the whole time it " +
+				"is running. It is only allowed a folder of its own — it cannot be " +
+				"pointed at your files.",
+			Reason: permissions.RunsAsRoot.Reason,
+		}
+	}
+	return nil
 }
 
 // --- Handlers ----------------------------------------------------------------
@@ -376,11 +424,39 @@ func appURL(manifest Manifest, hostPort int) string {
 	return fmt.Sprintf("%s://%s:%d%s", scheme, host, hostPort, path)
 }
 
+// appURLPlaceholder is the one thing a manifest may ask Homebase to fill in.
+//
+// Stremio needs it. Its interface runs in the browser and talks to a streaming
+// server in the same container, so it has to be told an address that works from
+// *outside* the machine — and that address contains the server's name, which a
+// file in the catalogue cannot know and which changes when somebody renames it.
+const appURLPlaceholder = "{{APP_URL}}"
+
+// expandManifestValue fills in the placeholders a manifest may use.
+//
+// Deliberately one placeholder, computed here, not a template language. The
+// value is composed by Homebase from what it already knows; a manifest cannot
+// name a variable, read the environment, or reach anything it was not given.
+// The point of ADR-0012 is that a manifest describes an application rather than
+// programming the machine, and a general substitution facility is the first step
+// away from that.
+func expandManifestValue(value string, manifest Manifest) string {
+	if !strings.Contains(value, appURLPlaceholder) {
+		return value
+	}
+	// Empty for an application on loopback, which is correct: there is no
+	// address other machines could use, and inventing one would be worse than
+	// the application noticing it was given nothing.
+	return strings.ReplaceAll(value, appURLPlaceholder,
+		appURL(manifest, manifest.Network.PublishedPort()))
+}
+
 func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp bool) AppStatus {
 	status := AppStatus{
 		ID:           manifest.ID,
 		Name:         manifest.Name,
 		Summary:      manifest.Summary,
+		Elevation:    describeElevation(manifest.Permissions),
 		State:        StateUnknown,
 		Image:        manifest.Container.Image,
 		Version:      manifest.Container.Version,
@@ -853,24 +929,36 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 	}
 
 	for key, value := range manifest.Container.Environment {
-		config.Env = append(config.Env, key+"="+value)
+		config.Env = append(config.Env, key+"="+expandManifestValue(value, manifest))
 	}
 
 	config.HostConfig.GroupAdd = supplementaryGroups(manifest)
 
 	// An image that cannot run as an arbitrary user.
 	//
-	// It starts as root, corrects ownership of what it was given, and drops to
-	// its own account. Homebase tells it which account that is, through PUID and
-	// PGID — so the files it ends up creating belong to the same uid and the same
-	// shared group everything else here uses, and the elevation lasts only as
-	// long as the entrypoint.
+	// Two declarations reach here and the container they build is identical, so
+	// the code is. What differs is what the manifest promised and what was
+	// checked against it, both of which happened before this point:
 	//
-	// Five capabilities, named, and nothing else: CapDrop=ALL still runs first.
-	// An image granted this can rewrite ownership anywhere in its own bind mounts
-	// and become any user inside itself; it cannot reach a path that is not
-	// mounted into it, which is what bounds the grant.
-	if manifest.Permissions.StartsAsRoot != nil {
+	//   starts_as_root — the entrypoint corrects ownership of what it was given
+	//   and drops to PUID and PGID. Homebase supplies those, so the files it
+	//   creates belong to the same uid and shared group as everything else here,
+	//   and the elevation lasts only as long as the entrypoint does.
+	//
+	//   runs_as_root — it does not drop, and never will. Accepted only from an
+	//   application whose every storage slot is private; catalogue validation
+	//   refuses the combination that would matter, which is permanent root over
+	//   a folder somebody else's files are in.
+	//
+	// Five capabilities either way, named, and nothing else: CapDrop=ALL still
+	// runs first. An image granted this can rewrite ownership anywhere in its
+	// own bind mounts and become any user inside itself; it cannot reach a path
+	// that is not mounted into it, which is what bounds the grant.
+	//
+	// PUID and PGID are passed in both cases. An image that ignores them is
+	// unaffected, and an image that honours them was going to be told anyway —
+	// there is nothing to gain by working out which this is a second time.
+	if manifest.Permissions.Elevated() {
 		config.User = ""
 		config.HostConfig.CapAdd = append(config.HostConfig.CapAdd, rootCapabilities...)
 		config.Env = append(config.Env,

@@ -237,6 +237,29 @@ type ManifestPermissions struct {
 	// So this exists, is declared per application, and requires a written reason
 	// a reviewer can check against the image's own entrypoint.
 	StartsAsRoot *ManifestElevation `json:"starts_as_root,omitempty"`
+
+	// RunsAsRoot marks an image that is root for its whole life.
+	//
+	// A different thing from StartsAsRoot, and the difference is the whole
+	// reason it exists rather than being folded in. StartsAsRoot is granted on
+	// the promise that the entrypoint drops to PUID and PGID; an image that
+	// honours neither and is granted it anyway is running as root for ever
+	// under a label that says it does not. The precondition is written into the
+	// schema, so the choice was to break it quietly or to name the other case.
+	//
+	// Neither is strictly safer than the other and this is not a weaker
+	// StartsAsRoot dressed up. Root lasts longer here. What makes it
+	// acceptable is the constraint that comes with it, enforced below:
+	// **every storage slot must be private.** The frightening version of
+	// permanent root is the one holding DAC_OVERRIDE over somebody's
+	// photographs; an application that can only reach a directory Homebase made
+	// for it, and that nothing else uses, cannot get there.
+	RunsAsRoot *ManifestElevation `json:"runs_as_root,omitempty"`
+}
+
+// Elevated reports whether this application's container runs as uid 0.
+func (p ManifestPermissions) Elevated() bool {
+	return p.StartsAsRoot != nil || p.RunsAsRoot != nil
 }
 
 // ManifestElevation is why an image needs to begin as root.
@@ -481,6 +504,30 @@ func (m Manifest) Validate() error {
 	if elevation := m.Permissions.StartsAsRoot; elevation != nil {
 		if len(strings.TrimSpace(elevation.Reason)) < 40 {
 			return fmt.Errorf("starts_as_root needs a reason a reviewer can check")
+		}
+	}
+	if elevation := m.Permissions.RunsAsRoot; elevation != nil {
+		if len(strings.TrimSpace(elevation.Reason)) < 40 {
+			return fmt.Errorf("runs_as_root needs a reason a reviewer can check")
+		}
+		// The constraint that makes permanent root tolerable, checked here
+		// rather than trusted to review. An application that never drops
+		// privileges must not be able to reach a folder anybody else uses:
+		// root plus DAC_OVERRIDE over a shared media directory is exactly the
+		// case this permission is narrow in order to exclude.
+		for _, storage := range m.Storage {
+			if storage.Type != "private" {
+				return fmt.Errorf(
+					"runs_as_root may not be combined with %s storage %q; an "+
+						"application that is root for its whole life may only "+
+						"reach directories of its own",
+					storage.Type, storage.ID)
+			}
+		}
+		// The two are alternatives, not a scale. Declaring both says the
+		// entrypoint does and does not drop privileges.
+		if m.Permissions.StartsAsRoot != nil {
+			return fmt.Errorf("starts_as_root and runs_as_root are alternatives; declare one")
 		}
 	}
 

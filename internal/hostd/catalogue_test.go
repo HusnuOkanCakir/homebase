@@ -700,3 +700,91 @@ func TestAnApplicationThatDoesNotAskStaysUnprivileged(t *testing.T) {
 		t.Error("an application that asked for nothing was given the elevation")
 	}
 }
+
+// The constraint that makes permanent root tolerable must be enforced, not
+// merely written down.
+//
+// runs_as_root grants uid 0 with DAC_OVERRIDE for the life of the container.
+// Over a private directory Homebase created, that is bounded by the mount. Over
+// a folder the user chose — their films, their photographs, the folder that is
+// also an SMB share — it is root over somebody's data, permanently, from a file
+// in the catalogue. So the combination is refused at load, which is before any
+// of it can be installed.
+func TestPermanentRootMayNotReachTheUsersOwnFolders(t *testing.T) {
+	base := func() Manifest {
+		return Manifest{
+			ManifestVersion: 1,
+			ID:              "example",
+			Name:            "Example",
+			Container:       ManifestContainer{Image: "example/app", Version: "1.0.0"},
+			Health:          ManifestHealth{Type: "none"},
+			Permissions: ManifestPermissions{
+				RunsAsRoot: &ManifestElevation{
+					Reason: "Its entrypoint writes into the image and never drops privileges, " +
+						"and it ignores PUID and PGID entirely.",
+				},
+			},
+		}
+	}
+
+	t.Run("private storage is allowed", func(t *testing.T) {
+		m := base()
+		m.Storage = []ManifestStorage{{ID: "config", Type: "private", MountPath: "/config"}}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("a private-only application was refused: %v", err)
+		}
+	})
+
+	t.Run("user-selected storage is refused", func(t *testing.T) {
+		m := base()
+		m.Storage = []ManifestStorage{
+			{ID: "config", Type: "private", MountPath: "/config"},
+			{ID: "media", Type: "user-selected", MountPath: "/data"},
+		}
+		err := m.Validate()
+		if err == nil {
+			t.Fatal("an application that is root for ever was given a folder the user chose")
+		}
+		if !strings.Contains(err.Error(), "media") {
+			t.Errorf("the error does not name the offending slot: %v", err)
+		}
+	})
+
+	t.Run("a reason is required", func(t *testing.T) {
+		m := base()
+		m.Storage = []ManifestStorage{{ID: "config", Type: "private", MountPath: "/config"}}
+		m.Permissions.RunsAsRoot = &ManifestElevation{Reason: "because"}
+		if err := m.Validate(); err == nil {
+			t.Fatal("permanent root was granted with no reason worth reading")
+		}
+	})
+
+	t.Run("the two elevations are alternatives", func(t *testing.T) {
+		m := base()
+		m.Storage = []ManifestStorage{{ID: "config", Type: "private", MountPath: "/config"}}
+		m.Permissions.StartsAsRoot = &ManifestElevation{
+			Reason: "The linuxserver.io entrypoint corrects ownership and then drops to PUID and PGID.",
+		}
+		if err := m.Validate(); err == nil {
+			t.Fatal("a manifest claimed its entrypoint both does and does not drop privileges")
+		}
+	})
+}
+
+// Whichever way it is declared, the container is built the same. A second
+// elevation that quietly built a *different* container would mean the reasoning
+// attached to one of them describes something that is not running.
+func TestBothElevationsBuildTheSameContainer(t *testing.T) {
+	reason := "Its entrypoint needs to write to root-owned paths before anything starts, " +
+		"which an unprivileged uid cannot do."
+
+	starts := ManifestPermissions{StartsAsRoot: &ManifestElevation{Reason: reason}}
+	runs := ManifestPermissions{RunsAsRoot: &ManifestElevation{Reason: reason}}
+
+	if !starts.Elevated() || !runs.Elevated() {
+		t.Fatal("an elevation that does not report itself as one is invisible to the code that acts on it")
+	}
+	if (ManifestPermissions{}).Elevated() {
+		t.Error("an application declaring nothing was reported as elevated")
+	}
+}

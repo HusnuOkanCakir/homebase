@@ -316,6 +316,22 @@ function ApplicationDetail({
           />
         ) : null}
 
+        {/* The privilege it holds, said before it is installed rather than
+            after. The point of declaring a relaxation per application is that
+            somebody can decline it, and a disclosure that arrives once the
+            container is running is a notification rather than a choice.
+
+            Kept quiet once it *is* installed — a warning that is always lit is
+            one people stop reading, and the decision has been made by then. */}
+        {application.elevation && !application.installed ? (
+          <Message
+            tone="warning"
+            title={`${application.name} needs more than most applications.`}
+            recovery={application.elevation.summary}
+            detail={application.elevation.reason}
+          />
+        ) : null}
+
         {/* What is still left for a person to do, from the manifest. Above the
             buttons, because it is the answer to "it is running and I cannot get
             in" — which otherwise looks exactly like a broken application. */}
