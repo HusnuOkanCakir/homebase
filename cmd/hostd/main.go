@@ -184,6 +184,12 @@ func run(log *slog.Logger, registry *hostd.Registry, apps *hostd.Catalogue,
 	// interface and leave a server unreachable. See internal/hostd/wol.go.
 	hostd.ApplyWakeOnLAN(log)
 
+	// A configuration written before the forwarding rules existed reaches this
+	// server and nothing else on the network. Repaired here rather than left for
+	// whoever next adds a device, because a machine with devices already paired
+	// is exactly the one where nobody will.
+	hostd.RepairVPNForwarding(context.Background(), log)
+
 	log.Info("hostd listening",
 		"socket", listener.Addr().String(),
 		"applications", len(apps.IDs()),

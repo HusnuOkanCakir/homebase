@@ -50,7 +50,7 @@ func TestTheClientConfigCarriesOnlyItsOwnKey(t *testing.T) {
 	const devicePrivate = "ZGV2aWNlLXByaXZhdGU="
 
 	client := renderClientConfig(devicePrivate, "c2VydmVyLXB1YmxpYw==",
-		"home.example.org", "10.71.0.2")
+		"home.example.org", "10.71.0.2", true)
 
 	if strings.Contains(client, serverPrivate) {
 		t.Fatal("the server's private key is in a device's configuration")
@@ -66,7 +66,7 @@ func TestTheClientConfigCarriesOnlyItsOwnKey(t *testing.T) {
 // A full tunnel would route a phone's entire internet through a domestic upload
 // link and a machine in a cupboard. Only the house's traffic goes over the VPN.
 func TestOnlyTheHouseGoesOverTheVPN(t *testing.T) {
-	client := renderClientConfig("a2V5", "cHVi", "home.example.org", "10.71.0.2")
+	client := renderClientConfig("a2V5", "cHVi", "home.example.org", "10.71.0.2", true)
 
 	for _, line := range strings.Split(client, "\n") {
 		if !strings.HasPrefix(line, "AllowedIPs") {
@@ -163,5 +163,76 @@ func TestAServerWithNoRemoteAccessSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(status.Message, "vpn setup") {
 		t.Errorf("the message does not say how to switch it on: %q", status.Message)
+	}
+}
+
+// A device is told to use this server's resolver only when there is one.
+//
+// Wireguard clients do not treat the DNS line as advisory: setting it replaces
+// the device's resolver for as long as the tunnel is up. Naming a port nothing
+// listens on therefore does not mean "the house is unreachable by name", it
+// means *nothing resolves* — which reads, on a phone in a café, as the VPN
+// having broken the internet.
+func TestNoResolverMeansNoDNSLine(t *testing.T) {
+	withResolver := renderClientConfig("a2V5", "cHVi", "home.example.org", "10.71.0.2", true)
+	if !strings.Contains(withResolver, "DNS = "+vpnServer) {
+		t.Error("a server that answers DNS did not offer itself as the resolver")
+	}
+
+	without := renderClientConfig("a2V5", "cHVi", "home.example.org", "10.71.0.2", false)
+	if strings.Contains(without, "DNS =") {
+		t.Errorf("a device was pointed at a resolver that does not exist:\n%s", without)
+	}
+	// Still a usable tunnel — the device keeps its own resolver and reaches the
+	// house by address.
+	if !strings.Contains(without, "Endpoint = home.example.org:51820") {
+		t.Error("dropping the DNS line broke the rest of the configuration")
+	}
+	if !strings.Contains(without, "[Peer]") {
+		t.Error("the peer section is missing")
+	}
+}
+
+// What the client is told it can reach must be reachable.
+//
+// The server used to write no forwarding rules at all, so a connected device
+// reached this machine and nothing else: every packet for the rest of the house
+// arrived and was dropped, because Ubuntu forwards nothing by default and
+// because a printer replying to 10.71.0.2 does not know where that is.
+//
+// It looked like it worked, which is why this is asserted rather than left to
+// the next person to connect from somewhere far away.
+func TestTheServerActuallyRoutesTheHouse(t *testing.T) {
+	config := renderServerConfig("cHJpdmF0ZQ==", "home.example.org", nil)
+
+	for _, needed := range []string{
+		"net.ipv4.ip_forward=1",
+		"PostUp = iptables -A FORWARD -i %i -j ACCEPT",
+		"MASQUERADE",
+	} {
+		if !strings.Contains(config, needed) {
+			t.Errorf("the server config does not %q; a device would reach this "+
+				"machine and nothing else on the network:\n%s", needed, config)
+		}
+	}
+
+	// Taken down again with the interface. Rules left behind on a machine whose
+	// remote access is switched off are rules nobody knows are there.
+	ups := strings.Count(config, "PostUp = iptables")
+	downs := strings.Count(config, "PostDown = iptables")
+	if ups != downs {
+		t.Errorf("%d rules are added and %d removed; the difference is left "+
+			"behind when the tunnel goes down", ups, downs)
+	}
+
+	// The card is not named. It has been renamed on the machine this was written
+	// for — a wireless card that failed to appear on one boot renumbered the
+	// ethernet from enp5s0 to enp4s0 — and a NAT rule naming it would have
+	// stopped working that morning.
+	for _, name := range []string{"enp5s0", "eth0", "-o enp", "-o eth"} {
+		if strings.Contains(config, name) {
+			t.Errorf("the forwarding rules name a network card (%q), which is a "+
+				"fact about one boot", name)
+		}
 	}
 }
