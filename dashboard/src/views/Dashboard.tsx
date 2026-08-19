@@ -170,7 +170,7 @@ export function Dashboard({ user, onSignOut }: Props) {
           <Message
             tone="error"
             title={error.title}
-            detail={error.detail}
+            technical={error.detail}
             recovery={error.recovery}
           />
         ) : null}

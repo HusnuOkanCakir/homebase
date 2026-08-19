@@ -57,7 +57,7 @@ export function RenameServer({ id, current }: Props) {
   return (
     <>
       {error ? (
-        <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+        <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
       ) : null}
 
       <label htmlFor={id}>What would you like to call it?</label>

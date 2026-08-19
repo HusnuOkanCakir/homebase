@@ -54,7 +54,7 @@ export function Security({ username }: { username: string }) {
   return (
     <>
       {error ? (
-        <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+        <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
       ) : null}
 
       <section className="card">

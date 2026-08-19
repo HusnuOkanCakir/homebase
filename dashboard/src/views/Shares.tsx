@@ -85,7 +85,7 @@ export function Shares({
           <Message
             tone="error"
             title={error.title}
-            detail={error.detail}
+            technical={error.detail}
             recovery={error.recovery}
           />
         ) : (
@@ -103,7 +103,7 @@ export function Shares({
         <Message
           tone="error"
           title={error.title}
-          detail={error.detail}
+          technical={error.detail}
           recovery={error.recovery}
         />
       ) : null}

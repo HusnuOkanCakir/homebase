@@ -42,7 +42,7 @@ export function Network({ canManage }: { canManage: boolean }) {
   }, [refresh]);
 
   if (error) {
-    return <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />;
+    return <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />;
   }
   if (!status) {
     return <p className="muted">Checking how this server is connected…</p>;

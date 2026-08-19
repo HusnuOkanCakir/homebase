@@ -366,10 +366,18 @@ a.button {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.25rem;
+  gap: 0.1rem 0.25rem;
   width: 100%;
   margin: 0 auto 1.25rem;
   border-bottom: 1px solid var(--border);
+}
+
+/* The underline marking the current tab sits on the tab, not on the bar. With
+   one row those were the same line and nobody had to decide; with two, a rule
+   under the whole nav and a mark under a tab on the first row are two
+   horizontal lines with a row of text between them, which reads as a table. */
+.tabs .tab {
+  flex: 0 1 auto;
 }
 
 .tab {
@@ -555,14 +563,24 @@ a.button {
   font-weight: 500;
 }
 
-.message-recovery {
+/* The rest of what happened, in the same voice as the title. Quieter only by
+   being smaller — it is prose, and setting prose in monospace made most of the
+   dashboard look like it was printing an error at somebody. */
+.message-detail {
   margin-top: 0.35rem !important;
   font-size: 0.925rem;
 }
 
+.message-recovery {
+  margin-top: 0.35rem !important;
+  font-size: 0.925rem;
+  color: var(--muted);
+}
+
 /* Diagnostics: present for whoever needs them, quiet enough that they do not
-   compete with the sentence the user actually has to read. */
-.message-detail {
+   compete with the sentence the user actually has to read. A path, a command,
+   an exit code — never a sentence. */
+.message-technical {
   margin-top: 0.5rem !important;
   color: var(--muted);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -976,4 +994,14 @@ select {
 select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* Grouped applications: what is on this server, then what else there is. */
+.app-group + .app-group {
+  margin-top: 1.75rem;
+}
+
+.app-group h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
 }

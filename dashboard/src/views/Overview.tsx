@@ -139,7 +139,7 @@ function SystemCard({ system, renaming, onRename }: SystemCardProps) {
               ? "This server is getting too hot."
               : "This server is running warm."
           }
-          detail={`${system.temperature.celsius} °C`}
+          technical={`${system.temperature.celsius} °C`}
           recovery={system.temperature.message}
         />
       ) : null}
@@ -344,12 +344,12 @@ function PowerCard({
             "button on the server itself. It needs the machine left plugged in — " +
             "a laptop on its battery has nothing listening once it is off."
           }
-          detail={`homebasectl wake ${waking}`}
+          technical={`homebasectl wake ${waking}`}
         />
       )}
 
       {error ? (
-        <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+        <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
       ) : null}
 
       <label htmlFor="confirm-name">

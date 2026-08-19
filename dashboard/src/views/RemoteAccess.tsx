@@ -75,7 +75,7 @@ export function RemoteAccess({ canManage }: { canManage: boolean }) {
         <Message
           tone="error"
           title={error.title}
-          detail={error.detail}
+          technical={error.detail}
           recovery={error.recovery}
         />
       ) : null}

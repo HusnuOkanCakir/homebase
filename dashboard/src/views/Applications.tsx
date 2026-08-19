@@ -110,6 +110,14 @@ export function Applications({ canManage }: Props) {
 
   const application = selected ? list?.items.find((a) => a.id === selected) : undefined;
 
+  // `installed` is null when the runtime did not answer, which is not the same
+  // as false — an application Homebase cannot see the state of is kept with the
+  // installed ones, because reporting it as merely available would be offering
+  // to install something that may already be running.
+  const items = list?.items ?? [];
+  const installed = items.filter((app) => app.installed !== false);
+  const available = items.filter((app) => app.installed === false);
+
   if (application) {
     return (
       <ApplicationDetail
@@ -126,7 +134,7 @@ export function Applications({ canManage }: Props) {
   return (
     <>
       {error ? (
-        <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+        <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
       ) : null}
 
       {/* Docker being down is stated once, at the top, rather than by making
@@ -153,29 +161,94 @@ export function Applications({ canManage }: Props) {
 
       <section className="card">
         <h2>Applications</h2>
-        <p className="muted">
-          Homebase installs and looks after these for you. Choose one to see what it does.
-        </p>
 
         {list && list.items.length === 0 ? (
           <p className="muted">This server has no applications available to install.</p>
         ) : (
-          <ul className="app-list">
-            {list?.items.map((app) => (
-              <li key={app.id}>
-                <button className="app-row" onClick={() => setSelected(app.id)}>
-                  <span className="app-row-main">
-                    <span className="app-row-name">{app.name}</span>
-                    {app.summary ? <span className="muted">{app.summary}</span> : null}
-                  </span>
-                  <StateBadge application={app} />
-                </button>
-              </li>
-            ))}
-          </ul>
+          <>
+            {/* What is on this server, first and separately.
+
+                It used to be one alphabetical list of everything, installed or
+                not. On a server running eight applications that is eight rows
+                worth reading scattered through four that are not, each carrying
+                a badge saying "Not installed" — so the loudest, most repeated
+                thing on the page was the word for nothing having happened.
+
+                Somebody opening this screen has one of two questions, and they
+                are not the same question: what is running, or what else could
+                I have. */}
+            <AppGroup
+              title="On this server"
+              apps={installed}
+              onChoose={setSelected}
+              empty="Nothing is installed yet."
+            />
+            <AppGroup
+              title={installed.length > 0 ? "You could also add" : "Available"}
+              subtitle={
+                installed.length > 0
+                  ? undefined
+                  : "Homebase installs and looks after these for you. Choose one to see what it does."
+              }
+              apps={available}
+              onChoose={setSelected}
+              /* Only reachable with an empty catalogue, which the branch above
+                 already handles — but a group that can render nothing should
+                 say what nothing means rather than showing a bare heading. */
+              empty="Everything in the catalogue is already installed."
+            />
+          </>
         )}
       </section>
     </>
+  );
+}
+
+/**
+ * One heading and the applications under it.
+ *
+ * The state badge is dropped for anything not installed. It said the same word
+ * on every row in that group, which is the definition of a label carrying no
+ * information — and the heading above them already says it once.
+ */
+function AppGroup({
+  title,
+  subtitle,
+  apps,
+  empty,
+  onChoose,
+}: {
+  title: string;
+  subtitle?: string | undefined;
+  apps: Application[];
+  empty: string;
+  onChoose: (id: string) => void;
+}) {
+  return (
+    <div className="app-group">
+      <h3>
+        {title}
+        {apps.length > 0 ? <span className="muted"> · {apps.length}</span> : null}
+      </h3>
+      {subtitle ? <p className="muted">{subtitle}</p> : null}
+      {apps.length === 0 ? (
+        <p className="muted">{empty}</p>
+      ) : (
+        <ul className="app-list">
+          {apps.map((app) => (
+            <li key={app.id}>
+              <button className="app-row" onClick={() => onChoose(app.id)}>
+                <span className="app-row-main">
+                  <span className="app-row-name">{app.name}</span>
+                  {app.summary ? <span className="muted">{app.summary}</span> : null}
+                </span>
+                {app.installed ? <StateBadge application={app} /> : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -277,7 +350,7 @@ function ApplicationDetail({
         </div>
 
         {error ? (
-          <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+          <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
         ) : null}
 
         {job ? <JobProgress job={job} /> : null}
@@ -588,7 +661,7 @@ function JobProgress({ job }: { job: Job }) {
       <Message
         tone="error"
         title={job.error?.message ?? "That did not work."}
-        detail={job.error?.detail}
+        technical={job.error?.detail}
         recovery={job.error?.recovery}
       />
     );

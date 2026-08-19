@@ -110,7 +110,7 @@ export function Leaving({
                 "which works only if waking over the network was switched on " +
                 "before it went off, and the machine is still plugged in."
               }
-              detail="homebasectl wake"
+              technical="homebasectl wake"
             />
             <button className="primary" onClick={onBack}>
               Done
@@ -123,7 +123,7 @@ export function Leaving({
               <Message
                 tone={resolved.state === "succeeded" ? "info" : "error"}
                 title={resolved.message ?? "It finished."}
-                detail={resolved.error?.detail}
+                technical={resolved.error?.detail}
                 recovery={resolved.error?.recovery}
               />
             ) : (

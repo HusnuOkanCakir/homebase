@@ -106,7 +106,7 @@ export function Updates({ canManage }: { canManage: boolean }) {
   return (
     <>
       {error ? (
-        <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+        <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
       ) : null}
 
       {status && status.interrupted ? (
