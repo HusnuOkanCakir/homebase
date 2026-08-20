@@ -145,7 +145,7 @@ export function Updates({ canManage }: { canManage: boolean }) {
       ) : null}
 
       <section className="card">
-        <h2>This server</h2>
+        <h2>Updates</h2>
 
         <dl className="facts">
           <dt>Version</dt>

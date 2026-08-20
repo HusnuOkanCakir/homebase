@@ -79,7 +79,7 @@ test("first-run setup claims the server", async ({ page }) => {
 test("the overview shows real information about this machine", async ({ page }) => {
   await signIn(page);
 
-  await expect(page.getByRole("heading", { name: "This server" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your applications" })).toBeVisible();
 
   // These values came from /proc, through hostd's typed operation, over the
   // Unix socket, through core, to this browser. Asserting they are plausible is
@@ -125,7 +125,7 @@ test("restarting requires naming the machine", async ({ page }) => {
 
   // Backing out must actually back out.
   await page.getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByRole("heading", { name: "This server" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your applications" })).toBeVisible();
 });
 
 test("restarting the server, and the dashboard noticing it came back", async ({ page }) => {
@@ -156,7 +156,7 @@ test("restarting the server, and the dashboard noticing it came back", async ({ 
   await expect(page.getByText(/restarted successfully/i)).toBeVisible();
 
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page.getByRole("heading", { name: "This server" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your applications" })).toBeVisible();
 
   // And the server is genuinely usable again, not merely answering.
   await expect(fact(page, "Operating system")).toContainText("Ubuntu");

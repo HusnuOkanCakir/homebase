@@ -110,7 +110,7 @@ test("preparing a blank disk, and setting it up", async ({ page }) => {
 test("an application says it needs a disk, and takes the one it is given", async ({ page }) => {
   await signIn(page);
 
-  await page.getByRole("button", { name: "Applications", exact: true }).click();
+  await page.getByRole("button", { name: "Apps", exact: true }).click();
   await page.locator("button.app-row", { hasText: "File Browser" }).click();
 
   // Before anything else on the screen: it cannot run yet, and why.

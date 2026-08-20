@@ -657,6 +657,12 @@
       "enum": [
         "dns"
       ]
+    },
+    "icon": {
+      "description": "One character shown on the application's tile, usually an emoji.\n\nNot a URL and not a file. Every alternative — an image shipped in the package, a logo fetched at runtime — is either a licensing question about somebody else's trademark or a request the dashboard is forbidden from making. One character renders in any theme at any size and costs nothing.\n\nOptional: without it the tile shows the application's first letter.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8
     }
   }
 }

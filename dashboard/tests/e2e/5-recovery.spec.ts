@@ -158,7 +158,7 @@ test("the old password no longer works, and neither does the spent code", async 
 // --- Helpers -----------------------------------------------------------------
 
 async function openSecurity(page: Page) {
-  await page.getByRole("button", { name: "Security", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Your recovery code" })).toBeVisible();
 }
 

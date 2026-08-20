@@ -4,6 +4,7 @@
   "id": "stremio",
   "name": "Stremio",
   "summary": "Press play and watch straight away, without waiting for a download or keeping the file.",
+  "icon": "▶️",
   "after_install": "Open it and it is empty on purpose — Stremio finds nothing by itself. Go to Addons, then Community Addons, and install Torrentio: that is the part that finds things to watch. Then search for a film, press play, and it starts in about half a minute. Nothing is kept afterwards; watch it twice and it is fetched twice. For anything you want to keep, use Jellyseerr instead.",
   "homepage": "https://www.stremio.com",
   "license": "MIT",

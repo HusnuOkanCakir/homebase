@@ -51,11 +51,6 @@ export function Health({ system }: { system: SystemInfo }) {
     };
   }, [days]);
 
-  const memoryUsed = system.memory.total_bytes - system.memory.available_bytes;
-  const memoryPercent = system.memory.total_bytes
-    ? Math.round((memoryUsed / system.memory.total_bytes) * 100)
-    : null;
-
   const samples = history?.samples ?? [];
   const times = samples.map((sample) => sample.time);
   const column = <K extends keyof (typeof samples)[number]>(key: K) =>
@@ -87,13 +82,10 @@ export function Health({ system }: { system: SystemInfo }) {
             {system.load_average[0].toFixed(2)} <span className="unit">load</span>
           </dd>
         </div>
-        <div className="tile">
-          <dt>Memory</dt>
-          <dd>
-            {memoryPercent === null ? "—" : `${memoryPercent}%`}{" "}
-            <span className="unit">of {bytes(system.memory.total_bytes)}</span>
-          </dd>
-        </div>
+        {/* Memory is deliberately not here. The bars above this say it better —
+            a proportion of a total, next to the disk, which is the comparison
+            somebody is actually making. Two readings of the same number on one
+            screen invite a search for the difference between them. */}
         {system.temperature.celsius !== null ? (
           <div className="tile">
             <dt>Temperature</dt>

@@ -30,6 +30,7 @@ type App struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
 	Summary string   `json:"summary,omitempty"`
+	Icon    string   `json:"icon,omitempty"`
 	State   AppState `json:"state"`
 
 	// Installed is null where the state is unknown — false would be a claim
@@ -63,7 +64,24 @@ type App struct {
 	AfterInstall         string `json:"after_install,omitempty"`
 	HostPort             int    `json:"host_port,omitempty"`
 	ReachableFromNetwork bool   `json:"reachable_from_network"`
-	URL                  string `json:"url,omitempty"`
+
+	// Path is the base path the web interface is served under, and URL is the
+	// whole address. Both, because a caller composing its own address needs the
+	// first and a caller opening a link wants the second.
+	Path string `json:"path,omitempty"`
+	URL  string `json:"url,omitempty"`
+
+	// A privilege this application holds that most do not, and why.
+	//
+	// Reported so that whoever is about to install it can decline. That is the
+	// entire justification for both root permissions existing — declared per
+	// application, and shown — and for a while it was not true of any of them,
+	// because this struct did not have the field and nothing said so.
+	Elevation *struct {
+		Kind    string `json:"kind"`
+		Summary string `json:"summary"`
+		Reason  string `json:"reason"`
+	} `json:"elevation,omitempty"`
 }
 
 // AppList is the catalogue plus the state of everything in it.

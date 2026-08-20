@@ -4,6 +4,7 @@
   "id": "sonarr",
   "name": "Sonarr",
   "summary": "Ask for a television series and it finds, downloads and files each episode.",
+  "icon": "📺",
   "after_install": "Sonarr handles television. Open it and set a password, then Settings, Download Clients, add qBittorrent with host qbittorrent and port 8081. Under Settings, Media Management add /data/shows as a root folder. Leave the indexers to Prowlarr.",
   "homepage": "https://wiki.servarr.com",
   "license": "GPL-3.0-only",

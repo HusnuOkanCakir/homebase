@@ -4,6 +4,7 @@
   "id": "filebrowser",
   "name": "File Browser",
   "summary": "Put files on your server and get them back, from any device.",
+  "icon": "📁",
   "after_install": "Sign in as “admin” with the password “admin”, then change it immediately under Settings, User Management — until you do, anyone on your network who finds this page is signed in as an administrator of it. File Browser does not issue a password of its own and does not print one anywhere, so this is the only pair that works.",
   "homepage": "https://filebrowser.org",
   "license": "Apache-2.0",

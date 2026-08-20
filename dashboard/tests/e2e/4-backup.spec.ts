@@ -211,7 +211,7 @@ function fact(page: Page, label: string) {
 }
 
 async function openBackup(page: Page, disk?: string) {
-  await page.getByRole("button", { name: "Backup", exact: true }).click();
+  await page.getByRole("button", { name: "Storage", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Make a backup" })).toBeVisible();
 
   // With more than one disk set up, Homebase asks which one and picks none by

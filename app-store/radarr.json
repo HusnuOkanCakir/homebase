@@ -4,6 +4,7 @@
   "id": "radarr",
   "name": "Radarr",
   "summary": "Ask for a film and it finds, downloads and files it into your library.",
+  "icon": "🎞️",
   "after_install": "Radarr handles films, and is set up like Sonarr: a qBittorrent download client with host qbittorrent and port 8081, and /data/films as its root folder.",
   "homepage": "https://wiki.servarr.com",
   "license": "GPL-3.0-only",

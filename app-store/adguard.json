@@ -4,6 +4,7 @@
   "id": "adguard",
   "name": "AdGuard Home",
   "summary": "Blocks adverts and trackers for every device in the house, and stops your provider seeing or faking the names you look up.",
+  "icon": "🛡️",
   "after_install": "Work through the short setup, leaving both ports as they are, then choose a username and password. Afterwards, under Settings, DNS settings: put https://dns.cloudflare.com/dns-query in the upstream box — that is the part that stops your provider reading and rewriting your lookups — and under Access settings allow only your own network. Nothing is blocked for any device until you point that device at this server. Do one laptop first and live with it for a day.",
   "homepage": "https://adguard.com/adguard-home.html",
   "license": "GPL-3.0",

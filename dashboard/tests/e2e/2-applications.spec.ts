@@ -114,7 +114,7 @@ test("the application and its data survive restarting the server", async ({ page
 
   // Restart the machine from the overview. exact: true because "Restart this
   // server" also contains "This server", and a loose match resolves to both.
-  await page.getByRole("button", { name: "This server", exact: true }).click();
+  await page.getByRole("button", { name: "Home", exact: true }).click();
   await page.getByRole("button", { name: "Restart this server" }).click();
   await page.getByLabel(/Server name/).fill(SERVER_NAME);
   await page.getByRole("button", { name: "Restart now" }).click();
@@ -199,7 +199,7 @@ function applicationRow(page: Page, name: string) {
 }
 
 async function openApplications(page: Page) {
-  await page.getByRole("button", { name: "Applications", exact: true }).click();
+  await page.getByRole("button", { name: "Apps", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Applications" })).toBeVisible();
 }
 

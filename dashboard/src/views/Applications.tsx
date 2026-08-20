@@ -34,12 +34,22 @@ const REFRESH_MS = 5000;
 
 interface Props {
   canManage: boolean;
+  /**
+   * An application to open straight away, when Home sent somebody here.
+   *
+   * Read once, as the initial state, rather than watched in an effect. This
+   * screen is unmounted whenever the tab changes, so arriving from Home is
+   * always a fresh mount — and an effect that pushed the selection in after the
+   * first render would fight anybody who pressed "All applications" before it
+   * ran. Dashboard clears its side when a tab is pressed.
+   */
+  initial?: string | null;
 }
 
-export function Applications({ canManage }: Props) {
+export function Applications({ canManage, initial }: Props) {
   const [list, setList] = useState<ApplicationList | null>(null);
   const [error, setError] = useState<ReturnType<typeof describeError> | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initial ?? null);
 
   // The job currently running, if any. One at a time on purpose: two installs at
   // once on a home connection makes both slow and neither explicable.

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, isTerminal, type Job } from "../api";
 import { Message } from "../components/Message";
-import type { PowerChoice } from "./Overview";
+import type { PowerChoice } from "../components/PowerCard";
 
 /**
  * The screen shown while the server is going away, and after it has gone.

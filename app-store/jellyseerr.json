@@ -4,7 +4,8 @@
   "id": "jellyseerr",
   "name": "Jellyseerr",
   "summary": "Browse films and television, ask for what you want, and it appears in Jellyfin.",
-  "after_install": "This is the one to use day to day. Open it, sign in with your Jellyfin account at http://jellyfin:8096, then add Sonarr at http://sonarr:8989 and Radarr at http://radarr:7878 under Settings \u2014 each needs its API key, found in its own Settings, General. Then you search for something, press request, and it turns up in Jellyfin.",
+  "icon": "🔍",
+  "after_install": "This is the one to use day to day. Open it, sign in with your Jellyfin account at http://jellyfin:8096, then add Sonarr at http://sonarr:8989 and Radarr at http://radarr:7878 under Settings — each needs its API key, found in its own Settings, General. Then you search for something, press request, and it turns up in Jellyfin.",
   "homepage": "https://docs.jellyseerr.dev",
   "license": "MIT",
   "container": {

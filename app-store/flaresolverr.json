@@ -4,6 +4,7 @@
   "id": "flaresolverr",
   "name": "FlareSolverr",
   "summary": "Gets past the anti-bot checks some search sites use, for Prowlarr.",
+  "icon": "🔓",
   "after_install": "Nothing to open — this has no interface. Tell Prowlarr about it: Settings, Indexers, add a FlareSolverr proxy with the host http://flaresolverr:8191, give it the tag \"cloudflare\", then put that same tag on each indexer that needs it. Only tag the ones that fail, because every request through here drives a real browser and is far slower than a direct one.",
   "homepage": "https://github.com/FlareSolverr/FlareSolverr",
   "license": "MIT",

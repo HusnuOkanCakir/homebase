@@ -39,8 +39,20 @@ type Manifest struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
 	Summary         string `json:"summary,omitempty"`
-	Homepage        string `json:"homepage,omitempty"`
-	License         string `json:"license,omitempty"`
+
+	// Icon is one character shown on the application's tile, usually an emoji.
+	//
+	// Not a URL and not a file. Every alternative — an image in the package, a
+	// logo fetched from the internet — is either a licensing question about
+	// somebody else's trademark or a request the dashboard is forbidden from
+	// making, and neither is worth it to make a grid legible. One character
+	// renders in any theme at any size and costs nothing.
+	//
+	// Optional. Without it the tile shows the application's first letter, which
+	// is worse and is not broken.
+	Icon     string `json:"icon,omitempty"`
+	Homepage string `json:"homepage,omitempty"`
+	License  string `json:"license,omitempty"`
 
 	Container ManifestContainer `json:"container"`
 	Network   ManifestNetwork   `json:"network,omitempty"`

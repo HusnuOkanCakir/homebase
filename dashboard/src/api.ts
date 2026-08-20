@@ -420,6 +420,8 @@ export interface Application {
   id: string;
   name: string;
   summary?: string;
+  /** One character for the tile — an emoji, usually. Absent is normal. */
+  icon?: string;
   state: ApplicationState;
   /** Null where the state is unknown; `false` would be a claim nobody can make. */
   installed: boolean | null;

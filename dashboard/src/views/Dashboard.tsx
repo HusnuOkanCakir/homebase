@@ -2,13 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Job, type SystemInfo, type User } from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
-import { Overview, type PowerChoice } from "./Overview";
+import { Home } from "./Home";
+import { Settings } from "./Settings";
+import { type PowerChoice } from "../components/PowerCard";
 import { Applications } from "./Applications";
 import { Storage } from "./Storage";
 import { Backup } from "./Backup";
-import { Security } from "./Security";
 import { Network } from "./Network";
-import { Updates } from "./Updates";
 import { Repair } from "./Repair";
 import { FirstSteps } from "./FirstSteps";
 import { Leaving } from "./Leaving";
@@ -25,16 +25,39 @@ import { Shares } from "./Shares";
 
 const REFRESH_MS = 5000;
 
+/**
+ * The sections, and there are deliberately fewer than there were.
+ *
+ * Nine tabs wrapped onto two rows and spent three of themselves — updates,
+ * security, and the machine's own settings — on things somebody does once or
+ * twice a year, while the applications the server exists to run had one tab
+ * shared with the catalogue of ones it does not.
+ *
+ * Seven now, each a word rather than a phrase, on one line at any width worth
+ * designing for. "Home" is where somebody lands and where they press the thing
+ * they came to press; everything rarer is behind a word they would think of.
+ */
 type Tab =
-  | "overview"
-  | "applications"
-  | "storage"
+  | "home"
+  | "apps"
   | "files"
-  | "backup"
+  | "storage"
   | "network"
-  | "updates"
-  | "security"
-  | "repair";
+  | "settings"
+  | "help";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "home", label: "Home" },
+  { id: "apps", label: "Apps" },
+  { id: "files", label: "Files" },
+  { id: "storage", label: "Storage" },
+  { id: "network", label: "Network" },
+  { id: "settings", label: "Settings" },
+  // Last, and named for what somebody is thinking rather than for what it does.
+  // Nobody looks for "recovery"; they look for the tab that sounds like "this
+  // is not working".
+  { id: "help", label: "Help" },
+];
 
 interface Props {
   user: User;
@@ -42,7 +65,10 @@ interface Props {
 }
 
 export function Dashboard({ user, onSignOut }: Props) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>("home");
+  // Set when Home sends somebody to a particular application, so the Apps
+  // screen opens on it rather than on the list.
+  const [openApp, setOpenApp] = useState<string | null>(null);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [error, setError] = useState<ReturnType<typeof describeError> | null>(null);
   // What the machine is doing instead of serving this page. Held here rather
@@ -94,75 +120,21 @@ export function Dashboard({ user, onSignOut }: Props) {
       </header>
 
       <nav className="tabs" aria-label="Sections">
-        <button
-          className={tab === "overview" ? "tab tab-current" : "tab"}
-          aria-current={tab === "overview" ? "page" : undefined}
-          onClick={() => setTab("overview")}
-        >
-          This server
-        </button>
-        <button
-          className={tab === "applications" ? "tab tab-current" : "tab"}
-          aria-current={tab === "applications" ? "page" : undefined}
-          onClick={() => setTab("applications")}
-        >
-          Applications
-        </button>
-        <button
-          className={tab === "storage" ? "tab tab-current" : "tab"}
-          aria-current={tab === "storage" ? "page" : undefined}
-          onClick={() => setTab("storage")}
-        >
-          Storage
-        </button>
-        {/* Named for the thing rather than the protocol. Nobody in a house
-            looks for "SMB", and the question they arrive with is how to get at
-            their files from the computer they are sitting at. */}
-        <button
-          className={tab === "files" ? "tab tab-current" : "tab"}
-          aria-current={tab === "files" ? "page" : undefined}
-          onClick={() => setTab("files")}
-        >
-          Files
-        </button>
-        <button
-          className={tab === "backup" ? "tab tab-current" : "tab"}
-          aria-current={tab === "backup" ? "page" : undefined}
-          onClick={() => setTab("backup")}
-        >
-          Backup
-        </button>
-        <button
-          className={tab === "network" ? "tab tab-current" : "tab"}
-          aria-current={tab === "network" ? "page" : undefined}
-          onClick={() => setTab("network")}
-        >
-          Network
-        </button>
-        <button
-          className={tab === "updates" ? "tab tab-current" : "tab"}
-          aria-current={tab === "updates" ? "page" : undefined}
-          onClick={() => setTab("updates")}
-        >
-          Updates
-        </button>
-        <button
-          className={tab === "security" ? "tab tab-current" : "tab"}
-          aria-current={tab === "security" ? "page" : undefined}
-          onClick={() => setTab("security")}
-        >
-          Security
-        </button>
-        {/* Last, and named for what somebody is thinking rather than for what
-            it does. Nobody looks for "recovery"; they look for the tab that
-            sounds like "this is not working". */}
-        <button
-          className={tab === "repair" ? "tab tab-current" : "tab"}
-          aria-current={tab === "repair" ? "page" : undefined}
-          onClick={() => setTab("repair")}
-        >
-          Something&rsquo;s wrong
-        </button>
+        {TABS.map((entry) => (
+          <button
+            key={entry.id}
+            className={tab === entry.id ? "tab tab-current" : "tab"}
+            aria-current={tab === entry.id ? "page" : undefined}
+            onClick={() => {
+              // Cleared here so that pressing "Apps" in the navigation shows
+              // the list, rather than reopening whatever Home last sent us to.
+              setOpenApp(null);
+              setTab(entry.id);
+            }}
+          >
+            {entry.label}
+          </button>
+        ))}
       </nav>
 
       <main className="app-main">
@@ -175,42 +147,59 @@ export function Dashboard({ user, onSignOut }: Props) {
           />
         ) : null}
 
-        {tab === "overview" ? (
+        {tab === "home" ? (
           system ? (
             <>
               {/*
-                Above the machine's vital statistics, because on a server that
-                has just been claimed the useful thing is what to do next, not
-                how much memory is free.
+                Above the machine's own numbers, because on a server that has
+                just been claimed the useful thing is what to do next, not how
+                much memory is free.
               */}
               <FirstSteps system={system} onGo={setTab} />
-              <Overview
+              <Home
                 system={system}
-                onLeaving={(choice, job) => setLeaving({ choice, job })}
+                onGoToApps={() => setTab("apps")}
+                onOpenApp={(id) => {
+                  setOpenApp(id);
+                  setTab("apps");
+                }}
               />
             </>
           ) : (
             !error && <p className="muted">Reading your server…</p>
           )
-        ) : tab === "applications" ? (
-          <Applications canManage={user.permissions.includes("apps.manage")} />
-        ) : tab === "storage" ? (
-          <Storage canManage={user.permissions.includes("storage.modify")} />
+        ) : tab === "apps" ? (
+          <Applications
+            canManage={user.permissions.includes("apps.manage")}
+            initial={openApp}
+          />
         ) : tab === "files" ? (
           <Shares
             canManage={user.permissions.includes("network.modify")}
             serverName={system?.hostname ?? ""}
           />
-        ) : tab === "backup" ? (
-          <Backup canManage={user.permissions.includes("backup.run")} />
+        ) : tab === "storage" ? (
+          <>
+            {/* Disks and backups on one screen, because a backup *is* a disk
+                decision: it needs a second one, and the first question either
+                way is which disks this server has. */}
+            <Storage canManage={user.permissions.includes("storage.modify")} />
+            <Backup canManage={user.permissions.includes("backup.run")} />
+          </>
         ) : tab === "network" ? (
           <Network canManage={user.permissions.includes("network.modify")} />
-        ) : tab === "updates" ? (
-          <Updates canManage={user.permissions.includes("update.manage")} />
-        ) : tab === "repair" ? (
-          <Repair serverName={system?.hostname ?? ""} />
+        ) : tab === "settings" ? (
+          system ? (
+            <Settings
+              user={user}
+              system={system}
+              onLeaving={(choice, job) => setLeaving({ choice, job })}
+            />
+          ) : (
+            !error && <p className="muted">Reading your server…</p>
+          )
         ) : (
-          <Security username={user.username} />
+          <Repair serverName={system?.hostname ?? ""} />
         )}
       </main>
     </div>

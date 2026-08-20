@@ -258,6 +258,7 @@ type AppStatus struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
 	Summary string   `json:"summary,omitempty"`
+	Icon    string   `json:"icon,omitempty"`
 	State   AppState `json:"state"`
 
 	// Installed is null where the state is unknown. false is a claim that it is
@@ -456,6 +457,7 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 		ID:           manifest.ID,
 		Name:         manifest.Name,
 		Summary:      manifest.Summary,
+		Icon:         manifest.Icon,
 		Elevation:    describeElevation(manifest.Permissions),
 		State:        StateUnknown,
 		Image:        manifest.Container.Image,
