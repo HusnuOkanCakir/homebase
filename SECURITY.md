@@ -7,7 +7,7 @@
 Report privately through GitHub:
 [**Report a vulnerability**](https://github.com/HusnuOkanCakir/homebase/security/advisories/new).
 
-If GitHub is not workable for you, email `h.okancakir@gmail.com` with `[homebase-security]`
+If GitHub is not workable for you, email `security@example.com` with `[homebase-security]`
 in the subject.
 
 Please include:

@@ -71,7 +71,7 @@ func (h *harness) signIn(t *testing.T) string {
 	t.Helper()
 
 	rec := h.do(http.MethodPost, "/api/v1/setup",
-		`{"username":"okan","password":"`+goodPassword+`"}`, nil)
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("setup returned %d: %s", rec.Code, rec.Body)
 	}
@@ -143,7 +143,7 @@ func TestSetupCannotBeRunTwice(t *testing.T) {
 func TestShortPasswordIsRejectedWithAdvice(t *testing.T) {
 	h := newHarness(t)
 
-	rec := h.do(http.MethodPost, "/api/v1/setup", `{"username":"okan","password":"short"}`, nil)
+	rec := h.do(http.MethodPost, "/api/v1/setup", `{"username":"alex","password":"short"}`, nil)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", rec.Code)
 	}
@@ -159,13 +159,13 @@ func TestLogin(t *testing.T) {
 	h.signIn(t)
 
 	rec := h.do(http.MethodPost, "/api/v1/auth/login",
-		`{"username":"okan","password":"`+goodPassword+`"}`, nil)
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
 
 	rec = h.do(http.MethodPost, "/api/v1/auth/login",
-		`{"username":"okan","password":"wrong"}`, nil)
+		`{"username":"alex","password":"wrong"}`, nil)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("a wrong password returned %d", rec.Code)
 	}
@@ -177,7 +177,7 @@ func TestSessionCookieIsProtected(t *testing.T) {
 	h := newHarness(t)
 
 	rec := h.do(http.MethodPost, "/api/v1/setup",
-		`{"username":"okan","password":"`+goodPassword+`"}`, nil)
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil)
 
 	var cookie *http.Cookie
 	for _, c := range rec.Result().Cookies() {
@@ -221,7 +221,7 @@ func TestTheSessionCookieIsSecureOverTLS(t *testing.T) {
 
 	client := server.Client()
 	response, err := client.Post(server.URL+"/api/v1/setup", "application/json",
-		strings.NewReader(`{"username":"okan","password":"`+goodPassword+`"}`))
+		strings.NewReader(`{"username":"alex","password":"`+goodPassword+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestPermissionIsCheckedSeparatelyFromAuthentication(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 
-	admin, err := h.auth.CreateAdministrator(ctx, "okan", goodPassword)
+	admin, err := h.auth.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestUnknownFieldsAreRejected(t *testing.T) {
 	h := newHarness(t)
 
 	rec := h.do(http.MethodPost, "/api/v1/setup",
-		`{"username":"okan","password":"`+goodPassword+`","admin":true}`, nil)
+		`{"username":"alex","password":"`+goodPassword+`","admin":true}`, nil)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 — an unexpected field was accepted", rec.Code)

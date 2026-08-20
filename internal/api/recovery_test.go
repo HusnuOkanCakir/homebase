@@ -20,7 +20,7 @@ func setupWithCode(t *testing.T, h *harness) (code, token string) {
 	t.Helper()
 
 	rec := h.do(http.MethodPost, "/api/v1/setup",
-		`{"username":"okan","password":"`+goodPassword+`"}`, nil)
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("setup returned %d: %s", rec.Code, rec.Body)
 	}
@@ -57,7 +57,7 @@ func TestSetupIssuesARecoveryCode(t *testing.T) {
 	// And it is shown once. Signing in again must not repeat it — anything the
 	// server can show twice, it can show to somebody else.
 	rec := h.do(http.MethodPost, "/api/v1/auth/login",
-		`{"username":"okan","password":"`+goodPassword+`"}`, nil)
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login returned %d", rec.Code)
 	}
@@ -72,7 +72,7 @@ func TestRecoveringWithTheCode(t *testing.T) {
 
 	const newPassword = "a-completely-new-password"
 	rec := h.do(http.MethodPost, "/api/v1/auth/recover",
-		`{"username":"okan","recovery_code":"`+code+`","new_password":"`+newPassword+`"}`, nil)
+		`{"username":"alex","recovery_code":"`+code+`","new_password":"`+newPassword+`"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("recovery returned %d: %s", rec.Code, rec.Body)
 	}
@@ -86,7 +86,7 @@ func TestRecoveringWithTheCode(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.User.Username != "okan" {
+	if body.User.Username != "alex" {
 		t.Errorf("recovered as %q", body.User.Username)
 	}
 	if body.RecoveryCode == "" || body.RecoveryCode == code {
@@ -107,11 +107,11 @@ func TestRecoveringWithTheCode(t *testing.T) {
 	}
 
 	if rec := h.do(http.MethodPost, "/api/v1/auth/login",
-		`{"username":"okan","password":"`+newPassword+`"}`, nil); rec.Code != http.StatusOK {
+		`{"username":"alex","password":"`+newPassword+`"}`, nil); rec.Code != http.StatusOK {
 		t.Errorf("the new password does not work: %d", rec.Code)
 	}
 	if rec := h.do(http.MethodPost, "/api/v1/auth/login",
-		`{"username":"okan","password":"`+goodPassword+`"}`, nil); rec.Code != http.StatusUnauthorized {
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil); rec.Code != http.StatusUnauthorized {
 		t.Error("the old password still works")
 	}
 }
@@ -122,7 +122,7 @@ func TestRecoveryAnnouncesItself(t *testing.T) {
 	code, _ := setupWithCode(t, h)
 
 	rec := h.do(http.MethodPost, "/api/v1/auth/recover",
-		`{"username":"okan","recovery_code":"`+code+`","new_password":"a-completely-new-password"}`, nil)
+		`{"username":"alex","recovery_code":"`+code+`","new_password":"a-completely-new-password"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("recovery returned %d: %s", rec.Code, rec.Body)
 	}
@@ -161,9 +161,9 @@ func TestRecoveryRefusalsLookTheSame(t *testing.T) {
 		name string
 		body string
 	}{
-		{"a wrong code", `{"username":"okan","recovery_code":"ABCDE-FGHJK-MNPQR-STVWX-YZ234","new_password":"a-new-password-x"}`},
+		{"a wrong code", `{"username":"alex","recovery_code":"ABCDE-FGHJK-MNPQR-STVWX-YZ234","new_password":"a-new-password-x"}`},
 		{"an unknown account", `{"username":"nobody","recovery_code":"` + code + `","new_password":"a-new-password-x"}`},
-		{"an empty code", `{"username":"okan","recovery_code":"","new_password":"a-new-password-x"}`},
+		{"an empty code", `{"username":"alex","recovery_code":"","new_password":"a-new-password-x"}`},
 	}
 
 	var seen []string
@@ -189,7 +189,7 @@ func TestRecoveryRefusalsLookTheSame(t *testing.T) {
 
 	// And nothing was changed by any of it.
 	if rec := h.do(http.MethodPost, "/api/v1/auth/login",
-		`{"username":"okan","password":"`+goodPassword+`"}`, nil); rec.Code != http.StatusOK {
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil); rec.Code != http.StatusOK {
 		t.Error("a refused recovery changed the password anyway")
 	}
 }
@@ -200,7 +200,7 @@ func TestRecoveryIsRateLimited(t *testing.T) {
 	h := newHarness(t)
 	_, _ = setupWithCode(t, h)
 
-	body := `{"username":"okan","recovery_code":"ABCDE-FGHJK-MNPQR-STVWX-YZ234","new_password":"a-new-password-x"}`
+	body := `{"username":"alex","recovery_code":"ABCDE-FGHJK-MNPQR-STVWX-YZ234","new_password":"a-new-password-x"}`
 
 	var limited *httptest.ResponseRecorder
 	for range authBurst + 5 {
@@ -232,7 +232,7 @@ func TestSuccessfulSignInIsNotRationed(t *testing.T) {
 
 	for i := range authBurst * 4 {
 		rec := h.do(http.MethodPost, "/api/v1/auth/login",
-			`{"username":"okan","password":"`+goodPassword+`"}`, nil)
+			`{"username":"alex","password":"`+goodPassword+`"}`, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("correct sign-in %d was refused with %d: %s", i+1, rec.Code, rec.Body)
 		}
@@ -240,7 +240,7 @@ func TestSuccessfulSignInIsNotRationed(t *testing.T) {
 
 	// And the allowance is still there for somebody who then mistypes.
 	rec := h.do(http.MethodPost, "/api/v1/auth/login",
-		`{"username":"okan","password":"wrong"}`, nil)
+		`{"username":"alex","password":"wrong"}`, nil)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("a wrong password after many correct ones returned %d", rec.Code)
 	}
@@ -253,7 +253,7 @@ func TestSignInIsRateLimited(t *testing.T) {
 	var limited bool
 	for range authBurst + 5 {
 		rec := h.do(http.MethodPost, "/api/v1/auth/login",
-			`{"username":"okan","password":"not-the-right-password"}`, nil)
+			`{"username":"alex","password":"not-the-right-password"}`, nil)
 		if rec.Code == http.StatusTooManyRequests {
 			limited = true
 			break
@@ -305,7 +305,7 @@ func TestRecoveryStatusAndReissue(t *testing.T) {
 
 	// The old one must stop working the moment a new one is issued.
 	old := h.do(http.MethodPost, "/api/v1/auth/recover",
-		`{"username":"okan","recovery_code":"`+code+`","new_password":"a-new-password-x"}`, nil)
+		`{"username":"alex","recovery_code":"`+code+`","new_password":"a-new-password-x"}`, nil)
 	if old.Code != http.StatusUnauthorized {
 		t.Errorf("the replaced code still works: %d", old.Code)
 	}
@@ -337,7 +337,7 @@ func TestTheSessionCookieMatchesTheConnectionItWasIssuedOn(t *testing.T) {
 	h := newHarness(t)
 
 	rec := h.do(http.MethodPost, "/api/v1/setup",
-		`{"username":"okan","password":"`+goodPassword+`"}`, nil)
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("setup returned %d", rec.Code)
 	}

@@ -111,7 +111,7 @@ def install_server(vm: VM, packages: list[Path]) -> None:
         time.sleep(1)
 
     result = ssh(vm, ["sudo", "sh", "-c",
-                      f"HOMEBASE_PASSWORD='{PASSWORD}' homebasectl setup okan"],
+                      f"HOMEBASE_PASSWORD='{PASSWORD}' homebasectl setup alex"],
                  check=False)
     check(result.returncode == 0, "and an administrator exists",
           (result.stdout + result.stderr)[-300:])

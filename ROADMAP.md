@@ -956,7 +956,7 @@ gap between *working* and *usable*, which is a distinction no test in this
 repository was measuring.
 
 **The login refused the name it was created with.** The account is namespaced —
-`hbshare-okan` — which is what stops a file-sharing password from also being an
+`hbshare-alex` — which is what stops a file-sharing password from also being an
 ssh login. It is not something anybody should have to type, and the first person
 to try typed the name they had just chosen and got an authentication box that
 came back for ever with no explanation. Samba has a username map for exactly

@@ -144,7 +144,7 @@ def install_server(vm: VM, packages: list[Path]) -> None:
     ssh(vm, ["curl", "--silent", "--insecure",
              "-c", "/tmp/net-cookies", "-b", "/tmp/net-cookies",
              "-H", "Content-Type: application/json",
-             "-d", json.dumps({"username": "okan", "password": NET_PASSWORD}),
+             "-d", json.dumps({"username": "alex", "password": NET_PASSWORD}),
              "https://127.0.0.1/api/v1/setup"], check=False)
     signed_in = ssh(vm, ["curl", "--silent", "--insecure",
                          "-c", "/tmp/net-cookies", "-b", "/tmp/net-cookies",

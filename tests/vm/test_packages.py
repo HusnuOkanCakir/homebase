@@ -295,7 +295,7 @@ def create_data(vm: VM) -> None:
     wait_for_api(vm)
 
     status, body = api(vm, "/setup", "POST",
-                       json.dumps({"username": "okan", "password": PASSWORD}))
+                       json.dumps({"username": "alex", "password": PASSWORD}))
     check(status == 201, f"administrator created ({status})", body)
 
     # A file where a user's own files would live.
@@ -319,7 +319,7 @@ def verify_data_survived(vm: VM, what: str) -> None:
           "network can claim this server.")
 
     status, _ = api(vm, "/auth/login", "POST",
-                    json.dumps({"username": "okan", "password": PASSWORD}))
+                    json.dumps({"username": "alex", "password": PASSWORD}))
     check(status == 200, "the same password still signs in")
 
     contents = ssh(vm, ["sudo", "cat", "/srv/homebase/important.txt"]).stdout.strip()
@@ -512,7 +512,7 @@ def verify_scheduled_backups(vm: VM) -> None:
     # it. The operations existing in hostd is not the same as the feature
     # existing, and that gap is what kept this off the dashboard for a milestone.
     status, body = api(vm, "/auth/login", "POST",
-                       json.dumps({"username": "okan", "password": PASSWORD}))
+                       json.dumps({"username": "alex", "password": PASSWORD}))
     check(status == 200, f"signed in ({status})", body)
 
     status, body = api(vm, "/backups/schedule")
@@ -789,7 +789,7 @@ def verify_factory_reset(vm: VM) -> None:
     # And the old password must not work any more, which is the half that
     # matters when somebody is giving the machine away.
     status, _ = api(vm, "/auth/login", "POST",
-                    json.dumps({"username": "okan", "password": PASSWORD}))
+                    json.dumps({"username": "alex", "password": PASSWORD}))
     check(status != 200,
           f"the account that was on it cannot sign in ({status})",
           "A reset that leaves an account behind is worse than one that fails.")
@@ -798,7 +798,7 @@ def verify_factory_reset(vm: VM) -> None:
     # setup` can be tested honestly: it refuses once an account exists, so a
     # freshly reset server is the only server it works on.
     result = ssh(vm, ["sudo", "sh", "-c",
-                      f"HOMEBASE_PASSWORD='{PASSWORD}' homebasectl setup okan"],
+                      f"HOMEBASE_PASSWORD='{PASSWORD}' homebasectl setup alex"],
                  check=False)
     check(result.returncode == 0,
           f"and it can be set up again from a terminal ({result.returncode})",
@@ -811,7 +811,7 @@ def verify_factory_reset(vm: VM) -> None:
 
     # And the account it made really works.
     status, _ = api(vm, "/auth/login", "POST",
-                    json.dumps({"username": "okan", "password": PASSWORD}))
+                    json.dumps({"username": "alex", "password": PASSWORD}))
     check(status == 200, f"and the account signs in ({status})")
 
     # Twice is refused: a second administrator created without credentials would

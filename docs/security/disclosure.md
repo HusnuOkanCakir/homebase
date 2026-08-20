@@ -9,7 +9,7 @@ covers how a report is handled once it arrives.
 [**Report a vulnerability**](https://github.com/HusnuOkanCakir/homebase/security/advisories/new)
 — private, and never a public issue.
 
-If GitHub is not workable, email `h.okancakir@gmail.com` with `[homebase-security]` in the
+If GitHub is not workable, email `security@example.com` with `[homebase-security]` in the
 subject.
 
 ## What happens next

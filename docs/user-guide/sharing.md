@@ -59,7 +59,7 @@ machine — so Homebase keeps these accounts apart from the ones that sign in to
 dashboard, and gives them no access to anything but the shared folders.
 
 You can use the same *name* in both places. Homebase stores the sharing account under a
-prefix and maps it back, so `okan` on the dashboard and `okan` on your laptop can be the
+prefix and maps it back, so `alex` on the dashboard and `alex` on your laptop can be the
 same person with two different passwords.
 
 Homebase cannot show you a sharing password again after you set it. Setting it again is how
@@ -101,7 +101,7 @@ back in and it works again with no further setting up.
 ```sh
 homebasectl share                       # what is shared, and how to open it
 homebasectl share add backup internal   # share a folder
-homebasectl share password okan         # let somebody open it
+homebasectl share password alex         # let somebody open it
 homebasectl share remove backup         # stop sharing; the files stay
 ```
 

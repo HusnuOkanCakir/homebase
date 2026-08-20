@@ -9,7 +9,7 @@ import { test, expect, type Page } from "@playwright/test";
  * following it would be looking for a server that no longer goes by that name.
  */
 
-const ADMIN = "okan";
+const ADMIN = "alex";
 const PASSWORD = "a-password-chosen-after-recovery";
 const SERVER_NAME = process.env["HOMEBASE_HOSTNAME"] ?? "homebase-dash";
 const NEW_NAME = "living-room";

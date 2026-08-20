@@ -76,7 +76,7 @@ make. If your network eats mDNS, the screen on the laptop shows the address inst
 ### 4. Create the administrator
 
 ```sh
-sudo homebasectl setup okan
+sudo homebasectl setup alex
 ```
 
 It asks for a password and prints a **recovery code**. Write that down somewhere other than
@@ -128,7 +128,7 @@ mounts.
 
 ```sh
 sudo homebasectl share add backup internal   # installs the file server the first time
-sudo homebasectl share password okan         # asks for it; never an argument
+sudo homebasectl share password alex         # asks for it; never an argument
 sudo homebasectl share                       # what to type, per operating system
 ```
 

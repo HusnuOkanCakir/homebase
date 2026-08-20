@@ -13,7 +13,7 @@ import { test, expect, type Page } from "@playwright/test";
  * followed it.
  */
 
-const ADMIN = "okan";
+const ADMIN = "alex";
 const PASSWORD = "a-sufficiently-long-password";
 const RECOVERED_PASSWORD = "a-password-chosen-after-recovery";
 const SERVER_NAME = process.env["HOMEBASE_HOSTNAME"] ?? "homebase-dash";

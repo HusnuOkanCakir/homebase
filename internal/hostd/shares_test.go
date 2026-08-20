@@ -128,7 +128,7 @@ func TestShareNamesAreConstrained(t *testing.T) {
 // It is typed into a Windows dialog and saved there for years, so it must not be
 // a credential for anything that administers the machine.
 func TestShareAccountsAreNamespaced(t *testing.T) {
-	if !strings.HasPrefix(shareUserPrefix+"okan", shareUserPrefix) {
+	if !strings.HasPrefix(shareUserPrefix+"alex", shareUserPrefix) {
 		t.Fatal("the prefix is not applied")
 	}
 	// An account named after a real login must land somewhere that is not it.

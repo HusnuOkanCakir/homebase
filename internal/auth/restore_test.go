@@ -35,7 +35,7 @@ func TestARecoveryCodeSurvivesABackupAndRestore(t *testing.T) {
 	defer func() { _ = origin.Close() }()
 
 	service := NewService(origin.DB())
-	user, err := service.CreateAdministrator(ctx, "okan", goodPassword)
+	user, err := service.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestARecoveryCodeSurvivesABackupAndRestore(t *testing.T) {
 
 	// The account is back, which is the part that was already true — and the
 	// part that was not enough on its own.
-	if _, err := restored.Authenticate(ctx, "okan", goodPassword); err != nil {
+	if _, err := restored.Authenticate(ctx, "alex", goodPassword); err != nil {
 		t.Fatalf("the account did not survive the restore: %v", err)
 	}
 
@@ -78,25 +78,25 @@ func TestARecoveryCodeSurvivesABackupAndRestore(t *testing.T) {
 	// disk. Without this, restoring after being locked out restores the lock.
 	const chosenAfterTheDisaster = "a-password-chosen-afterwards"
 	recovered, replacementCode, err := restored.ResetPasswordWithCode(
-		ctx, "okan", onPaper, chosenAfterTheDisaster)
+		ctx, "alex", onPaper, chosenAfterTheDisaster)
 	if err != nil {
 		t.Fatalf("the recovery code written down before the backup does not work "+
 			"on the restored machine: %v", err)
 	}
-	if recovered.Username != "okan" {
+	if recovered.Username != "alex" {
 		t.Errorf("recovered as %q", recovered.Username)
 	}
 	if replacementCode == "" {
 		t.Error("the restored machine did not hand back a fresh code")
 	}
 
-	if _, err := restored.Authenticate(ctx, "okan", chosenAfterTheDisaster); err != nil {
+	if _, err := restored.Authenticate(ctx, "alex", chosenAfterTheDisaster); err != nil {
 		t.Errorf("the password set on the restored machine does not work: %v", err)
 	}
 
 	// The original is untouched by any of it: a restore reads the backup, and
 	// recovering on the new machine must not reach back to the old one.
-	if _, err := service.Authenticate(ctx, "okan", goodPassword); err != nil {
+	if _, err := service.Authenticate(ctx, "alex", goodPassword); err != nil {
 		t.Errorf("restoring changed the machine the backup came from: %v", err)
 	}
 }
@@ -114,7 +114,7 @@ func TestASpentCodeIsSpentOnTheMachineThatSpentIt(t *testing.T) {
 	defer func() { _ = origin.Close() }()
 
 	service := NewService(origin.DB())
-	user, err := service.CreateAdministrator(ctx, "okan", goodPassword)
+	user, err := service.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,10 +135,10 @@ func TestASpentCodeIsSpentOnTheMachineThatSpentIt(t *testing.T) {
 	defer func() { _ = replacement.Close() }()
 	restored := NewService(replacement.DB())
 
-	if _, _, err := restored.ResetPasswordWithCode(ctx, "okan", onPaper, "a-new-password-here"); err != nil {
+	if _, _, err := restored.ResetPasswordWithCode(ctx, "alex", onPaper, "a-new-password-here"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := restored.ResetPasswordWithCode(ctx, "okan", onPaper, "another-password-x"); !errors.Is(err, ErrInvalidRecoveryCode) {
+	if _, _, err := restored.ResetPasswordWithCode(ctx, "alex", onPaper, "another-password-x"); !errors.Is(err, ErrInvalidRecoveryCode) {
 		t.Error("the code still works on the machine it was already spent on")
 	}
 }

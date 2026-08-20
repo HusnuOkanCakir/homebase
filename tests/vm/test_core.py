@@ -170,7 +170,7 @@ def verify_setup_flow(vm: VM) -> None:
     check(status == 401, f"system information is refused before sign-in ({status})")
 
     status, body = api(vm, "/setup", "POST",
-                       json.dumps({"username": "okan", "password": PASSWORD}))
+                       json.dumps({"username": "alex", "password": PASSWORD}))
     check(status == 201, f"administrator created ({status})", body)
 
     status, body = api(vm, "/setup", "POST",
@@ -271,7 +271,7 @@ def verify_job_resolved_after_reboot(vm: VM, job_id: str) -> None:
     # Sign in again: the session cookie jar in /tmp did not survive the reboot,
     # which is itself worth knowing.
     status, _ = api(vm, "/auth/login", "POST",
-                    json.dumps({"username": "okan", "password": PASSWORD}))
+                    json.dumps({"username": "alex", "password": PASSWORD}))
     check(status == 200, f"signing in again returned {status}")
 
     status, body = api(vm, f"/jobs/{job_id}")

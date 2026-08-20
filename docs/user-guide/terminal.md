@@ -33,7 +33,7 @@ sudo homebasectl installer create --device /dev/sdX
 
 # Boot the laptop from it, wait, then
 ssh you@homebase.local
-sudo homebasectl setup okan            # prints a recovery code — write it down
+sudo homebasectl setup alex            # prints a recovery code — write it down
 sudo homebasectl apps install jellyfin
 sudo homebasectl backup schedule daily backups
 sudo homebasectl update check
@@ -64,7 +64,7 @@ homebasectl vpn dns duckdns yourname        # keep a name pointing at the house
 homebasectl vpn off                         # close the port; the keys are kept
 homebasectl share                           # folders on the network, and what to type
 homebasectl share add backup internal
-homebasectl share password okan
+homebasectl share password alex
 homebasectl apps storage jellyfin           # where an application keeps its files
 homebasectl apps open jellyfin              # the address, and open it if there is a desktop
 homebasectl system history 7                # how hot it has been, as a chart

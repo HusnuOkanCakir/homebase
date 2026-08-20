@@ -54,7 +54,7 @@ VM_NAME = "homebase-installed"
 # never heard of it.
 CONSOLE_USER = "console"
 
-ADMIN = "okan"
+ADMIN = "alex"
 PASSWORD = "a-sufficiently-long-password"
 
 

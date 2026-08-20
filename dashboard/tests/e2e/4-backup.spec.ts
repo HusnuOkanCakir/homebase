@@ -17,7 +17,7 @@ import { test, expect, type Page } from "@playwright/test";
  * the disk whose files it is backing up.
  */
 
-const ADMIN = "okan";
+const ADMIN = "alex";
 const PASSWORD = "a-sufficiently-long-password";
 const SERVER_NAME = process.env["HOMEBASE_HOSTNAME"] ?? "homebase-dash";
 

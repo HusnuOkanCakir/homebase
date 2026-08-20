@@ -729,7 +729,7 @@ def verify_the_api_exposes_all_of_this(vm: VM) -> None:
     step("The same thing, through the API a browser uses")
 
     status, body = core_api(vm, "/setup", "POST",
-                        json.dumps({"username": "okan", "password": PASSWORD}))
+                        json.dumps({"username": "alex", "password": PASSWORD}))
     check(status == 201, f"an administrator is created ({status})", body[:300])
 
     status, body = core_api(vm, "/system/update")
@@ -813,7 +813,7 @@ def verify_a_diagnostic_file_is_safe_to_send(vm: VM) -> None:
 
     # Through the API, which is the only way a person gets it off the machine.
     status, body = core_api(vm, "/auth/login", "POST",
-                            json.dumps({"username": "okan", "password": PASSWORD}))
+                            json.dumps({"username": "alex", "password": PASSWORD}))
     check(status == 200, f"signed in ({status})", body[:200])
 
     status, body = core_api(vm, "/system/diagnostics/download")

@@ -13,7 +13,7 @@ import (
 //
 //	homebasectl share                          what is shared, and how to open it
 //	homebasectl share add backup internal      share a folder
-//	homebasectl share password okan            let somebody open it
+//	homebasectl share password alex            let somebody open it
 //	homebasectl share remove backup            stop sharing; the files stay
 //
 // The status output is most of the value here. SMB is a protocol every device

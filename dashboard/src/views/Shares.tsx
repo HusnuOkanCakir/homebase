@@ -395,7 +395,7 @@ function People({
           id="share-user"
           value={username}
           onChange={(event) => setUsername(event.target.value)}
-          placeholder="okan"
+          placeholder="alex"
           autoComplete="off"
         />
         <label htmlFor="share-password">File-sharing password</label>

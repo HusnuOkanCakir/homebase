@@ -9,7 +9,7 @@ Enough of an SMB2 client to prove somebody can open a Homebase share:
 NEGOTIATE, SESSION_SETUP with NTLMv2, TREE_CONNECT.
 
 ```sh
-python3 tests/tools/smbcheck.py homebase.local backup hbshare-okan 'the-password'
+python3 tests/tools/smbcheck.py homebase.local backup hbshare-alex 'the-password'
 ```
 
 It exists because neither machine involved in testing Milestone 12 had

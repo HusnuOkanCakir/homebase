@@ -38,9 +38,9 @@ const (
 
 	// sambaUserMap lets somebody type the name they chose.
 	//
-	// The Unix account is namespaced — `hbshare-okan` — and that is what stops a
+	// The Unix account is namespaced — `hbshare-alex` — and that is what stops a
 	// file-sharing password from also being a login. It is not what anybody
-	// should have to type. The first person to use this typed "okan", which is
+	// should have to type. The first person to use this typed "alex", which is
 	// the name they had just set, and got an authentication box that came back
 	// for ever with no explanation.
 	//
@@ -252,7 +252,7 @@ func (s *ShareServices) shareUsers() []string {
 
 // renderUserMap maps the name somebody types to the account it belongs to.
 //
-// One line per account: `hbshare-okan = okan`. Samba reads the left side as the
+// One line per account: `hbshare-alex = alex`. Samba reads the left side as the
 // Unix account and everything after the equals as names that may be typed for
 // it.
 func renderUserMap(users []string) string {

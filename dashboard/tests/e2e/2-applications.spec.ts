@@ -16,7 +16,7 @@ import { test, expect, type Page } from "@playwright/test";
  * as. The numbered filenames are what orders them — see playwright.config.ts.
  */
 
-const ADMIN = "okan";
+const ADMIN = "alex";
 const PASSWORD = "a-sufficiently-long-password";
 const SERVER_NAME = process.env["HOMEBASE_HOSTNAME"] ?? "homebase-dash";
 

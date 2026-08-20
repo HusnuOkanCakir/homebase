@@ -49,7 +49,7 @@ func testDatabase(t *testing.T, accounts ...string) (path string, service *auth.
 }
 
 func TestRecoveryCodeFromTheConsoleActuallyWorks(t *testing.T) {
-	path, service := testDatabase(t, "okan")
+	path, service := testDatabase(t, "alex")
 
 	var out, errOut bytes.Buffer
 	if err := run([]string{"recovery-code", "--database", path}, &out, &errOut); err != nil {
@@ -63,7 +63,7 @@ func TestRecoveryCodeFromTheConsoleActuallyWorks(t *testing.T) {
 
 	// The whole point: this code, typed into the browser, opens the server.
 	if _, _, err := service.ResetPasswordWithCode(
-		context.Background(), "okan", code, "a-brand-new-password"); err != nil {
+		context.Background(), "alex", code, "a-brand-new-password"); err != nil {
 		t.Fatalf("the code printed at the console did not work: %v", err)
 	}
 
@@ -80,9 +80,9 @@ func TestRecoveryCodeFromTheConsoleActuallyWorks(t *testing.T) {
 // Issuing a new code must invalidate the old one, including when the old one
 // came from setup rather than from here.
 func TestConsoleCodeReplacesThePreviousOne(t *testing.T) {
-	path, service := testDatabase(t, "okan")
+	path, service := testDatabase(t, "alex")
 
-	first, err := service.IssueRecoveryCode(context.Background(), mustUser(t, service, "okan"))
+	first, err := service.IssueRecoveryCode(context.Background(), mustUser(t, service, "alex"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestConsoleCodeReplacesThePreviousOne(t *testing.T) {
 	}
 
 	if _, _, err := service.ResetPasswordWithCode(
-		context.Background(), "okan", first, "a-brand-new-password"); err == nil {
+		context.Background(), "alex", first, "a-brand-new-password"); err == nil {
 		t.Error("the previous code still works after a new one was issued")
 	}
 }
@@ -101,14 +101,14 @@ func TestConsoleCodeReplacesThePreviousOne(t *testing.T) {
 // With more than one account it must refuse rather than guess: a wasted trip to
 // the machine is the cost of picking wrong.
 func TestSeveralAccountsRequireANameAndSayWhichExist(t *testing.T) {
-	path, _ := testDatabase(t, "okan", "guest")
+	path, _ := testDatabase(t, "alex", "guest")
 
 	var out bytes.Buffer
 	err := run([]string{"recovery-code", "--database", path}, &out, &out)
 	if err == nil {
 		t.Fatal("with two accounts the tool picked one on its own")
 	}
-	if !strings.Contains(err.Error(), "okan") || !strings.Contains(err.Error(), "guest") {
+	if !strings.Contains(err.Error(), "alex") || !strings.Contains(err.Error(), "guest") {
 		t.Errorf("the refusal does not say which accounts there are: %v", err)
 	}
 	if codePattern.FindString(out.String()) != "" {
@@ -126,7 +126,7 @@ func TestSeveralAccountsRequireANameAndSayWhichExist(t *testing.T) {
 }
 
 func TestUnknownAccountIsExplained(t *testing.T) {
-	path, _ := testDatabase(t, "okan")
+	path, _ := testDatabase(t, "alex")
 
 	var out bytes.Buffer
 	err := run([]string{"recovery-code", "--database", path, "--user", "nobody"}, &out, &out)
@@ -139,13 +139,13 @@ func TestUnknownAccountIsExplained(t *testing.T) {
 }
 
 func TestListAccounts(t *testing.T) {
-	path, _ := testDatabase(t, "okan", "guest")
+	path, _ := testDatabase(t, "alex", "guest")
 
 	var out bytes.Buffer
 	if err := run([]string{"list-accounts", "--database", path}, &out, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "okan") || !strings.Contains(out.String(), "guest") {
+	if !strings.Contains(out.String(), "alex") || !strings.Contains(out.String(), "guest") {
 		t.Errorf("accounts missing from the listing:\n%s", out.String())
 	}
 }

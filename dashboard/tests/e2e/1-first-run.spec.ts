@@ -14,7 +14,7 @@ import { test, expect, type Page } from "@playwright/test";
  * dashboard handles the server going away underneath it.
  */
 
-const ADMIN = "okan";
+const ADMIN = "alex";
 const PASSWORD = "a-sufficiently-long-password";
 
 /** The VM's hostname, which is also what the reboot confirmation requires. */

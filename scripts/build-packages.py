@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD = REPO_ROOT / "build"
 OUT = REPO_ROOT / "dist"
 
-MAINTAINER = "Husnu Okan Cakir <h.okancakir@gmail.com>"
+MAINTAINER = "The Homebase Project <maintainer@example.com>"
 HOMEPAGE = "https://github.com/HusnuOkanCakir/homebase"
 SECTION = "admin"
 
