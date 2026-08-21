@@ -420,6 +420,11 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.Us
 			"cores":   info.CPU.Cores,
 			"threads": info.CPU.Threads,
 		},
+		// Passed through rather than rebuilt field by field. This response is
+		// assembled by hand, which is a third place a field can be dropped
+		// between hostd and a browser — and three fields had already been lost
+		// that way in the two layers below it before anybody noticed.
+		"graphics":     info.Graphics,
 		"memory":       resources.Memory,
 		"load_average": resources.LoadAverage,
 		"power":        resources.Power,

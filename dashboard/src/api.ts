@@ -295,6 +295,23 @@ export interface SystemInfo {
   virtualised: boolean;
   uptime_seconds: number;
   cpu: { model: string; cores: number; threads: number };
+  /**
+   * The graphics hardware, and the name for it that will still be right after
+   * a reboot.
+   *
+   * `render_node` is what every other tool prints. `stable_path` is what to
+   * actually configure an application with — the numbering in the first one is
+   * assigned in probe order, and on this project's own test machine installing
+   * a driver made two cards swap numbers, silently pointing the media server at
+   * a different chip than the one it had been using.
+   */
+  graphics?: {
+    name: string;
+    driver: string;
+    render_node: string;
+    stable_path?: string;
+    accelerates_video: boolean;
+  }[];
   memory: { total_bytes: number; available_bytes: number };
   load_average: [number, number, number];
   power: {

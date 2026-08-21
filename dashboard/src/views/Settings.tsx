@@ -73,6 +73,36 @@ export function Settings({ user, system, onLeaving }: Props) {
           ) : null}
         </dl>
 
+        {/* Only where there is something to say. A machine with one graphics
+            chip and nothing configured against it does not need a lecture; a
+            machine with two needs to know which is which, because the obvious
+            name for them is the one that moves. */}
+        {(system.graphics?.length ?? 0) > 0 ? (
+          <>
+            <h3>Graphics</h3>
+            <ul className="list">
+              {system.graphics?.map((card) => (
+                <li key={card.render_node}>
+                  <strong>{card.name}</strong>{" "}
+                  <span className="muted">({card.driver})</span>
+                  {card.accelerates_video ? null : (
+                    <span className="badge badge-warning"> No video acceleration</span>
+                  )}
+                  {card.stable_path ? (
+                    <div className="muted">
+                      Point applications at <code>{card.stable_path}</code>
+                      {" — "}it is <code>{card.render_node}</code> today, and that
+                      number changes.
+                    </div>
+                  ) : (
+                    <div className="muted">{card.render_node}</div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+
         <details className="details">
           <summary>Technical details</summary>
           <dl className="facts facts-quiet">

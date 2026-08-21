@@ -64,3 +64,25 @@ func jsonFields(t reflect.Type) map[string]bool {
 	}
 	return names
 }
+
+// SystemInfo is mirrored by hand for the same reason App is, and drifts for the
+// same reason. Checked here so that the next field added to one of them cannot
+// go missing in the other in silence — which is how `icon`, `elevation` and
+// `path` were all lost, none of them with a symptom.
+func TestSystemInfoMirrorsWhatHostdReports(t *testing.T) {
+	theirs := jsonFields(reflect.TypeOf(hostd.SystemInfo{}))
+	ours := jsonFields(reflect.TypeOf(SystemInfo{}))
+
+	for name := range theirs {
+		if !ours[name] {
+			t.Errorf("hostd reports %q and hostclient.SystemInfo drops it; core "+
+				"will serve an empty value and nothing will report a fault", name)
+		}
+	}
+	for name := range ours {
+		if !theirs[name] {
+			t.Errorf("hostclient.SystemInfo carries %q and hostd does not report "+
+				"it; it will always be empty", name)
+		}
+	}
+}

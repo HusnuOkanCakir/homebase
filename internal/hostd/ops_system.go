@@ -99,6 +99,11 @@ type SystemInfo struct {
 	UptimeSeconds int64  `json:"uptime_seconds"`
 	CPU           CPU    `json:"cpu"`
 	Virtualised   bool   `json:"virtualised"`
+
+	// Graphics is what this machine can put a picture together with, and — more
+	// to the point — what an application should be told to use for hardware
+	// video work. See graphics.go for why the obvious answer is the wrong one.
+	Graphics []Graphics `json:"graphics,omitempty"`
 }
 
 type CPU struct {
@@ -106,6 +111,11 @@ type CPU struct {
 	Cores   int    `json:"cores"`
 	Threads int    `json:"threads"`
 }
+
+const (
+	sysClassDRM = "/sys/class/drm"
+	devDRI      = "/dev/dri"
+)
 
 func systemGetInfo(ctx context.Context, _ NoParams) (any, error) {
 	hostname, err := os.Hostname()
@@ -133,6 +143,7 @@ func systemGetInfo(ctx context.Context, _ NoParams) (any, error) {
 		UptimeSeconds: uptime,
 		CPU:           cpu,
 		Virtualised:   virtualised,
+		Graphics:      readGraphics(sysClassDRM, devDRI),
 	}, nil
 }
 

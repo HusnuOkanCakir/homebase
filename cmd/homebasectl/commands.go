@@ -1534,6 +1534,13 @@ func systemCommand(args []string, stdout io.Writer) error {
 					Controlled string `json:"controlled"`
 					Message    string `json:"message"`
 				} `json:"fan"`
+				Graphics []struct {
+					Name             string `json:"name"`
+					Driver           string `json:"driver"`
+					RenderNode       string `json:"render_node"`
+					StablePath       string `json:"stable_path"`
+					AcceleratesVideo bool   `json:"accelerates_video"`
+				} `json:"graphics"`
 			}
 			if err := c.Get(ctx, "/system", &info); err != nil {
 				return err
@@ -1548,6 +1555,20 @@ func systemCommand(args []string, stdout io.Writer) error {
 				info.CPU.Model, info.CPU.Cores, info.LoadAverage[0])
 			fmt.Fprintf(w, "Memory:  %s free of %s\n",
 				humanBytes(info.Memory.AvailableBytes), humanBytes(info.Memory.TotalBytes))
+
+			// The stable path, not the numbered one. renderD128 is assigned in
+			// probe order and moves when a driver changes; anybody who writes it
+			// into a configuration file is describing one boot.
+			for _, card := range info.Graphics {
+				note := ""
+				if !card.AcceleratesVideo {
+					note = " — no video acceleration"
+				}
+				fmt.Fprintf(w, "Video:   %s via %s%s\n", card.Name, card.Driver, note)
+				if card.StablePath != "" {
+					fmt.Fprintf(w, "         %s\n", card.StablePath)
+				}
+			}
 			if info.Temperature.Celsius != nil {
 				fmt.Fprintf(w, "Heat:    %d °C (%s)\n",
 					*info.Temperature.Celsius, info.Temperature.State)

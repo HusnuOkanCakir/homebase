@@ -189,11 +189,18 @@ type Operation struct {
 // `git grep 'hostclient\.'` lists every privileged thing core can do.
 
 type SystemInfo struct {
-	Hostname      string `json:"hostname"`
-	OS            string `json:"os"`
-	Kernel        string `json:"kernel"`
-	Architecture  string `json:"architecture"`
-	UptimeSeconds int64  `json:"uptime_seconds"`
+	Hostname     string `json:"hostname"`
+	OS           string `json:"os"`
+	Kernel       string `json:"kernel"`
+	Architecture string `json:"architecture"`
+	Graphics     []struct {
+		Name             string `json:"name"`
+		Driver           string `json:"driver"`
+		RenderNode       string `json:"render_node"`
+		StablePath       string `json:"stable_path,omitempty"`
+		AcceleratesVideo bool   `json:"accelerates_video"`
+	} `json:"graphics,omitempty"`
+	UptimeSeconds int64 `json:"uptime_seconds"`
 	CPU           struct {
 		Model   string `json:"model"`
 		Cores   int    `json:"cores"`
