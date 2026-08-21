@@ -30,7 +30,7 @@ const realNetworkReply = `{
      "wake_on_lan":false,"wake_on_lan_known":true,"wake_on_lan_supported":false},
     {"addresses":["10.71.0.1"],"kind":"ethernet","name":"wg0","up":true,
      "wake_on_lan":false,"wake_on_lan_known":true,"wake_on_lan_supported":false},
-    {"addresses":["172.17.0.1"],"kind":"container","mac":"ea:35:ab:8b:bd:0d",
+    {"addresses":["172.17.0.1"],"kind":"container","mac":"00:00:5e:00:53:03",
      "name":"docker0","up":true,
      "wake_on_lan":false,"wake_on_lan_known":true,"wake_on_lan_supported":false}
   ]

@@ -120,10 +120,10 @@ func TestADeviceNameCannotBecomeADirective(t *testing.T) {
 		}
 	}
 
-	// An iPhone is called "Okan's iPhone" out of the box. A naming rule that
+	// An iPhone is called "Alex's iPhone" out of the box. A naming rule that
 	// rejects what the device calls itself is one people work around.
 	for _, name := range []string{
-		"phone", "work laptop", "Okan's iPad", "tv-2", "Okan's iPhone",
+		"phone", "work laptop", "Alex's iPad", "tv-2", "Alex's iPhone",
 	} {
 		if !validDeviceName.MatchString(name) {
 			t.Errorf("%q was refused, and is an ordinary name", name)

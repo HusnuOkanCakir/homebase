@@ -142,9 +142,15 @@ and phones, where you cannot install anything.
 
 **It stops your provider reading and rewriting your lookups.** Every name your server
 looks up used to go to your router in plain text, and on some connections the answer that
-comes back is not true. On the connection Homebase was developed against,
-`thepiratebay.org` resolved to `85.111.6.83` — a block page — while the real answer is
-`162.159.136.6`. Applications are told the site is down, and report it that way.
+comes back is not true. Where a provider filters at the DNS level — which several do, and
+some are required to — a name resolves to one of their own servers showing a block page
+instead of to the site's real address.
+
+That is not only a privacy point. Every container inherits the server's resolver, so an
+application looking one of those names up is handed a wrong address by a machine it has no
+reason to distrust, and reports the result as the site being down. It was verified on a
+connection that does this: the same name returned a block page through the router and the
+correct address through an encrypted upstream.
 
 ### What Homebase changes to make room for it
 

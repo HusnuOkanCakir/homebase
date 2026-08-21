@@ -6,7 +6,7 @@ site_url: https://husnuokancakir.github.io/homebase/
 repo_url: https://github.com/HusnuOkanCakir/homebase
 repo_name: HusnuOkanCakir/homebase
 edit_uri: edit/main/docs/
-copyright: Copyright &copy; 2026 Husnu Okan Cakir and the Homebase contributors
+copyright: Copyright &copy; 2026 The Homebase Project and its contributors
 
 # Warnings are errors. An orphaned page or a broken reference fails the build
 # rather than shipping quietly.

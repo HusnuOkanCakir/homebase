@@ -21,7 +21,7 @@ import (
 //
 // An allowlist rather than a check for newlines, because an allowlist fails
 // closed. It includes the apostrophe, which is not decoration: an iPhone is
-// called "Okan's iPhone" out of the box, and a device-naming rule that rejects
+// called "Alex's iPhone" out of the box, and a device-naming rule that rejects
 // what the device calls itself is a rule people work around by typing something
 // worse.
 var validDeviceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 '._-]{0,30}$`)

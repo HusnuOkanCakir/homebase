@@ -12,12 +12,14 @@
 # already in use" while 192.168.x.x:53 succeeds.
 #
 # **The upstream.** Left alone, this machine asks the router, the router asks
-# the ISP, and on the connection this was written for the ISP answers with a
-# block page: thepiratebay.org resolves to 85.111.6.83 over the router and to
-# 162.159.136.6 over 1.1.1.1. That is not an abstract privacy point. Every
-# container inherits the host's resolver, so an application looking up an
-# address is told a lie by a machine it has no reason to distrust, and reports
-# it as the site being down.
+# the ISP, and where the ISP filters at the DNS level the answer that comes back
+# is one of their own servers rather than the address asked for. Measured on a
+# connection that does this: a name that returns a block page through the router
+# returns its real address through an encrypted upstream.
+#
+# That is not an abstract privacy point. Every container inherits the host's
+# resolver, so an application looking up an address is handed a wrong one by a
+# machine it has no reason to distrust, and reports it as the site being down.
 #
 # Fixing the second is what makes the first safe. With the stub gone, something
 # has to answer for the host, and it must not be the container we are freeing
