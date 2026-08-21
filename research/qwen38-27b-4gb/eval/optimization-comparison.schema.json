@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homeserver.invalid/qwen38/optimization-comparison.v1.schema.json",
+  "title": "Qwen 3.8 optimization A/B comparison v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "baseline_run_id",
+    "candidate_run_id",
+    "baseline_runtime_profile",
+    "candidate_runtime_profile",
+    "integrity",
+    "throughput",
+    "quality",
+    "pairs",
+    "passed",
+    "gates"
+  ],
+  "properties": {
+    "schema_version": {"const": "qwen38-optimization-comparison/v1"},
+    "baseline_runtime_profile": {"const": "baseline"},
+    "candidate_runtime_profile": {"enum": ["q4-kv", "ngram", "prompt-cache"]},
+    "integrity": {"type": "object"},
+    "throughput": {
+      "type": "object",
+      "required": [
+        "basis",
+        "baseline_tokens_per_second",
+        "candidate_tokens_per_second",
+        "improvement_percent"
+      ]
+    },
+    "quality": {
+      "type": "object",
+      "required": ["policy", "regression_count", "regressions"]
+    },
+    "pairs": {"type": "array", "items": {"type": "object"}},
+    "passed": {"type": "boolean"},
+    "gates": {"type": "array", "items": {"type": "object"}}
+  }
+}

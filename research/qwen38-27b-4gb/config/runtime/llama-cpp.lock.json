@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/ggml-org/llama.cpp.git",
+  "build": "b10549",
+  "revision": "b2e5e9b28b2484fbf94b543432ece638996a8b97",
+  "cuda": {
+    "required_release": "12.9",
+    "architectures": [
+      "60",
+      "61"
+    ]
+  },
+  "cmake_defines": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "BUILD_SHARED_LIBS": "ON",
+    "GGML_CUDA": "ON",
+    "GGML_NATIVE": "ON",
+    "LLAMA_BUILD_NUMBER": "10549",
+    "LLAMA_BUILD_COMMIT": "b2e5e9b28b2484fbf94b543432ece638996a8b97"
+  },
+  "targets": [
+    "llama-server",
+    "llama-bench",
+    "llama-cli",
+    "llama-perplexity"
+  ]
+}

@@ -1,0 +1,13 @@
+# Büyük veya yeniden üretilebilir deney çıktıları repoya girmez.
+artifacts/
+cache/
+models/
+checkpoints/
+results/raw/
+results/runs/
+.ipynb_checkpoints/
+__pycache__/
+*.gguf
+*.safetensors
+*.bin
+*.log

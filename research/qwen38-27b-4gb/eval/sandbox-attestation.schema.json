@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homeserver.invalid/qwen38/sandbox-attestation.v2.schema.json",
+  "title": "Qwen 3.8 sandbox attestation v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "attester",
+    "issued_at",
+    "runtime_pid",
+    "runtime_start_ticks",
+    "network_namespace_inode",
+    "mount_namespace_inode",
+    "rootfs_read_only",
+    "external_network_access",
+    "api_loopback_only",
+    "tools_enabled",
+    "host_mounts",
+    "model_sha256",
+    "runtime_revision"
+  ],
+  "properties": {
+    "schema_version": {"const": "qwen38-sandbox-attestation/v2"},
+    "attester": {"type": "string", "minLength": 1},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "runtime_pid": {"type": "integer", "minimum": 1},
+    "runtime_start_ticks": {"type": "integer", "minimum": 0},
+    "network_namespace_inode": {"type": "integer", "minimum": 1},
+    "mount_namespace_inode": {"type": "integer", "minimum": 1},
+    "rootfs_read_only": {"const": true},
+    "external_network_access": {"const": false},
+    "api_loopback_only": {"const": true},
+    "tools_enabled": {"const": false},
+    "host_mounts": {"type": "array", "maxItems": 0},
+    "model_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "runtime_revision": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}
+  },
+  "additionalProperties": false
+}

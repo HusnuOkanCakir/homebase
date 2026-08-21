@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "host": "127.0.0.1",
+  "port": 8088,
+  "ctx_size": 2048,
+  "parallel": 1,
+  "batch_size": 512,
+  "ubatch_size": 64,
+  "thread_profile": "physical",
+  "cache_type_k": "q8_0",
+  "cache_type_v": "q8_0",
+  "kv_location": "gpu",
+  "flash_attention": "off",
+  "gpu_layers": "auto",
+  "fit_target_mib": 1024,
+  "load_mode": "mmap",
+  "metrics": true
+}

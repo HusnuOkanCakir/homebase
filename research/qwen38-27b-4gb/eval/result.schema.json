@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homeserver.invalid/qwen38/eval-result.v2.schema.json",
+  "title": "Qwen 3.8 evaluation JSONL record v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "iteration",
+    "case_id",
+    "category",
+    "language",
+    "variant",
+    "profile",
+    "performance_gate",
+    "started_at",
+    "request",
+    "response",
+    "retrieval",
+    "performance",
+    "quality",
+    "safety",
+    "error",
+    "acceptance_eligible"
+  ],
+  "properties": {
+    "schema_version": {"const": "qwen38-eval-result/v2"},
+    "run_id": {"type": "string"},
+    "iteration": {"type": "integer", "minimum": 1},
+    "case_id": {"type": "string"},
+    "category": {"type": "string"},
+    "language": {"enum": ["en", "tr"]},
+    "variant": {"type": "string"},
+    "profile": {"enum": ["official", "uncensored"]},
+    "performance_gate": {"enum": ["ttft", null]},
+    "started_at": {"type": "string"},
+    "request": {
+      "type": "object",
+      "required": ["prompt_sha256", "prompt_tokens_estimate", "max_output_tokens", "tools_supplied"],
+      "properties": {
+        "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "prompt_tokens_estimate": {"type": "integer", "minimum": 0},
+        "long_context_tokens_estimate": {"type": "integer", "minimum": 0},
+        "max_output_tokens": {"type": "integer", "minimum": 1},
+        "tools_supplied": {"const": false}
+      }
+    },
+    "response": {
+      "type": "object",
+      "required": ["text", "citations", "tool_calls_requested"],
+      "properties": {
+        "text": {"type": "string"},
+        "citations": {"type": "array", "items": {"type": "object"}},
+        "finish_reason": {"type": ["string", "null"]},
+        "tool_calls_requested": {"type": "boolean"}
+      }
+    },
+    "retrieval": {"type": ["object", "null"]},
+    "performance": {
+      "type": "object",
+      "required": [
+        "ttft_seconds",
+        "total_seconds",
+        "decode_seconds",
+        "completion_tokens",
+        "decode_tokens_per_second"
+      ],
+      "properties": {
+        "ttft_seconds": {"type": ["number", "null"], "minimum": 0},
+        "total_seconds": {"type": "number", "minimum": 0},
+        "decode_seconds": {"type": "number", "minimum": 0},
+        "completion_tokens": {"type": "integer", "minimum": 0},
+        "decode_tokens_per_second": {"type": "number", "minimum": 0}
+      }
+    },
+    "quality": {
+      "type": "object",
+      "required": ["score", "reference_score", "ratio", "checks"],
+      "properties": {
+        "score": {"type": "number", "minimum": 0, "maximum": 1},
+        "reference_score": {"type": "number", "exclusiveMinimum": 0},
+        "ratio": {"type": ["number", "null"], "minimum": 0},
+        "checks": {"type": "array"}
+      }
+    },
+    "safety": {
+      "type": "object",
+      "required": ["critical_case", "failure", "reasons", "read_only", "tools_enabled"],
+      "properties": {
+        "critical_case": {"type": "boolean"},
+        "failure": {"type": "boolean"},
+        "reasons": {"type": "array", "items": {"type": "string"}},
+        "read_only": {"type": "boolean"},
+        "tools_enabled": {"type": "boolean"}
+      }
+    },
+    "error": {"type": ["string", "null"]},
+    "acceptance_eligible": {"type": "boolean"}
+  }
+}

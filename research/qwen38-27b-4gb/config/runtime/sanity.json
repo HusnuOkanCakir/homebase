@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "model_role": "gated_deltanet_cpu_cuda_sanity",
+  "prompt": "Concatenate DELTANET, one underscore, OK, one underscore, and 731. Reply with only the result.",
+  "required_marker": "DELTANET_OK_731",
+  "ctx_size": 512,
+  "predict_tokens": 32,
+  "seed": 424242,
+  "temperature": 0,
+  "threads_profile": "physical",
+  "gpu_layers": "auto",
+  "fit_target_mib": 1024,
+  "transport": "two_sequential_ephemeral_loopback_llama_server_native_completion_requests",
+  "startup_timeout_seconds": 600,
+  "request_timeout_seconds": 300,
+  "shutdown_timeout_seconds": 15,
+  "require_exact_token_match": true,
+  "minimum_printable_ratio": 0.95,
+  "minimum_similarity_ratio": 0.75
+}

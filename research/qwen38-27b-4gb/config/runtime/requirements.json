@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "architecture": "x86_64",
+  "compute_capabilities": [
+    "6.0",
+    "6.1"
+  ],
+  "gpu_memory_min_mib": 3500,
+  "gpu_memory_max_mib": 4608,
+  "ram_class": "16-GB-class (15 GiB usable tolerance)",
+  "ram_min_bytes": 16106127360,
+  "data_free_min_bytes": 107374182400,
+  "cuda_release": "12.9",
+  "driver_major": 580,
+  "disk_probe_bytes": 1073741824,
+  "disk_probe_block_bytes": 8388608
+}

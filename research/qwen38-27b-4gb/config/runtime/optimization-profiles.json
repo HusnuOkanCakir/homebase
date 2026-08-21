@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "default_profile": "baseline",
+  "minimum_speedup_percent": 10,
+  "profiles": {
+    "baseline": {
+      "description": "Q8 KV, no speculative decoding and prompt caching explicitly disabled.",
+      "cache_type_k": "q8_0",
+      "cache_type_v": "q8_0",
+      "server_args": [
+        "--no-cache-prompt",
+        "--cache-ram",
+        "0",
+        "--no-cache-idle-slots",
+        "--cache-reuse",
+        "0"
+      ],
+      "experimental": false
+    },
+    "q4-kv": {
+      "description": "Q4 KV memory experiment; retain only if end-to-end speedup is at least 10 percent without quality regression.",
+      "cache_type_k": "q4_0",
+      "cache_type_v": "q4_0",
+      "server_args": [
+        "--no-cache-prompt",
+        "--cache-ram",
+        "0",
+        "--no-cache-idle-slots",
+        "--cache-reuse",
+        "0"
+      ],
+      "experimental": true
+    },
+    "ngram": {
+      "description": "Draft-model-free n-gram speculation using b10549 --spec-default; it uses a transient 16 MiB lookup table.",
+      "cache_type_k": "q8_0",
+      "cache_type_v": "q8_0",
+      "server_args": [
+        "--no-cache-prompt",
+        "--cache-ram",
+        "0",
+        "--no-cache-idle-slots",
+        "--cache-reuse",
+        "0",
+        "--spec-default"
+      ],
+      "experimental": true
+    },
+    "prompt-cache": {
+      "description": "Short repeated-prompt cache experiment with no speculative draft weights.",
+      "cache_type_k": "q8_0",
+      "cache_type_v": "q8_0",
+      "server_args": [
+        "--cache-prompt",
+        "--cache-ram",
+        "128",
+        "--no-cache-idle-slots",
+        "--cache-reuse",
+        "64"
+      ],
+      "experimental": true
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homeserver.invalid/qwen38/acceptance.v2.schema.json",
+  "title": "Qwen 3.8 acceptance report v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "reference_mode",
+    "provisional_fixture_quality_ratio",
+    "integrity",
+    "passed",
+    "gates",
+    "thresholds_version"
+  ],
+  "properties": {
+    "schema_version": {"const": "qwen38-acceptance/v2"},
+    "run_id": {"type": ["string", "null"]},
+    "reference_mode": {"enum": ["external_results", "provisional_fixture_only"]},
+    "provisional_fixture_quality_ratio": {"type": ["number", "null"]},
+    "integrity": {"type": "object"},
+    "passed": {"type": "boolean"},
+    "thresholds_version": {"const": "qwen38-acceptance-thresholds/v2"},
+    "gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "measured", "operator", "threshold", "passed", "reason"]
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "status": "not_run_example_only",
+  "claim": "This file contains no benchmark result.",
+  "model_id": null,
+  "model_sha256": null,
+  "runtime_revision": null,
+  "hardware": {
+    "gpu_name": null,
+    "compute_capability": null,
+    "vram_bytes": null,
+    "ram_bytes": null
+  },
+  "settings": {
+    "context_tokens": null,
+    "gpu_layers": null,
+    "batch_size": null,
+    "kv_type": null
+  },
+  "measurements": {
+    "peak_vram_bytes": null,
+    "peak_rss_bytes": null,
+    "prompt_tokens_per_second": null,
+    "decode_tokens_per_second": null,
+    "p95_latency_ms": null
+  }
+}

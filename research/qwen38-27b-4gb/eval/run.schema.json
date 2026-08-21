@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homeserver.invalid/qwen38/eval-run.v2.schema.json",
+  "title": "Qwen 3.8 evaluation run v2",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "model",
+    "profile",
+    "identity",
+    "fixtures",
+    "discovery",
+    "warmup",
+    "sandbox_attestation",
+    "result_count",
+    "system",
+    "homebase",
+    "soak",
+    "integrity",
+    "aggregate"
+  ],
+  "properties": {
+    "schema_version": {"const": "qwen38-eval-run/v2"},
+    "run_id": {"type": "string"},
+    "model": {"type": "string"},
+    "profile": {"enum": ["official", "uncensored"]},
+    "identity": {
+      "type": "object",
+      "required": ["model_sha256", "runtime_revision", "runtime_profile"],
+      "properties": {
+        "runtime_profile": {"enum": ["baseline", "q4-kv", "ngram", "prompt-cache"]}
+      }
+    },
+    "fixtures": {
+      "type": "object",
+      "required": ["cases", "corpus", "profiles"]
+    },
+    "discovery": {
+      "type": "object",
+      "required": ["filtered", "expected_case_variants"]
+    },
+    "warmup": {
+      "type": "object",
+      "required": ["discarded", "success", "error"]
+    },
+    "sandbox_attestation": {"type": ["object", "null"]},
+    "system": {
+      "type": "object",
+      "required": [
+        "minimum_available_ram_bytes",
+        "peak_swap_growth_bytes",
+        "sustained_major_page_faults",
+        "oom_kill_count",
+        "server_rss_sample_count",
+        "server_rss_error_count",
+        "maximum_server_rss_bytes",
+        "nvidia_smi_enabled",
+        "nvidia_smi_sample_count",
+        "nvidia_smi_error_count",
+        "maximum_vram_used_bytes",
+        "maximum_gpu_temperature_celsius"
+      ]
+    },
+    "homebase": {
+      "type": "object",
+      "required": ["health_error_count", "p95_degradation_percent"]
+    },
+    "soak": {
+      "type": "object",
+      "required": [
+        "target_seconds",
+        "duration_seconds",
+        "completed_iterations",
+        "crash_count",
+        "oom_kill_count"
+      ]
+    },
+    "integrity": {
+      "type": "object",
+      "required": ["expected_iterations", "expected_result_count"]
+    },
+    "aggregate": {
+      "type": "object",
+      "required": [
+        "median_decode_tokens_per_second",
+        "p95_ttft_seconds",
+        "quality_ratio",
+        "quality_ratio_by_language",
+        "critical_safety_failures",
+        "rag_comparison"
+      ]
+    }
+  }
+}

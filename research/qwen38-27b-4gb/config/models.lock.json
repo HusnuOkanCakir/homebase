@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "models": [
+    {
+      "id": "qwen35-0.8b-ggml-q4-0-sanity",
+      "repository": "ggml-org/Qwen3.5-0.8B-GGUF",
+      "filename": "Qwen3.5-0.8B-Q4_0.gguf",
+      "revision": "8fea620810c4afa23dd6443f999a48574c1611a3",
+      "sha256": "57d1997790d1744fba5b40a7317df71ea5e2acee28c47e78f0cce39c0703f8cf",
+      "size_bytes": 563036064,
+      "role": "gated_deltanet_cpu_cuda_sanity",
+      "license": "Apache-2.0",
+      "provenance": "Small Gated DeltaNet GGUF sanity fixture converted by ggml-org from official Qwen3.5-0.8B revision 2fc06364715b967f1860aea9cf38778875588b17; immutable revision, byte size and SHA-256 are verified. It is not a Qwen3.8 quality proxy."
+    },
+    {
+      "id": "qwen38-27b-official-source",
+      "repository": "Qwen/Qwen3.8-27B",
+      "filename": "model.safetensors.index.json",
+      "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+      "sha256": "77042094076611b69791a610065f28b7013b8c621795fa86ddccc8bac7d1b9df",
+      "size_bytes": 112216,
+      "role": "official_source_reference_not_for_4gb_execution",
+      "license": "Apache-2.0",
+      "provenance": "Official Qwen snapshot last modified 2026-08-14. This record locks the 112216-byte index file; its metadata declares 55562855904 bytes of aggregate safetensors payload. Phase 0 excludes vision, MTP and long-context execution."
+    },
+    {
+      "id": "qwen38-27b-unsloth-ud-iq2-m",
+      "repository": "unsloth/Qwen3.8-27B-GGUF",
+      "filename": "Qwen3.8-27B-UD-IQ2_M.gguf",
+      "revision": "313447f257f7ebde0b968e4778feef774546ed81",
+      "sha256": "04a89ef4fa9c8726d09331433346809bbab692b4851d49d0738ba8d58a1ae740",
+      "size_bytes": 10319907904,
+      "role": "initial_q2_cpu_partial_gpu_candidate",
+      "license": "Apache-2.0",
+      "provenance": "Community GGUF derived from official Qwen revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 by Unsloth; pinned to immutable revision 313447f257f7ebde0b968e4778feef774546ed81 because later main revisions removed this file. Not an official Qwen quantization."
+    },
+    {
+      "id": "qwen38-27b-unsloth-ud-iq2-xxs",
+      "repository": "unsloth/Qwen3.8-27B-GGUF",
+      "filename": "Qwen3.8-27B-UD-IQ2_XXS.gguf",
+      "revision": "313447f257f7ebde0b968e4778feef774546ed81",
+      "sha256": "e792d8fb3142fe6d9171876d6da0f71f05a71028718debc72dbec93ff645e67d",
+      "size_bytes": 7266070528,
+      "role": "initial_q2_cpu_partial_gpu_candidate",
+      "license": "Apache-2.0",
+      "provenance": "Community GGUF derived from official Qwen revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 by Unsloth; pinned to immutable revision 313447f257f7ebde0b968e4778feef774546ed81 because later main revisions changed the file set. Not an official Qwen quantization."
+    },
+    {
+      "id": "qwen38-27b-unsloth-ud-iq3-xxs",
+      "repository": "unsloth/Qwen3.8-27B-GGUF",
+      "filename": "Qwen3.8-27B-UD-IQ3_XXS.gguf",
+      "revision": "313447f257f7ebde0b968e4778feef774546ed81",
+      "sha256": "c0b7c3038681ed2e3040456c1dd45f9858b6c2290bed172c70388a94874f3eee",
+      "size_bytes": 10934860704,
+      "role": "initial_q3_cpu_partial_gpu_candidate",
+      "license": "Apache-2.0",
+      "provenance": "Community GGUF derived from official Qwen revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 by Unsloth; pinned to immutable revision 313447f257f7ebde0b968e4778feef774546ed81 because later main revisions changed the file set. Not an official Qwen quantization."
+    },
+    {
+      "id": "qwen38-27b-unsloth-q3-k-m",
+      "repository": "unsloth/Qwen3.8-27B-GGUF",
+      "filename": "Qwen3.8-27B-Q3_K_M.gguf",
+      "revision": "313447f257f7ebde0b968e4778feef774546ed81",
+      "sha256": "7f3b845b563888ec3abc269474cf744bf703a7ce8766dbb7f696c63975facfd7",
+      "size_bytes": 13818690528,
+      "role": "initial_q3_cpu_partial_gpu_candidate",
+      "license": "Apache-2.0",
+      "provenance": "Community GGUF derived from official Qwen revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0 by Unsloth; pinned to immutable revision 313447f257f7ebde0b968e4778feef774546ed81 because later main revisions removed this file. Not an official Qwen quantization."
+    },
+    {
+      "id": "qwen38-27b-ggml-q4-k-m-reference",
+      "repository": "ggml-org/Qwen3.8-27B-GGUF",
+      "filename": "Qwen3.8-27B-Q4_K_M.gguf",
+      "revision": "97c30c65c8d9a3e73f9fdfb50f1d1a669e9a2827",
+      "sha256": "31629f53165ab6a7dad8c9847dcfd1fdf55829dac1e6e748f4a68581b0033d34",
+      "size_bytes": 18973870432,
+      "role": "q4_reference_colab_only_when_vram_at_least_15gb",
+      "license": "Apache-2.0",
+      "provenance": "GGUF automatically converted by ggml-org from official Qwen revision 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0; pinned SHA-256 and size come from the verified Git LFS pointer. Vision projector and MTP sidecars are deliberately out of scope."
+    }
+  ]
+}
