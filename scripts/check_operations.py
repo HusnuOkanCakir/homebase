@@ -174,6 +174,11 @@ def main() -> int:
         # which for a household using it is a credential for redirecting anything
         # that trusts that name.
         "vpn.set_dns": ["token"],
+        # The file-sharing password. Typed into a Windows dialog once and saved
+        # there for ever, which makes it exactly the kind nobody ever changes —
+        # so a copy of it sitting in an append-only log is a copy that outlives
+        # every reason it was ever written down.
+        "share.set_password": ["password"],
     }
     for name, fields in TAKES_A_SECRET.items():
         operation = declared.get(name)
