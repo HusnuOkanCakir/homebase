@@ -33,7 +33,7 @@ sudo homebasectl installer create --device /dev/sdX
 
 # Boot the laptop from it, wait, then
 ssh you@homebase.local
-sudo homebasectl setup okan            # prints a recovery code — write it down
+sudo homebasectl setup alex            # prints a recovery code — write it down
 sudo homebasectl apps install jellyfin
 sudo homebasectl backup schedule daily backups
 sudo homebasectl update check
@@ -61,7 +61,16 @@ homebasectl vpn setup yours.duckdns.org
 homebasectl vpn add-device phone            # prints a QR code, once
 homebasectl vpn remove-device phone
 homebasectl vpn dns duckdns yourname        # keep a name pointing at the house
+homebasectl vpn off                         # close the port; the keys are kept
+homebasectl share                           # folders on the network, and what to type
+homebasectl share add backup internal
+homebasectl share password alex
+homebasectl apps storage jellyfin           # where an application keeps its files
+homebasectl apps open jellyfin              # the address, and open it if there is a desktop
+homebasectl system history 7                # how hot it has been, as a chart
 homebasectl wake AA:BB:CC:DD:EE:FF          # start a sleeping machine
+homebasectl shutdown                        # switch this server off
+homebasectl restart                         # restart it
 homebasectl repair                          # fix what a power cut left broken
 homebasectl diagnostics                     # a file safe to send to somebody
 ```
@@ -69,6 +78,85 @@ homebasectl diagnostics                     # a file safe to send to somebody
 Anything that takes a while — installing an application, making a backup — waits and reports
 how it ended, rather than handing back a job number for you to poll. The polling loop would
 otherwise be written once per caller, slightly differently each time.
+
+## Switching it off
+
+```sh
+sudo homebasectl shutdown
+```
+
+It says which machine this is, what stops, and — before asking you to confirm — whether this
+server can be switched **on** again without walking to it:
+
+```
+It can be switched on again from here:
+    homebasectl wake 40:16:7E:01:F3:F5
+```
+
+or, if waking over the network is not enabled:
+
+```
+Nothing here can switch it on again. Waking it over the network
+is not enabled, so somebody has to press its power button.
+```
+
+That is the whole reason this exists rather than `sudo poweroff`. A server in a cupboard,
+switched off from a laptop in another room, is a mistake that costs a trip up a ladder — and
+it is entirely avoidable if the last screen that can say so says so first.
+
+Confirming means typing the server's name. There is no `--yes`; from a script, pass
+`--confirm <name>`.
+
+Waking needs the machine left plugged in. A laptop running on its battery has nothing
+listening once it is off, and most machines also need it enabled in the BIOS —
+`homebasectl network` reports whether the card is set to.
+
+## Reaching it from outside the house
+
+Wireguard, and Homebase runs the server itself — there is no third party in the path and
+no account anywhere ([ADR-0019](../decisions/0019-remote-access-is-self-hosted-wireguard.md)).
+
+```sh
+sudo homebasectl vpn dns duckdns yourname       # asks for the token, never an argument
+sudo homebasectl vpn setup yourname.duckdns.org
+sudo homebasectl vpn add-device phone
+```
+
+The last one prints a QR code **once**. It contains the device's private key, which is
+stored nowhere — losing it means removing the device and adding it again.
+
+**Scan it from inside the Wireguard app** — Add tunnel, then Scan from QR code. A phone's
+own camera decodes a QR code to text, so pointing it at this one displays the private key
+on screen and does nothing useful with it.
+
+Three things are worth knowing before you rely on it.
+
+**It opens a port.** UDP 51820, to the whole internet rather than to private addresses
+only, because being reachable from outside is what this is for. Every other listening
+thing Homebase sets up is offered to the house alone. What makes the difference acceptable
+is Wireguard's answer to a packet it does not recognise, which is silence — there is no
+banner, no error, and no way to distinguish the port from a closed one without a key.
+
+**Your router has to forward it, and Homebase cannot.** Nor can it check from here: a
+firewalled port and a wrong key are the same experience on a phone, which is to say
+nothing happening. `homebasectl vpn` therefore keeps telling you the forwarding is
+outstanding until a device has actually connected once, and `ever_connected` is the field
+that makes that possible.
+
+**Give the server a fixed address in the router** while you are in there. A forward points
+at an address, and the server's changes when its lease does — which is how remote access
+stops working three weeks later for no visible reason.
+
+To switch it off:
+
+```sh
+sudo homebasectl vpn off
+```
+
+The port closes first and the tunnel stops second, deliberately: a failure to stop leaves
+something nothing can reach, where the other order would leave the door open after you
+were told it was shut. The devices keep their keys and work again when it is switched back
+on — "switch this off" and "forget every device I set up" are different intentions.
 
 ## Scripting it
 

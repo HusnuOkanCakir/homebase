@@ -1,0 +1,56 @@
+{
+  "manifest_version": 1,
+  "revision": 1,
+  "id": "stremio",
+  "name": "Stremio",
+  "summary": "Press play and watch straight away, without waiting for a download or keeping the file.",
+  "icon": "▶️",
+  "after_install": "Open it and it is empty on purpose — Stremio finds nothing by itself. Go to Addons, then Community Addons, and install Torrentio: that is the part that finds things to watch. Then search for a film, press play, and it starts in about half a minute. Nothing is kept afterwards; watch it twice and it is fetched twice. For anything you want to keep, use Jellyseerr instead.",
+  "homepage": "https://www.stremio.com",
+  "license": "MIT",
+  "container": {
+    "image": "docker.io/tsaridas/stremio-docker",
+    "version": "v1.3.9",
+    "environment": {
+      "NO_CORS": "1",
+      "CASTING_DISABLED": "1",
+      "SERVER_URL": "{{APP_URL}}",
+      "APP_PATH": "/config/",
+      "NODE_ENV": "production"
+    }
+  },
+  "network": {
+    "internal_port": 8080,
+    "host_port": 8082,
+    "protocol": "http",
+    "path": "/",
+    "reachable_from": "network"
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config",
+      "access": "read-write",
+      "description": "What Stremio is part-way through fetching, and its own settings. Bounded — it deletes the oldest to stay within a couple of gigabytes.",
+      "backup": false
+    }
+  ],
+  "health": {
+    "type": "http",
+    "path": "/",
+    "interval_seconds": 30,
+    "start_period_seconds": 60
+  },
+  "permissions": {
+    "read_only_root": false,
+    "runs_as_root": {
+      "reason": "The entrypoint rewrites files in the image itself before starting, and nginx needs its own root-owned spool and log directories. Nothing in it drops privileges and it ignores PUID and PGID entirely, so starts_as_root would be a promise the image does not keep. Its only storage is private."
+    }
+  },
+  "resources": {
+    "memory_limit_bytes": 2147483648,
+    "memory_minimum_bytes": 536870912,
+    "disk_minimum_bytes": 4294967296
+  }
+}

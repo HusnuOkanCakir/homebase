@@ -95,6 +95,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return appsCommand(args[1:], stdout)
 	case "storage":
 		return storageCommand(args[1:], stdout)
+	case "share":
+		return shareCommand(args[1:], stdout)
 	case "backup":
 		return backupCommand(args[1:], stdout)
 	case "update":
@@ -107,6 +109,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return factoryResetCommand(args[1:], stdout)
 	case "wake":
 		return wakeCommand(args[1:], stdout)
+	case "shutdown":
+		return shutdownCommand(args[1:], stdout)
+	case "restart":
+		return restartCommand(args[1:], stdout)
 	case "repair":
 		return repairCommand(args[1:], stdout)
 	case "diagnostics":
@@ -137,6 +143,11 @@ func usage(w io.Writer) {
   homebasectl apps logs NAME
         The application catalogue, and what is installed from it.
 
+  homebasectl apps storage APP [SLOT DISK]
+  homebasectl system history [DAYS]
+  homebasectl share [status]
+  homebasectl share add NAME DISK
+  homebasectl share password NAME
   homebasectl storage [list]
   homebasectl storage disks
   homebasectl storage format /dev/sdX [--name NAME]
@@ -145,6 +156,12 @@ func usage(w io.Writer) {
         The disks Homebase manages, and every disk it can see. Formatting
         shows what is on the disk first and then asks; it destroys
         everything on it.
+
+  homebasectl shutdown
+  homebasectl restart
+        Switch this server off, or restart it. Both say what stops and
+        what starts again by itself; "shutdown" also says whether this
+        machine can be switched back on without walking to it.
 
   homebasectl factory-reset
         Remove every account and every setting. Your files are kept.

@@ -13,7 +13,7 @@ until you are trying to remember which machine in the house you are looking at.
 
 Under **This server**, either in the getting-started list or with **Rename this server**
 lower down, type a name and choose **Use this name**. The list stops offering it once the
-server has a name of its own; the button under **This server** stays for ever, so you can
+server has a name of its own; the button under **Settings** stays for ever, so you can
 change your mind years later.
 
 Letters, digits and hyphens only — no spaces, no dots, no accents. Something like
@@ -58,6 +58,26 @@ put a backup on the same disk as the thing it is backing up, because a disk that
 everything on it.
 
 See [Backup and restore](backup.md).
+
+## Switching it off, and restarting it
+
+At the bottom of **This server** there are two buttons, and both make you type the server's
+name first — a click by accident should not be able to take a machine down.
+
+**Restart** takes a minute or two and the server comes back by itself. The page waits and
+tells you when it has.
+
+**Switch off** does not come back. Before you confirm, Homebase says how you would switch it
+on again: pressing the power button on the machine itself, always, and — if waking over the
+network is enabled on this server — a command you can run from any other computer in the
+house.
+
+It is worth reading that line before you press the button rather than after. Once the machine
+is off, every page in Homebase is off with it, including the one that would have told you.
+
+Waking over the network needs three things: it enabled in the machine's BIOS, the network
+card set to listen, and the machine left plugged in. `homebasectl network` reports the middle
+one. A laptop running on its battery has nothing listening once it is off.
 
 ## Updates
 

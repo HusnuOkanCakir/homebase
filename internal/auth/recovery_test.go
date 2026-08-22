@@ -53,7 +53,7 @@ func TestRecoveryCodeIsForgivingAboutTranscription(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	user, err := s.CreateAdministrator(ctx, "okan", goodPassword)
+	user, err := s.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestRecoveryCodeIsForgivingAboutTranscription(t *testing.T) {
 	mangled = strings.ReplaceAll(mangled, "0", "o")
 	mangled = strings.ReplaceAll(mangled, "1", "l")
 
-	if _, _, err := s.ResetPasswordWithCode(ctx, "okan", mangled, "a-brand-new-password"); err != nil {
+	if _, _, err := s.ResetPasswordWithCode(ctx, "alex", mangled, "a-brand-new-password"); err != nil {
 		t.Fatalf("a code typed the way a person types it was refused: %v", err)
 	}
 }
@@ -77,7 +77,7 @@ func TestRecoveryResetsThePasswordAndReplacesTheCode(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	user, err := s.CreateAdministrator(ctx, "okan", goodPassword)
+	user, err := s.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestRecoveryResetsThePasswordAndReplacesTheCode(t *testing.T) {
 	}
 
 	const newPassword = "an-entirely-different-password"
-	recovered, replacement, err := s.ResetPasswordWithCode(ctx, "okan", code, newPassword)
+	recovered, replacement, err := s.ResetPasswordWithCode(ctx, "alex", code, newPassword)
 	if err != nil {
 		t.Fatalf("recovering: %v", err)
 	}
@@ -105,10 +105,10 @@ func TestRecoveryResetsThePasswordAndReplacesTheCode(t *testing.T) {
 		t.Error("recovery must hand back a new code, not the one just spent")
 	}
 
-	if _, err := s.Authenticate(ctx, "okan", newPassword); err != nil {
+	if _, err := s.Authenticate(ctx, "alex", newPassword); err != nil {
 		t.Errorf("the new password does not work: %v", err)
 	}
-	if _, err := s.Authenticate(ctx, "okan", goodPassword); !errors.Is(err, ErrInvalidCredential) {
+	if _, err := s.Authenticate(ctx, "alex", goodPassword); !errors.Is(err, ErrInvalidCredential) {
 		t.Error("the old password still works after a reset")
 	}
 	if _, err := s.UserForSession(ctx, token); err == nil {
@@ -116,10 +116,10 @@ func TestRecoveryResetsThePasswordAndReplacesTheCode(t *testing.T) {
 	}
 
 	// Single use. The paper the user is holding is now the replacement.
-	if _, _, err := s.ResetPasswordWithCode(ctx, "okan", code, "yet-another-password"); !errors.Is(err, ErrInvalidRecoveryCode) {
+	if _, _, err := s.ResetPasswordWithCode(ctx, "alex", code, "yet-another-password"); !errors.Is(err, ErrInvalidRecoveryCode) {
 		t.Error("a spent recovery code was accepted a second time")
 	}
-	if _, _, err := s.ResetPasswordWithCode(ctx, "okan", replacement, "yet-another-password"); err != nil {
+	if _, _, err := s.ResetPasswordWithCode(ctx, "alex", replacement, "yet-another-password"); err != nil {
 		t.Errorf("the replacement code does not work: %v", err)
 	}
 }
@@ -128,7 +128,7 @@ func TestRecoveryRefusesWhatItShould(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	user, err := s.CreateAdministrator(ctx, "okan", goodPassword)
+	user, err := s.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,10 +144,10 @@ func TestRecoveryRefusesWhatItShould(t *testing.T) {
 		password string
 		want     error
 	}{
-		{"an empty code", "okan", "", goodPassword + "-new", ErrInvalidRecoveryCode},
-		{"somebody else's code", "okan", "ABCDE-FGHJK-MNPQR-STVWX-YZ234", goodPassword + "-new", ErrInvalidRecoveryCode},
+		{"an empty code", "alex", "", goodPassword + "-new", ErrInvalidRecoveryCode},
+		{"somebody else's code", "alex", "ABCDE-FGHJK-MNPQR-STVWX-YZ234", goodPassword + "-new", ErrInvalidRecoveryCode},
 		{"an account that does not exist", "nobody", code, goodPassword + "-new", ErrInvalidRecoveryCode},
-		{"a password that is too short", "okan", code, "short", ErrWeakPassword},
+		{"a password that is too short", "alex", code, "short", ErrWeakPassword},
 	}
 
 	for _, tc := range cases {
@@ -160,7 +160,7 @@ func TestRecoveryRefusesWhatItShould(t *testing.T) {
 	}
 
 	// None of that should have changed anything.
-	if _, err := s.Authenticate(ctx, "okan", goodPassword); err != nil {
+	if _, err := s.Authenticate(ctx, "alex", goodPassword); err != nil {
 		t.Errorf("a refused recovery changed the password anyway: %v", err)
 	}
 }
@@ -171,11 +171,11 @@ func TestAnAccountWithoutACodeIsIndistinguishable(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	if _, err := s.CreateAdministrator(ctx, "okan", goodPassword); err != nil {
+	if _, err := s.CreateAdministrator(ctx, "alex", goodPassword); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, err := s.ResetPasswordWithCode(ctx, "okan", "ABCDE-FGHJK-MNPQR-STVWX-YZ234", "a-new-password-here")
+	_, _, err := s.ResetPasswordWithCode(ctx, "alex", "ABCDE-FGHJK-MNPQR-STVWX-YZ234", "a-new-password-here")
 	if !errors.Is(err, ErrInvalidRecoveryCode) {
 		t.Errorf("got %v, want %v", err, ErrInvalidRecoveryCode)
 	}
@@ -185,7 +185,7 @@ func TestRecoveryStatusDoesNotRevealTheCode(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	user, err := s.CreateAdministrator(ctx, "okan", goodPassword)
+	user, err := s.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestRecoveryStatusDoesNotRevealTheCode(t *testing.T) {
 		t.Error("the status leaks the code")
 	}
 
-	if _, _, err := s.ResetPasswordWithCode(ctx, "okan", code, "a-new-password-here"); err != nil {
+	if _, _, err := s.ResetPasswordWithCode(ctx, "alex", code, "a-new-password-here"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -237,7 +237,7 @@ func TestReissuingKeepsTheRecoveryHistory(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	user, err := s.CreateAdministrator(ctx, "okan", goodPassword)
+	user, err := s.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestReissuingKeepsTheRecoveryHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.ResetPasswordWithCode(ctx, "okan", code, "a-new-password-here"); err != nil {
+	if _, _, err := s.ResetPasswordWithCode(ctx, "alex", code, "a-new-password-here"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.IssueRecoveryCode(ctx, user.ID); err != nil {
@@ -265,7 +265,7 @@ func TestUsernamesForTheConsoleTool(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	if _, err := s.CreateAdministrator(ctx, "okan", goodPassword); err != nil {
+	if _, err := s.CreateAdministrator(ctx, "alex", goodPassword); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreateUser(ctx, "guest", goodPassword, []string{PermSystemRead}); err != nil {
@@ -276,7 +276,7 @@ func TestUsernamesForTheConsoleTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(names) != 2 || names[0] != "okan" || names[1] != "guest" {
-		t.Errorf("got %v, want [okan guest] in creation order", names)
+	if len(names) != 2 || names[0] != "alex" || names[1] != "guest" {
+		t.Errorf("got %v, want [alex guest] in creation order", names)
 	}
 }

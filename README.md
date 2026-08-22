@@ -76,7 +76,7 @@ make. If your network eats mDNS, the screen on the laptop shows the address inst
 ### 4. Create the administrator
 
 ```sh
-sudo homebasectl setup okan
+sudo homebasectl setup alex
 ```
 
 It asks for a password and prints a **recovery code**. Write that down somewhere other than
@@ -101,16 +101,41 @@ sudo homebasectl storage attach UUID backups
 name — never "yes". There is no `--yes`: a flag meaning "do it anyway" ends up in every
 invocation within a week.
 
+You do not have to attach anything. The server's own disk is a storage location called
+`internal`, and applications can keep their files on it — a 1 TB laptop does not need a USB
+drive taped to it to run a media server. What a plugged-in disk is *required* for is
+backups, because a copy on the same disk as the original is lost with it.
+
 ### 6. Install what you want to run
 
 ```sh
-sudo homebasectl apps                  # the catalogue
+sudo homebasectl apps                     # the catalogue
+sudo homebasectl apps storage jellyfin    # what it needs, and where it would go
+sudo homebasectl apps storage jellyfin media internal
 sudo homebasectl apps install jellyfin
 sudo homebasectl apps logs jellyfin
 ```
 
-Jellyfin's data goes on the disk you attached, not the system disk. The container runs with
-every capability dropped, no new privileges, and its port bound to localhost.
+The address is in `homebasectl apps`. Jellyfin lands on `http://<name>.local:8096`, because
+its manifest says it may be reached from the network — which only an application with its
+own accounts may say. Everything else stays on loopback. Containers run with every
+capability dropped and no new privileges.
+
+### 6b. Share a folder onto the network
+
+The half a browser cannot be: a drive on your laptop, that Windows backs up to and Linux
+mounts.
+
+```sh
+sudo homebasectl share add backup internal   # installs the file server the first time
+sudo homebasectl share password alex         # asks for it; never an argument
+sudo homebasectl share                       # what to type, per operating system
+```
+
+That last command prints the exact address for Windows, macOS and Linux. The account it
+creates has no shell and no password on the machine itself, so it opens a folder and is not
+a way to log in. The port is opened to private address ranges only, and closed again when
+the last share goes — the way in from outside the house is the VPN in step 9.
 
 ### 7. Turn on backups
 
@@ -130,7 +155,32 @@ sudo homebasectl backup now backups    # and one right now
 A backup is plain files with a JSON manifest, readable without Homebase, and it restores
 onto a *different* machine ([ADR-0014](docs/decisions/0014-backups-are-readable-without-homebase.md)).
 
-### 8. Keep it patched
+### 8. Reach it from anywhere
+
+Wireguard, self-hosted ([ADR-0019](docs/decisions/0019-remote-access-is-self-hosted-wireguard.md)).
+Your phone joins this house's network from anywhere; nothing else on the server is exposed.
+
+```sh
+sudo homebasectl vpn dns duckdns yourname     # a name that follows your address
+sudo homebasectl vpn setup yourname.duckdns.org
+sudo homebasectl vpn add-device phone         # prints a QR code — scan it
+sudo homebasectl vpn                          # who is set up, and who has connected
+sudo homebasectl vpn remove-device phone      # a lost phone, dealt with
+sudo homebasectl vpn off                      # closes the port; keys are kept
+```
+
+Setting it up writes the configuration, starts the tunnel and **opens UDP 51820 in the
+firewall** — the one port Homebase offers to the whole internet rather than to the house
+only, because being reachable from outside is the entire purpose of this one. What makes
+that acceptable is what Wireguard does with a packet it does not recognise, which is
+nothing at all: no reply, no banner, no way to tell the port from a closed one.
+
+**One thing is left that no server can do for you: forward UDP 51820 on your router.**
+Give the server a fixed address there at the same time, or the forwarding breaks the next
+time it restarts. Until a device has connected once, `homebasectl vpn` keeps saying so —
+because a port the router has not forwarded looks from a phone exactly like a wrong key.
+
+### 9. Keep it patched
 
 ```sh
 sudo homebasectl update check

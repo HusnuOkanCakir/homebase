@@ -28,9 +28,6 @@ const (
 	// Slack after the ISO, so the appended partition starts on a sensible
 	// boundary and the backup partition table has somewhere to live.
 	mediaSlackBytes = 4 * 1024 * 1024
-
-	// The smallest stick worth trying. The ISO alone is 3.2 GB.
-	minimumMediaBytes = 6 * 1000 * 1000 * 1000
 )
 
 func installerCreate(args []string, stdout, stderr io.Writer, stdin io.Reader) error {
@@ -152,9 +149,14 @@ func checkDevice(path string, required int64) error {
 				path, reason)
 		}
 		if candidate.Size < required {
+			// The exact figures, because "about 6 GB" sent somebody to buy a
+			// stick they did not need. This is the ISO they gave plus the seed
+			// carrying Homebase's packages, and nothing rounded up for comfort.
 			return fmt.Errorf(
-				"%s holds %s, and the media needs about %d GB.",
-				path, candidate.humanSize(), required/1_000_000_000+1)
+				"%s holds %s, and this image needs %.2f GB "+
+					"(the ISO is %.2f GB, plus Homebase's packages).",
+				path, candidate.humanSize(),
+				float64(required)/1e9, float64(required-mediaSlackBytes)/1e9)
 		}
 		return nil
 	}

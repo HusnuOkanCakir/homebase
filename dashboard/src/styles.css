@@ -21,6 +21,28 @@
   --warning: #8a6100;
   --radius: 10px;
   --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 4%);
+
+  /*
+   * Chart colours, and they are not the same thing as interface colours.
+   *
+   * --accent is chosen to look right on a button. A series colour has to clear
+   * a lightness band, a chroma floor, and a separation floor under three kinds
+   * of colour blindness against the surface it is drawn on — which are
+   * measurable properties, so they were measured rather than judged.
+   *
+   * Only two are needed. Every chart here plots one series except network,
+   * which plots two, so this is the two-slot case: one series takes slot 1, and
+   * the chart's own title says what it is. Adding a hue per metric would be a
+   * rainbow carrying no information the titles do not already carry.
+   *
+   * Validated against #ffffff light and #1e2126 dark — the card, not the page:
+   * worst pair 33.6 normal-vision, 24.7 under protanopia, both well clear, and
+   * both above 3:1 against their surface.
+   */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --chart-grid: #e8eaed;
+  --chart-axis: #c3c2b7;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,6 +58,14 @@
     --danger-bg: #2a1d1c;
     --warning: #e0b050;
     --shadow: none;
+
+    /* Stepped for the dark surface and validated against it, not lightened
+       automatically from the light values — an automatic flip lands outside the
+       band at one end or the other. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --chart-grid: #2f343b;
+    --chart-axis: #383835;
   }
 }
 
@@ -137,6 +167,12 @@ code {
   max-width: none;
 }
 
+/* Five stacked time-series need horizontal room to be readable; nothing else
+   on the dashboard does, so this widens one card rather than the layout. */
+.card-wide {
+  max-width: 48rem;
+}
+
 .card-quiet {
   background: transparent;
   box-shadow: none;
@@ -182,13 +218,24 @@ input:focus-visible {
   color: var(--warning);
 }
 
-button {
+button,
+a.button {
   padding: 0.6rem 1.1rem;
   border: 1px solid transparent;
   border-radius: 8px;
   font: inherit;
   font-weight: 500;
   cursor: pointer;
+}
+
+/* Opening an application is a link, not a button, because it goes somewhere —
+   so it middle-clicks, opens in a new tab, and shows its address on hover the
+   way every other link does. It is styled as a button because that is what it
+   looks like it should be. */
+a.button {
+  display: inline-block;
+  text-align: center;
+  text-decoration: none;
 }
 
 button:disabled {
@@ -306,13 +353,31 @@ a.button {
 
 /* --- Tabs ----------------------------------------------------------------- */
 
+/*
+ * Wrapping, and the full width of the page.
+ *
+ * It was neither, and held six tabs comfortably. At nine they are squeezed into
+ * thirty rem until the words touch, which is the point where a navigation bar
+ * stops looking like one. Wrapping to a second line is the cheaper of the two
+ * bad options: the alternative is hiding sections behind a menu, and a section
+ * nobody can see is a section nobody uses.
+ */
 .tabs {
   display: flex;
-  gap: 0.25rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.1rem 0.25rem;
   width: 100%;
-  max-width: 30rem;
   margin: 0 auto 1.25rem;
   border-bottom: 1px solid var(--border);
+}
+
+/* The underline marking the current tab sits on the tab, not on the bar. With
+   one row those were the same line and nobody had to decide; with two, a rule
+   under the whole nav and a mark under a tab on the first row are two
+   horizontal lines with a row of text between them, which reads as a table. */
+.tabs .tab {
+  flex: 0 1 auto;
 }
 
 .tab {
@@ -498,14 +563,24 @@ a.button {
   font-weight: 500;
 }
 
-.message-recovery {
+/* The rest of what happened, in the same voice as the title. Quieter only by
+   being smaller — it is prose, and setting prose in monospace made most of the
+   dashboard look like it was printing an error at somebody. */
+.message-detail {
   margin-top: 0.35rem !important;
   font-size: 0.925rem;
 }
 
+.message-recovery {
+  margin-top: 0.35rem !important;
+  font-size: 0.925rem;
+  color: var(--muted);
+}
+
 /* Diagnostics: present for whoever needs them, quiet enough that they do not
-   compete with the sentence the user actually has to read. */
-.message-detail {
+   compete with the sentence the user actually has to read. A path, a command,
+   an exit code — never a sentence. */
+.message-technical {
   margin-top: 0.5rem !important;
   color: var(--muted);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -666,4 +741,606 @@ ul.plain {
 
 ul.plain li {
   padding: 0.35rem 0;
+}
+
+/* Charts.
+ *
+ * Inline SVG, no charting library: the bundle has a size gate and no UI
+ * framework by choice, so importing a chart library to draw a polyline would be
+ * the largest dependency in the product for its simplest picture.
+ */
+.chart {
+  margin: 0 0 1.25rem;
+}
+
+.chart figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.375rem;
+}
+
+.chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  touch-action: pan-y;
+}
+
+.chart-empty {
+  font-size: 0.875rem;
+  margin: 0.25rem 0 0;
+}
+
+/* 2px, and the same weight for every series: a thicker line reads as more
+   important, which is information the data does not contain. */
+.line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.line-1,
+.dot-1 {
+  stroke: var(--series-1);
+}
+
+.line-2,
+.dot-2 {
+  stroke: var(--series-2);
+}
+
+/* A 2px ring in the surface colour, so a marker sitting on a line stays
+   readable where they overlap. */
+.dot {
+  fill: var(--surface);
+  stroke-width: 2;
+}
+
+.chart-grid-line {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-axis-line {
+  stroke: var(--chart-axis);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-crosshair {
+  stroke: var(--chart-axis);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-tick {
+  font-size: 10px;
+  fill: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The reading, under the chart rather than floating over it: a tooltip that
+   follows the pointer covers the line it describes, and a touch screen has no
+   pointer to follow. */
+.chart-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  min-height: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Identity is a mark beside the text, never the text itself — a coloured label
+   is unreadable at the contrast a series colour is chosen for. */
+/* The legend is one flex item inside the caption, so it needs its own gap —
+   without it the keys run together as "DownUp". */
+.legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.chart-unit {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+}
+
+.key::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentcolor;
+}
+
+.key-1::before {
+  background: var(--series-1);
+}
+
+.key-2::before {
+  background: var(--series-2);
+}
+
+/* A heading with its controls pushed to the far end. */
+.row-spread {
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Current values, above the charts. The number is the answer; the chart behind
+   it is the context. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.tile {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+}
+
+.tile dt {
+  font-size: 0.8125rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.tile dd {
+  margin: 0.15rem 0 0;
+  font-size: 1.35rem;
+  line-height: 1.2;
+}
+
+.tile .unit {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+/* A device's configuration, shown exactly once.
+   The private key is in it and is stored nowhere, so the panel is deliberately
+   distinct from everything around it — this is the only moment it exists
+   outside the device that will hold it. */
+.issued {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.issued h4 {
+  margin-top: 0;
+}
+
+/* Sized to be scannable from a phone held at arm's length in front of a laptop,
+   and capped so it does not fill the screen on a wide one. A stretched QR code
+   will not scan, so the aspect ratio is never touched. */
+.qr {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: auto;
+  image-rendering: pixelated;
+  background: #fff;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.config {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.8125rem;
+  background: var(--surface-quiet, rgba(127, 127, 127, 0.08));
+  padding: 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+/* --- File sharing --------------------------------------------------------- */
+
+/*
+ * The address somebody has to type on another computer.
+ *
+ * Bigger than ordinary inline code and given a line of its own, because it is
+ * the one thing on the screen that leaves it: it gets copied into a Windows
+ * dialog, or read out to somebody across a room. `user-select: all` makes one
+ * click select the whole path — a UNC path broken by a double-click that
+ * stopped at a backslash is a path that silently does not work.
+ */
+.address {
+  display: inline-block;
+  padding: 0.35rem 0.6rem;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* Matched to the inputs beside it rather than left as the browser's control,
+   which on a form of five styled fields reads as the one that is broken. */
+select {
+  width: 100%;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Grouped applications: what is on this server, then what else there is. */
+.app-group + .app-group {
+  margin-top: 1.75rem;
+}
+
+.app-group h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+/* --- The application grid ------------------------------------------------- */
+
+/*
+ * Tiles rather than rows, because this is the part of the dashboard somebody
+ * presses rather than reads. A row of text with a button on the right is a
+ * thing to scan; a tile is a thing to hit, including with a thumb.
+ *
+ * auto-fill rather than a fixed count, so one application is not stretched
+ * across the page and twelve do not become unreadably narrow. Nothing here
+ * animates and nothing has a gradient — a grid of application tiles is furniture
+ * and should behave like it.
+ */
+.tiles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tile-app {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* The face of the tile is one large target that opens the application. Both a
+   link and a button end up here depending on whether there is anywhere to go,
+   so the styling is written for both rather than for an anchor. */
+.tile-app-open {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 1rem 0.6rem 0.75rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tile-app-open:hover {
+  background: var(--bg);
+}
+
+.tile-app-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tile-app-icon {
+  font-size: 1.75rem;
+  line-height: 1.2;
+  /* An application with no icon shows its first letter, which needs to look
+     deliberate rather than like a missing image. */
+  font-weight: 600;
+}
+
+.tile-app-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.tile-app-state {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* Colour carries the same thing the words do, never on its own: every state
+   here is spelled out beside its dot. */
+.tile-app-state-ok::before,
+.tile-app-state-warn::before,
+.tile-app-state-bad::before,
+.tile-app-state-off::before {
+  content: "";
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.35rem;
+  border-radius: 50%;
+  vertical-align: 0.05rem;
+}
+
+.tile-app-state-ok::before { background: var(--accent); }
+.tile-app-state-warn::before { background: var(--warning); }
+.tile-app-state-bad::before { background: var(--danger); }
+.tile-app-state-off::before { background: var(--muted); }
+
+.tile-app-more {
+  width: 100%;
+  padding: 0.4rem;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.tile-app-more:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* --- Room left ------------------------------------------------------------ */
+
+.usage + .usage {
+  margin-top: 1.25rem;
+}
+
+.usage .meter {
+  margin: 0.4rem 0 0.35rem;
+}
+
+/* The one state worth a colour of its own. A disk at 94 % is a week from being
+   somebody's problem and reads identically to one at 40 % otherwise. */
+.meter-fill-full {
+  background: var(--danger);
+}
+
+.usage-note {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* --- Assistant ------------------------------------------------------------
+
+   A conversation with a model that writes about six words a second. The layout
+   is built around that: the transcript is a fixed, scrolling region so the box
+   somebody types into never moves down the page as an answer grows, and the
+   answer is followed rather than chased.
+
+   No avatars, no bubbles with tails, no coloured gradient for the machine's
+   replies. Two voices distinguished by one indent and one small label is enough
+   to tell them apart, and everything else would be decoration on a screen whose
+   real problem is that it is slow. */
+
+.assistant-transcript {
+  /* Tall enough for a real exchange, bounded so the compose box stays put. */
+  height: min(52vh, 30rem);
+  overflow-y: auto;
+  padding: 0.25rem 0.5rem 0.25rem 0;
+  margin-bottom: 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.assistant-empty {
+  margin: 2rem 0 0;
+  max-width: 34rem;
+}
+
+.assistant-turn {
+  margin-bottom: 1.15rem;
+}
+
+.assistant-who {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+/* What the person asked, set apart by indent rather than by colour: a tinted
+   block for every question turns a long conversation into stripes. */
+.assistant-you {
+  padding-left: 0.85rem;
+  border-left: 2px solid var(--border);
+}
+
+.assistant-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+/* Something moving while the answer is written. On this hardware the gap
+   between tokens is long enough that a still screen reads as a stalled one. */
+.assistant-cursor {
+  display: inline-block;
+  width: 0.5rem;
+  height: 1rem;
+  margin-left: 0.15rem;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: assistant-blink 1s step-end infinite;
+}
+
+@keyframes assistant-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Someone who has asked not to see motion still needs to know it is working,
+   so the cursor stops blinking and stays visible rather than disappearing. */
+@media (prefers-reduced-motion: reduce) {
+  .assistant-cursor {
+    animation: none;
+  }
+}
+
+.assistant-ask {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+}
+
+.assistant-input {
+  flex: 1;
+  resize: vertical;
+  min-height: 2.9rem;
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.assistant-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.assistant-footer {
+  margin-top: 0.7rem;
+  align-items: center;
+}
+
+.assistant-think {
+  font-size: 0.88rem;
+}
+
+.assistant-model {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The base rules these have to escape, and why:
+
+   `.primary` is width:100% because most buttons in this dashboard end a form
+   and span it. Here one sits beside the box somebody types into, so it is sized
+   to its label — without this the textarea collapses to a sliver.
+
+   `input` is width:100% and `label` is display:block for the same reason: every
+   other input on the site is a full-width field with its label above it. A
+   checkbox is neither. */
+
+.assistant-head {
+  margin-top: 0;
+}
+
+.assistant-head h2 {
+  margin: 0;
+}
+
+.assistant-ask .primary,
+.assistant-ask .quiet {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+  margin-bottom: 0;
+}
+
+.assistant-think {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0;
+  font-size: 0.88rem;
+  font-weight: 400;
+}
+
+.assistant-think input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+/* The model writes headings into the middle of a paragraph of prose. They mark
+   a change of subject, not a document structure, so they are set as emphasis
+   rather than as a size that would out-shout the card's own title. */
+.assistant-heading {
+  font-weight: 600;
+  margin: 1rem 0 0.35rem;
+}
+
+.assistant-text > :first-child {
+  margin-top: 0;
+}
+
+.assistant-text p {
+  margin: 0 0 0.6rem;
+}
+
+.assistant-text ul,
+.assistant-text ol {
+  margin: 0 0 0.6rem;
+  padding-left: 1.35rem;
+}
+
+.assistant-text li {
+  margin-bottom: 0.25rem;
+}
+
+.assistant-text code {
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 0.9em;
+}
+
+.assistant-text pre {
+  margin: 0 0 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  /* Code does not wrap; it scrolls, so the card never widens the page. */
+  overflow-x: auto;
+  font-size: 0.88rem;
+}
+
+.assistant-text hr {
+  height: 0;
+  margin: 1rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
 }

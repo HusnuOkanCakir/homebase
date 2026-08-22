@@ -30,20 +30,37 @@ func TestLocationsSurviveARestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(locations) != 1 || locations[0].UUID != "abcd-1234" {
-		t.Fatalf("got %+v", locations)
+
+	// The server's own disk is always there, so what is asserted is the added
+	// disk surviving rather than the number of entries.
+	added, _, found := findLocation(locations, "media")
+	if !found {
+		t.Fatalf("the added disk did not survive: %+v", locations)
+	}
+	if added.UUID != "abcd-1234" {
+		t.Errorf("UUID %q, want abcd-1234", added.UUID)
+	}
+	if _, _, ok := findLocation(locations, InternalLocationID); !ok {
+		t.Error("this server's own disk was not offered as a location")
 	}
 }
 
-// A machine with no storage set up is an ordinary state, not an error.
-func TestNoLocationsYetIsNotAnError(t *testing.T) {
+// A machine with no storage set up is an ordinary state, not an error — and it
+// still has somewhere to put things, which is the point of the built-in
+// location. Before it existed, a server with a 1 TB disk and nothing plugged in
+// could not run an application that keeps files.
+func TestAFreshMachineAlreadyHasSomewhereToKeepFiles(t *testing.T) {
 	s := storageServices(t)
 	locations, err := s.load()
 	if err != nil {
 		t.Fatalf("a fresh machine reported an error: %v", err)
 	}
-	if len(locations) != 0 {
-		t.Errorf("got %d locations", len(locations))
+	if len(locations) != 1 {
+		t.Fatalf("got %d locations, want only this server's own disk: %+v",
+			len(locations), locations)
+	}
+	if locations[0].ID != InternalLocationID {
+		t.Errorf("the one location is %q, want %q", locations[0].ID, InternalLocationID)
 	}
 }
 
@@ -417,5 +434,130 @@ func TestAnEmptyMountPointIsImmutableNotJustUnwritable(t *testing.T) {
 	}
 	if immutable, _ := isImmutable(mountPoint); immutable {
 		t.Error("the flag could not be cleared")
+	}
+}
+
+// --- This server's own disk ---------------------------------------------------
+
+// It must never be written to the state file. If it were, adding one disk would
+// persist a synthetic entry and the next load would produce it twice — which
+// looks harmless until something iterates locations and does work per entry.
+func TestTheInternalLocationIsNeverPersisted(t *testing.T) {
+	s := storageServices(t)
+
+	locations, err := s.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exactly what a read-modify-write does: load, append, save.
+	locations = append(locations, Location{ID: "media", Name: "Films", UUID: "u-1"})
+	if err := s.save(locations); err != nil {
+		t.Fatal(err)
+	}
+
+	written, err := os.ReadFile(s.stateFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(written), InternalLocationID) {
+		t.Errorf("the built-in location was written to the state file:\n%s", written)
+	}
+
+	reloaded, err := s.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, location := range reloaded {
+		if location.ID == InternalLocationID {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Errorf("this server's own disk appears %d times after a save, want once", seen)
+	}
+}
+
+// The operations that exist to detach a disk must refuse the one that cannot be
+// detached. Removing it would leave every application assigned to a location
+// that no longer exists.
+func TestTheInternalLocationCannotBeTakenAway(t *testing.T) {
+	s := storageServices(t)
+	ctx := t.Context()
+
+	for _, action := range []struct {
+		name string
+		call func() (any, error)
+	}{
+		{"remove", func() (any, error) {
+			return s.removeLocation(ctx, LocationRef{ID: InternalLocationID})
+		}},
+		{"unmount", func() (any, error) {
+			return s.unmount(ctx, LocationRef{ID: InternalLocationID})
+		}},
+		{"mount", func() (any, error) {
+			return s.mount(ctx, LocationRef{ID: InternalLocationID})
+		}},
+	} {
+		_, err := action.call()
+		if err == nil {
+			t.Errorf("%s was allowed on this server's own disk", action.name)
+			continue
+		}
+		var hostErr *Error
+		if !asHostError(err, &hostErr) {
+			t.Errorf("%s failed with %v, want a Homebase error", action.name, err)
+			continue
+		}
+		if hostErr.Code != "storage.refused_system_disk" {
+			t.Errorf("%s refused with %q, want storage.refused_system_disk",
+				action.name, hostErr.Code)
+		}
+	}
+}
+
+// The name is reserved, and the refusal has to say so. Falling through to the
+// duplicate-name check would report "another disk is already using that name",
+// which sends somebody looking for a disk that does not exist.
+func TestTheInternalNameIsReserved(t *testing.T) {
+	s := storageServices(t)
+
+	_, err := s.addLocation(t.Context(), AddLocationParams{
+		UUID: "some-uuid", ID: InternalLocationID, Name: "Mine",
+	})
+	if err == nil {
+		t.Fatal("a disk was allowed to take the reserved name")
+	}
+	var hostErr *Error
+	if !asHostError(err, &hostErr) {
+		t.Fatalf("failed with %v, want a Homebase error", err)
+	}
+	if hostErr.Code != "storage.reserved_id" {
+		t.Errorf("refused with %q, want storage.reserved_id", hostErr.Code)
+	}
+}
+
+// Present and usable without anything being plugged in — the whole point.
+func TestTheInternalLocationIsAlwaysUsable(t *testing.T) {
+	s := storageServices(t)
+
+	state, found := s.LocationByID(InternalLocationID)
+	if !found {
+		t.Fatal("this server's own disk is not a location")
+	}
+	if !state.Internal {
+		t.Error("it is not marked as this server's own disk")
+	}
+	if !state.Connected || !state.Mounted {
+		t.Errorf("connected=%v mounted=%v, want both true — it cannot be unplugged",
+			state.Connected, state.Mounted)
+	}
+	if state.TotalBytes == 0 {
+		t.Error("no size reported, so nothing can warn when it fills up")
+	}
+
+	// And it resolves, which is what decides whether an application can start.
+	if _, ok := s.ResolveLocation(InternalLocationID); !ok {
+		t.Error("it did not resolve, so no application could be run on it")
 	}
 }

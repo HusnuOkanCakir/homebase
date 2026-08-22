@@ -30,6 +30,7 @@ type App struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
 	Summary string   `json:"summary,omitempty"`
+	Icon    string   `json:"icon,omitempty"`
 	State   AppState `json:"state"`
 
 	// Installed is null where the state is unknown — false would be a claim
@@ -47,6 +48,40 @@ type App struct {
 	StartedAt    *string `json:"started_at"`
 	ExitCode     *int    `json:"exit_code"`
 	DataPath     string  `json:"data_path"`
+
+	// Where to open it, and whether anything other than this machine can. Both,
+	// because an address alone cannot say which — and until these existed,
+	// nothing anywhere reported how to reach an application that was running.
+	// What each supporting container is doing, for an application made of more
+	// than one — a database, a cache. "It is not running" and "its database is
+	// not running" need different answers.
+	Services []struct {
+		Name      string `json:"name"`
+		Installed bool   `json:"installed"`
+		Running   bool   `json:"running"`
+	} `json:"services,omitempty"`
+
+	AfterInstall         string `json:"after_install,omitempty"`
+	HostPort             int    `json:"host_port,omitempty"`
+	ReachableFromNetwork bool   `json:"reachable_from_network"`
+
+	// Path is the base path the web interface is served under, and URL is the
+	// whole address. Both, because a caller composing its own address needs the
+	// first and a caller opening a link wants the second.
+	Path string `json:"path,omitempty"`
+	URL  string `json:"url,omitempty"`
+
+	// A privilege this application holds that most do not, and why.
+	//
+	// Reported so that whoever is about to install it can decline. That is the
+	// entire justification for both root permissions existing — declared per
+	// application, and shown — and for a while it was not true of any of them,
+	// because this struct did not have the field and nothing said so.
+	Elevation *struct {
+		Kind    string `json:"kind"`
+		Summary string `json:"summary"`
+		Reason  string `json:"reason"`
+	} `json:"elevation,omitempty"`
 }
 
 // AppList is the catalogue plus the state of everything in it.

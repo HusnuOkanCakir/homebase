@@ -41,6 +41,40 @@ const (
 
 var validLocationID = regexp.MustCompile(locationIDPattern)
 
+// InternalLocationID is this server's own disk, offered as a place to keep
+// files like any external one.
+//
+// It exists because the original design had no way to say "use the disk that is
+// already in the machine". Every location was a filesystem added by UUID, and
+// the only way to get one was to plug something in — so a server with a 1 TB
+// drive could not run a media application without an external disk beside it,
+// which is an absurd thing to require of a 1 TB server.
+//
+// What the original design was protecting against is real and is kept: an
+// application must never *fall back* to the system disk when the disk it was
+// given is missing, because that produces a media server with an empty library
+// and a root filesystem quietly filling up. That is about silence, not about the
+// disk. Choosing this location by name is not silent, and it cannot go missing,
+// so the refusal it protects has nothing left to protect against here.
+//
+// The cost is real too and is why this is never the default and never chosen
+// automatically: filling this disk stops the whole machine, not one application.
+const InternalLocationID = "internal"
+
+// internalLocation is the record for the server's own disk.
+//
+// Synthesised rather than written to the state file, so that it cannot be
+// edited, cannot be removed by editing, and cannot drift. There is nothing to
+// persist: it has no UUID to remember and it is wherever the machine is.
+func internalLocation() Location {
+	return Location{
+		ID:         InternalLocationID,
+		Name:       "This server's own disk",
+		Filesystem: "",
+		Label:      "",
+	}
+}
+
 // Location is a disk Homebase manages, as recorded on this machine.
 //
 // The UUID is the identity; everything else is either derived from it at read
@@ -83,6 +117,12 @@ type LocationState struct {
 	// Device is where it currently appears. Reported for diagnostics only, and
 	// deliberately never stored: it changes.
 	Device string `json:"device,omitempty"`
+
+	// Internal marks this server's own disk, which is a location like any other
+	// and unlike every other in ways a caller has to be able to see: it cannot
+	// be unplugged, cannot be removed, cannot be formatted, and filling it up
+	// stops the whole machine rather than one application.
+	Internal bool `json:"internal,omitempty"`
 }
 
 // StorageServices is what the storage operations need from their environment.
@@ -230,6 +270,25 @@ func (s *StorageServices) describe(location Location) LocationState {
 		MountPoint: s.mountPointFor(location.ID),
 	}
 
+	// The server's own disk. It is not a managed mount and has no UUID to look
+	// for: it is a directory on the filesystem that is already there, so it is
+	// present and usable by definition, and the free space is the machine's.
+	if location.ID == InternalLocationID {
+		state.Internal = true
+		state.Connected = true
+		state.Mounted = true
+		state.Device = deviceHoldingRoot(readMounts(mountInfoPath))
+		// Measured at the nearest directory that exists, because this one is
+		// created when something is first put on it and the size has to be
+		// reportable before then — otherwise a fresh server shows its own disk
+		// as zero bytes, and nothing can warn that it is filling up.
+		if total, available, err := diskUsage(nearestExisting(state.MountPoint)); err == nil {
+			state.TotalBytes = total
+			state.AvailableBytes = available
+		}
+		return state
+	}
+
 	if volume, found := FindVolume(location.UUID); found {
 		state.Connected = true
 		state.Device = volume.Device
@@ -251,6 +310,31 @@ func (s *StorageServices) describe(location Location) LocationState {
 
 func (s *StorageServices) mountPointFor(id string) string {
 	return filepath.Join(s.root, id)
+}
+
+// nearestExisting walks up until it finds a directory that is there.
+//
+// Every ancestor is on the same filesystem as the missing directory would be,
+// so the free space it reports is the free space that matters. Bounded by the
+// root, which always exists.
+func nearestExisting(path string) string {
+	for path != "/" && path != "." {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		path = filepath.Dir(path)
+	}
+	return "/"
+}
+
+// PrepareInternalLocation creates the directory for this server's own disk.
+//
+// Called once at startup so that the place exists before anybody is told about
+// it: a location somebody can be shown, assigned and told the path of, but
+// cannot `cd` into until an application happens to create it, is a location that
+// looks broken.
+func (s *StorageServices) PrepareInternalLocation() error {
+	return os.MkdirAll(s.mountPointFor(InternalLocationID), 0o755)
 }
 
 // --- Adding and removing ------------------------------------------------------
@@ -279,6 +363,19 @@ func (s *StorageServices) addLocation(ctx context.Context, params AddLocationPar
 			Recoverable: true,
 			Recovery:    "Use lowercase letters, numbers and hyphens.",
 			Status:      400,
+		}
+	}
+
+	// The built-in name, refused before anything else so the message is about
+	// what is actually wrong rather than "another disk is using that name".
+	if params.ID == InternalLocationID {
+		return nil, &Error{
+			Code:        "storage.reserved_id",
+			Message:     "That name is reserved for this server's own disk.",
+			Detail:      InternalLocationID + " always exists",
+			Recoverable: true,
+			Recovery:    "Choose a different name for this disk.",
+			Status:      409,
 		}
 	}
 
@@ -389,7 +486,33 @@ type LocationRef struct {
 	ID string `json:"id"`
 }
 
+// refuseInternal stops the operations that exist to detach a disk from being
+// aimed at the one that cannot be detached.
+//
+// Each of them would otherwise do something between useless and destructive:
+// unmounting the system disk is not a thing that can happen, removing it would
+// leave every application assigned to a location that no longer exists, and
+// mounting it is already done.
+func refuseInternal(id, verb string) error {
+	if id != InternalLocationID {
+		return nil
+	}
+	return &Error{
+		Code:        "storage.refused_system_disk",
+		Message:     "This server's own disk cannot be " + verb + ".",
+		Detail:      id + " is the disk the system is running from",
+		Recoverable: false,
+		Recovery: "It is always there and always in use. Applications can keep " +
+			"files on it, but it cannot be detached or erased.",
+		Status: 409,
+	}
+}
+
 func (s *StorageServices) removeLocation(ctx context.Context, params LocationRef) (any, error) {
+	if err := refuseInternal(params.ID, "removed"); err != nil {
+		return nil, err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -454,6 +577,9 @@ func (s *StorageServices) removeLocation(ctx context.Context, params LocationRef
 // --- Mounting -----------------------------------------------------------------
 
 func (s *StorageServices) mount(ctx context.Context, params LocationRef) (any, error) {
+	if err := refuseInternal(params.ID, "connected"); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -489,6 +615,9 @@ func (s *StorageServices) mount(ctx context.Context, params LocationRef) (any, e
 }
 
 func (s *StorageServices) unmount(ctx context.Context, params LocationRef) (any, error) {
+	if err := refuseInternal(params.ID, "disconnected"); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -979,7 +1108,9 @@ func (s *StorageServices) prepareMountPoint(mountPoint string) error {
 func (s *StorageServices) load() ([]Location, error) {
 	data, err := os.ReadFile(s.stateFile)
 	if os.IsNotExist(err) {
-		return nil, nil
+		// A machine that has never had a disk added still has its own, and this
+		// is the path every fresh installation takes.
+		return []Location{internalLocation()}, nil
 	}
 	if err != nil {
 		return nil, internalError("reading " + s.stateFile + ": " + err.Error())
@@ -995,7 +1126,32 @@ func (s *StorageServices) load() ([]Location, error) {
 	}
 
 	sort.Slice(locations, func(i, j int) bool { return locations[i].ID < locations[j].ID })
-	return locations, nil
+
+	// The server's own disk, added on the way out rather than written to the
+	// file. Every reader — listing, assignment, backup destination checks — goes
+	// through here, so there is one place where it exists and no possibility of
+	// a caller that forgot about it.
+	//
+	// Prepended, and the sort above is deliberately not redone: an added disk
+	// keeps its alphabetical order among the other added disks, and the built-in
+	// one is first because it is the one that is always there.
+	return append([]Location{internalLocation()}, locations...), nil
+}
+
+// saveable strips the built-in location out again, so that a read-modify-write
+// of the state file cannot persist a synthetic entry.
+//
+// Without this, adding one disk would write the internal location into the file,
+// and the next load would produce it twice — the kind of duplication that looks
+// harmless until something iterates locations and does work per entry.
+func saveable(locations []Location) []Location {
+	kept := make([]Location, 0, len(locations))
+	for _, location := range locations {
+		if location.ID != InternalLocationID {
+			kept = append(kept, location)
+		}
+	}
+	return kept
 }
 
 func (s *StorageServices) save(locations []Location) error {
@@ -1003,7 +1159,7 @@ func (s *StorageServices) save(locations []Location) error {
 		return internalError("creating the state directory: " + err.Error())
 	}
 
-	body, err := json.MarshalIndent(locations, "", "  ")
+	body, err := json.MarshalIndent(saveable(locations), "", "  ")
 	if err != nil {
 		return internalError("encoding the storage configuration: " + err.Error())
 	}

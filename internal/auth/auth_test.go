@@ -34,7 +34,7 @@ func TestFirstRunSetup(t *testing.T) {
 		t.Fatal("a fresh server should need setup")
 	}
 
-	user, err := s.CreateAdministrator(ctx, "okan", goodPassword)
+	user, err := s.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatalf("creating the administrator: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestSetupCannotHappenTwice(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	if _, err := s.CreateAdministrator(ctx, "okan", goodPassword); err != nil {
+	if _, err := s.CreateAdministrator(ctx, "alex", goodPassword); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,7 +68,7 @@ func TestShortPasswordsAreRejected(t *testing.T) {
 	s := testService(t)
 
 	for _, password := range []string{"", "short", strings.Repeat("a", MinPasswordLen-1)} {
-		_, err := s.CreateAdministrator(context.Background(), "okan", password)
+		_, err := s.CreateAdministrator(context.Background(), "alex", password)
 		if !errors.Is(err, ErrWeakPassword) {
 			t.Errorf("password %q was accepted (got %v)", password, err)
 		}
@@ -79,12 +79,12 @@ func TestAuthenticate(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	created, err := s.CreateAdministrator(ctx, "okan", goodPassword)
+	created, err := s.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	user, err := s.Authenticate(ctx, "okan", goodPassword)
+	user, err := s.Authenticate(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatalf("correct credentials rejected: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestAuthenticate(t *testing.T) {
 		t.Error("authenticated as the wrong user")
 	}
 
-	if _, err := s.Authenticate(ctx, "okan", "the-wrong-password"); !errors.Is(err, ErrInvalidCredential) {
+	if _, err := s.Authenticate(ctx, "alex", "the-wrong-password"); !errors.Is(err, ErrInvalidCredential) {
 		t.Errorf("wrong password accepted: %v", err)
 	}
 }
@@ -103,11 +103,11 @@ func TestUnknownUserAndWrongPasswordAreIndistinguishable(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	if _, err := s.CreateAdministrator(ctx, "okan", goodPassword); err != nil {
+	if _, err := s.CreateAdministrator(ctx, "alex", goodPassword); err != nil {
 		t.Fatal(err)
 	}
 
-	_, wrongPassword := s.Authenticate(ctx, "okan", "not-the-password")
+	_, wrongPassword := s.Authenticate(ctx, "alex", "not-the-password")
 	_, noSuchUser := s.Authenticate(ctx, "someone-else", "not-the-password")
 
 	if wrongPassword == nil || noSuchUser == nil {
@@ -123,7 +123,7 @@ func TestSessionLifecycle(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	user, err := s.CreateAdministrator(ctx, "okan", goodPassword)
+	user, err := s.CreateAdministrator(ctx, "alex", goodPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestSessionTokensAreNotStored(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	user, _ := s.CreateAdministrator(ctx, "okan", goodPassword)
+	user, _ := s.CreateAdministrator(ctx, "alex", goodPassword)
 	token, _, err := s.CreateSession(ctx, user.ID, "")
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestExpiredSessionsAreRejectedAndPurged(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
 
-	user, _ := s.CreateAdministrator(ctx, "okan", goodPassword)
+	user, _ := s.CreateAdministrator(ctx, "alex", goodPassword)
 	token, _, err := s.CreateSession(ctx, user.ID, "")
 	if err != nil {
 		t.Fatal(err)

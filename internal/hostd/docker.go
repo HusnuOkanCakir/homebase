@@ -393,20 +393,45 @@ type containerConfig struct {
 	Labels       map[string]string   `json:"Labels,omitempty"`
 	ExposedPorts map[string]struct{} `json:"ExposedPorts,omitempty"`
 	HostConfig   hostConfig          `json:"HostConfig"`
+
+	NetworkingConfig *networkingConfig `json:"NetworkingConfig,omitempty"`
+}
+
+// networkingConfig attaches a container to a network at creation, with the
+// aliases it answers to on it.
+//
+// At creation rather than by connecting afterwards: a container that starts
+// before it is on the network fails its first connection, and an application
+// whose database is briefly unreachable at startup is one that crash-loops for
+// reasons nobody can see.
+type networkingConfig struct {
+	EndpointsConfig map[string]endpointConfig `json:"EndpointsConfig,omitempty"`
+}
+
+type endpointConfig struct {
+	Aliases []string `json:"Aliases,omitempty"`
 }
 
 type hostConfig struct {
-	Binds          []string                 `json:"Binds,omitempty"`
-	PortBindings   map[string][]portBinding `json:"PortBindings,omitempty"`
-	RestartPolicy  restartPolicy            `json:"RestartPolicy"`
-	Memory         int64                    `json:"Memory,omitempty"`
-	CpuShares      int                      `json:"CpuShares,omitempty"`
-	CapDrop        []string                 `json:"CapDrop,omitempty"`
-	CapAdd         []string                 `json:"CapAdd,omitempty"`
-	SecurityOpt    []string                 `json:"SecurityOpt,omitempty"`
-	ReadonlyRootfs bool                     `json:"ReadonlyRootfs,omitempty"`
-	NetworkMode    string                   `json:"NetworkMode,omitempty"`
-	Devices        []deviceMapping          `json:"Devices,omitempty"`
+	Binds         []string                 `json:"Binds,omitempty"`
+	PortBindings  map[string][]portBinding `json:"PortBindings,omitempty"`
+	RestartPolicy restartPolicy            `json:"RestartPolicy"`
+	Memory        int64                    `json:"Memory,omitempty"`
+	CpuShares     int                      `json:"CpuShares,omitempty"`
+	CapDrop       []string                 `json:"CapDrop,omitempty"`
+
+	// GroupAdd are supplementary groups the container's process joins.
+	//
+	// One group, ever: the service group, and only for an application that has
+	// been given a folder the user also uses. That folder belongs to the group
+	// rather than to the application — because the file server writes into it
+	// too — and a container that is not a member of it can read nothing there.
+	GroupAdd       []string        `json:"GroupAdd,omitempty"`
+	CapAdd         []string        `json:"CapAdd,omitempty"`
+	SecurityOpt    []string        `json:"SecurityOpt,omitempty"`
+	ReadonlyRootfs bool            `json:"ReadonlyRootfs,omitempty"`
+	NetworkMode    string          `json:"NetworkMode,omitempty"`
+	Devices        []deviceMapping `json:"Devices,omitempty"`
 	// Privileged is deliberately present and deliberately never set. Its absence
 	// from the struct would make it impossible to assert that it is false.
 	Privileged bool `json:"Privileged"`
@@ -521,11 +546,109 @@ type containerState struct {
 		Image  string            `json:"Image"`
 		Labels map[string]string `json:"Labels"`
 	} `json:"Config"`
+
+	// Where the container actually ended up, which is not always where it was
+	// asked to go: a binding of port 0 means Docker chooses, and the choice is
+	// only knowable afterwards. Read back rather than assumed, so that what
+	// Homebase reports is where the application is rather than where it was
+	// meant to be.
+	NetworkSettings struct {
+		Ports map[string][]struct {
+			HostIP   string `json:"HostIp"`
+			HostPort string `json:"HostPort"`
+		} `json:"Ports"`
+	} `json:"NetworkSettings"`
+}
+
+// publishedPort reports the host address a container's port ended up on.
+func (c *containerState) publishedPort(internal int) (hostIP string, hostPort int) {
+	for _, binding := range c.NetworkSettings.Ports[fmt.Sprintf("%d/tcp", internal)] {
+		port, err := strconv.Atoi(binding.HostPort)
+		if err != nil {
+			continue
+		}
+		return binding.HostIP, port
+	}
+	return "", 0
 }
 
 // inspectContainer returns the container's state, or (nil, nil) when there is no
 // such container — which is an ordinary answer for an application that is not
 // installed.
+// --- Networks ------------------------------------------------------------------
+//
+// One per application that has supporting services, and nothing else is on it.
+//
+// The alternative — putting a database on the default bridge — makes it
+// reachable by every other container on the machine, which is every other
+// application. A private network is what makes "this database belongs to this
+// application" a property of the machine rather than an intention.
+
+type networkConfig struct {
+	Name string `json:"Name"`
+	// Bridge, explicitly. The default would also be bridge; saying so means a
+	// change of Docker's default is not a change to what Homebase creates.
+	Driver string `json:"Driver"`
+	// Internal cuts the network off from the world outside this machine.
+	// Deliberately false: a database needs no route out, but the applications
+	// on this network do — an image pull is not the only thing an application
+	// reaches the internet for, and a network flag is the wrong place to decide
+	// that. What keeps the database unreachable is that nothing publishes it.
+	Internal bool              `json:"Internal"`
+	Labels   map[string]string `json:"Labels,omitempty"`
+}
+
+// createNetwork makes an application's private network, or does nothing if it
+// is already there.
+func (d *docker) createNetwork(ctx context.Context, name string) error {
+	err := d.do(ctx, http.MethodPost, "/networks/create", networkConfig{
+		Name:   name,
+		Driver: "bridge",
+		Labels: map[string]string{"homebase.managed": "true"},
+	}, nil)
+	var dockerErr *dockerError
+	// 409 is "already exists", which is the ordinary case on every start after
+	// the first and is not a failure.
+	if asDockerError(err, &dockerErr) && dockerErr.Status == http.StatusConflict {
+		return nil
+	}
+	return err
+}
+
+// connectNetwork attaches an existing container to another network.
+//
+// Docker attaches only one network when a container is created, so an
+// application that reaches others is put on its own at creation and connected to
+// theirs immediately afterwards — before it is started, so its first connection
+// already resolves.
+func (d *docker) connectNetwork(ctx context.Context, network, container string, aliases []string) error {
+	body := struct {
+		Container      string         `json:"Container"`
+		EndpointConfig endpointConfig `json:"EndpointConfig"`
+	}{container, endpointConfig{Aliases: aliases}}
+
+	err := d.do(ctx, http.MethodPost,
+		"/networks/"+url.PathEscape(network)+"/connect", body, nil)
+	var dockerErr *dockerError
+	// Already connected, which is the ordinary case on every start after the
+	// first.
+	if asDockerError(err, &dockerErr) && dockerErr.Status == http.StatusForbidden {
+		return nil
+	}
+	return err
+}
+
+// removeNetwork deletes it. A network with something still attached cannot be
+// removed, which is why this runs after the containers are gone.
+func (d *docker) removeNetwork(ctx context.Context, name string) error {
+	err := d.do(ctx, http.MethodDelete, "/networks/"+url.PathEscape(name), nil, nil)
+	var dockerErr *dockerError
+	if asDockerError(err, &dockerErr) && dockerErr.NotFound() {
+		return nil
+	}
+	return err
+}
+
 func (d *docker) inspectContainer(ctx context.Context, name string) (*containerState, error) {
 	var state containerState
 	err := d.do(ctx, http.MethodGet, "/containers/"+url.PathEscape(name)+"/json", nil, &state)

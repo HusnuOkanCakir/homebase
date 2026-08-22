@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -278,10 +280,188 @@ func appsCommand(args []string, stdout io.Writer) error {
 			})
 	case "logs":
 		return withClient("apps logs", rest, stdout, appLogs)
+	case "storage":
+		return withClient("apps storage", rest, stdout, appStorage)
+	case "open":
+		return withClient("apps open", rest, stdout, openApp)
 	default:
 		return usageError{fmt.Errorf("unknown apps command %q — try list, install, "+
-			"start, stop, restart, uninstall, logs", action)}
+			"start, stop, restart, uninstall, logs, storage, open", action)}
 	}
+}
+
+// openApp prints the address of a running application, and opens it if there is
+// a desktop to open it on.
+//
+// There was no way to find this out from anywhere in Homebase. An application
+// would install, start, pass its health check, and sit at an address nothing
+// reported — which for a media server is the whole of what it is for.
+func openApp(ctx context.Context, c *Client, o *options, args []string, w io.Writer) error {
+	if len(args) != 1 {
+		return usageError{errors.New("which application? — homebasectl apps open NAME")}
+	}
+	var app application
+	if err := c.Get(ctx, "/apps/"+args[0], &app); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, app)
+	}
+
+	if app.URL == "" {
+		fmt.Fprintf(w, "%s has no address to open.\n", app.Name)
+		if app.State != "running" {
+			fmt.Fprintf(w, "\nIt is %s. Start it with: homebasectl apps start %s\n",
+				strings.ReplaceAll(app.State, "_", " "), app.ID)
+		}
+		return nil
+	}
+
+	fmt.Fprintln(w, app.URL)
+	if !app.ReachableFromNetwork {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "That address only works on the server itself. Reach it from")
+		fmt.Fprintln(w, "another computer with an ssh tunnel:")
+		fmt.Fprintf(w, "\n    ssh -L 8000:%s console@%s\n",
+			strings.TrimPrefix(strings.TrimPrefix(app.URL, "http://"), "https://"),
+			shortHost())
+		return nil
+	}
+
+	// Opened as well as printed, when there is a desktop to open it on. Printed
+	// first and always, because the usual place this runs is an ssh session,
+	// where there is nothing to open and the address is the whole answer.
+	if opener, err := exec.LookPath("xdg-open"); err == nil && os.Getenv("DISPLAY") != "" {
+		_ = exec.CommandContext(ctx, opener, app.URL).Start()
+	}
+	return nil
+}
+
+// appStorage shows where an application keeps its files, and chooses.
+//
+//	homebasectl apps storage jellyfin                   what it needs and has
+//	homebasectl apps storage jellyfin media internal    put it on this server
+//
+// There was no way to do this from a terminal at all until now: the operation
+// and the endpoint both existed and nothing invoked them, so an application
+// declaring user-selected storage could be installed and could never be started.
+func appStorage(ctx context.Context, c *Client, o *options, args []string, w io.Writer) error {
+	if len(args) == 0 {
+		return usageError{errors.New(
+			"which application? Try `homebasectl apps storage jellyfin`")}
+	}
+	app := args[0]
+
+	if len(args) >= 2 {
+		if len(args) < 3 {
+			return usageError{fmt.Errorf(
+				"which disk should hold %q? Run `homebasectl storage` to see them", args[1])}
+		}
+		body := map[string]any{"storage_id": args[1], "location": args[2]}
+		if len(args) > 3 {
+			// The folder on that disk. Given so that a media server can read
+			// the same folder a laptop copies films into, rather than a
+			// directory of its own that somebody then has to fill twice.
+			body["folder"] = args[3]
+		}
+
+		var job jobReply
+		if err := c.Post(ctx, "/apps/"+app+"/storage", body, &job); err != nil {
+			return err
+		}
+		if err := followJob(ctx, c, o, job, w); err != nil {
+			return err
+		}
+		if o.asJSON {
+			return printResponse(w, c, job)
+		}
+
+		// Read back rather than echoed. The response to this is a job envelope,
+		// so the folder is not in it — printing the one that was asked for
+		// reported an empty folder as though it had been set, which is a claim
+		// about the server made from the request.
+		var placed struct {
+			Storage []struct {
+				ID   string `json:"id"`
+				Path string `json:"path"`
+			} `json:"storage"`
+		}
+		if err := c.Get(ctx, "/apps/"+app+"/storage", &placed); err != nil {
+			return err
+		}
+		for _, slot := range placed.Storage {
+			if slot.ID == args[1] && slot.Path != "" {
+				fmt.Fprintf(w, "%s will read its %s from %s\n", app, args[1], slot.Path)
+			}
+		}
+		// No "now restart it". The container is rebuilt by the assignment,
+		// because a restart would have kept the old directories — Docker fixes
+		// bind mounts when a container is created. Telling somebody to run a
+		// command that would not have worked is worse than saying nothing.
+		return nil
+	}
+
+	var storage struct {
+		Name    string `json:"name"`
+		Ready   bool   `json:"ready"`
+		Storage []struct {
+			ID           string `json:"id"`
+			Type         string `json:"type"`
+			Description  string `json:"description"`
+			Location     string `json:"location"`
+			LocationName string `json:"location_name"`
+			Ready        bool   `json:"ready"`
+			Path         string `json:"path"`
+		} `json:"storage"`
+	}
+	if err := c.Get(ctx, "/apps/"+app+"/storage", &storage); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, storage)
+	}
+
+	rows := [][]string{{"WHAT", "WHERE", "STATUS"}}
+	var missing []string
+	for _, slot := range storage.Storage {
+		where := "on this server, with the application"
+		if slot.Type == "user-selected" {
+			where = "not chosen yet"
+			if slot.LocationName != "" {
+				where = slot.LocationName
+			}
+		}
+		status := "ready"
+		if !slot.Ready {
+			status = "waiting"
+			if slot.Type == "user-selected" {
+				missing = append(missing, slot.ID)
+			}
+		}
+		rows = append(rows, []string{slot.ID, where, status})
+	}
+	writeTable(w, rows)
+
+	for _, slot := range storage.Storage {
+		if slot.Type == "user-selected" && slot.Description != "" {
+			fmt.Fprintf(w, "\n%s — %s\n", slot.ID, slot.Description)
+		}
+	}
+	if len(missing) > 0 {
+		fmt.Fprintf(w, "\nChoose a disk:\n\n    homebasectl apps storage %s %s internal\n",
+			app, missing[0])
+		fmt.Fprintln(w, "\nRun `homebasectl storage` for the list. `internal` is this")
+		fmt.Fprintln(w, "server's own disk, which is fine for anything that fits on it.")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "To point it at folders you can also reach from your own computer,")
+		fmt.Fprintln(w, "share them first and then name the folder:")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "    homebasectl share add films internal")
+		fmt.Fprintln(w, "    homebasectl share add shows internal")
+		fmt.Fprintf(w, "    homebasectl apps storage %s %s internal shares\n",
+			app, missing[0])
+	}
+	return nil
 }
 
 type application struct {
@@ -291,6 +471,14 @@ type application struct {
 	Version string `json:"version,omitempty"`
 	URL     string `json:"url,omitempty"`
 	Health  string `json:"health,omitempty"`
+
+	// What is still left for a person to do, from the manifest.
+	AfterInstall string `json:"after_install,omitempty"`
+
+	// Whether anything other than this machine can open it. Without this an
+	// address is worse than none: a loopback URL is a real place that is not
+	// there from the laptop somebody is reading it on.
+	ReachableFromNetwork bool `json:"reachable_from_network"`
 }
 
 func listApps(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
@@ -311,11 +499,35 @@ func listApps(ctx context.Context, c *Client, o *options, _ []string, w io.Write
 	sort.Slice(reply.Items, func(a, b int) bool { return reply.Items[a].ID < reply.Items[b].ID })
 
 	rows := [][]string{{"ID", "STATE", "VERSION", "ADDRESS"}}
+	onlyHere := false
 	for _, app := range reply.Items {
-		rows = append(rows, []string{app.ID, app.State, app.Version, app.URL})
+		address := app.URL
+		if address != "" && !app.ReachableFromNetwork {
+			address += "  (this server only)"
+			onlyHere = true
+		}
+		rows = append(rows, []string{app.ID, app.State, app.Version, address})
 	}
 	writeTable(w, rows)
+	if onlyHere {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "\"this server only\" means the application is not published onto")
+		fmt.Fprintln(w, "the network. Reach it with an ssh tunnel:")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "    ssh -L 8000:127.0.0.1:PORT console@"+shortHost()+"")
+	}
 	return nil
+}
+
+// shortHost is the name this client is talking to, for use in an example
+// command. The address as typed, so the example can be pasted as printed.
+func shortHost() string {
+	host := os.Getenv("HOMEBASE_ADDRESS")
+	if host == "" {
+		return "homebase.local"
+	}
+	host = strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
+	return strings.TrimSuffix(strings.SplitN(host, "/", 2)[0], ":443")
 }
 
 func actOnApp(ctx context.Context, c *Client, o *options, action string,
@@ -326,9 +538,17 @@ func actOnApp(ctx context.Context, c *Client, o *options, action string,
 	id := names[0]
 
 	body := map[string]any{}
-	// Uninstalling asks for the name back. The API checks it again, and so does
-	// hostd: this is not the confirmation, it is passing one along.
-	if action == "uninstall" {
+	// Stopping, restarting and uninstalling all ask for the name back — each of
+	// them takes a service away from whoever is using it, possibly somebody else
+	// in the house. In a terminal the command itself is the confirmation: the
+	// name is already typed, deliberately, in the line that was run.
+	//
+	// Only uninstall sent it, so `apps stop` and `apps restart` failed with
+	// "confirm must be jellyfin" against every server they were ever pointed at.
+	// The same shape as `apps logs` decoding the wrong field: an endpoint with a
+	// caller nobody had run.
+	switch action {
+	case "stop", "restart", "uninstall":
 		body["confirm"] = id
 	}
 
@@ -338,17 +558,55 @@ func actOnApp(ctx context.Context, c *Client, o *options, action string,
 		path = "/apps/" + id + "/install"
 	}
 	if err := c.Post(ctx, path, body, &job); err != nil {
+		// The one refusal that has a fix a person can type. hostd cannot phrase
+		// it: it answers a dashboard and a terminal from the same sentence, and
+		// "choose a disk in the storage settings" is no help at a prompt.
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.Code == "app.storage_not_assigned" {
+			return fmt.Errorf("%w\n\nChoose a disk first:\n\n    "+
+				"homebasectl apps storage %s", err, id)
+		}
 		return err
 	}
-	return followJob(ctx, c, o, job, w)
+	if err := followJob(ctx, c, o, job, w); err != nil {
+		return err
+	}
+
+	// The address, at the moment somebody wants it. Anything that starts an
+	// application ends with a person wanting to look at it, and until this was
+	// added there was nowhere at all in Homebase that would say where.
+	if o.asJSON || (action != "install" && action != "start" && action != "restart") {
+		return nil
+	}
+	var app application
+	if err := c.Get(ctx, "/apps/"+id, &app); err != nil || app.URL == "" {
+		return nil
+	}
+	if app.ReachableFromNetwork {
+		fmt.Fprintf(w, "\nOpen it at: %s\n", app.URL)
+	} else {
+		fmt.Fprintf(w, "\nIt is at %s, on the server only.\n", app.URL)
+	}
+	// What is left to do, from the manifest. Printed after an install rather
+	// than only in a screen somebody might visit: an application asking for a
+	// password nobody was given looks exactly like one that is broken.
+	if action == "install" && app.AfterInstall != "" {
+		fmt.Fprintf(w, "\n%s\n", wrapAt(app.AfterInstall, 72))
+	}
+	return nil
 }
 
 func appLogs(ctx context.Context, c *Client, o *options, names []string, w io.Writer) error {
 	if len(names) != 1 {
 		return usageError{errors.New("which application? — homebasectl apps logs NAME")}
 	}
+	// `lines` is the number asked for and `logs` is the text. This decoded
+	// `lines` as the log itself and failed on every application with
+	// "cannot unmarshal number into Go struct field .lines of type []string" —
+	// which is what `homebasectl apps logs` did for its whole existence, because
+	// nothing ever ran it against a server.
 	var reply struct {
-		Lines []string `json:"lines"`
+		Logs string `json:"logs"`
 	}
 	if err := c.Get(ctx, "/apps/"+names[0]+"/logs?lines=200", &reply); err != nil {
 		return err
@@ -356,9 +614,11 @@ func appLogs(ctx context.Context, c *Client, o *options, names []string, w io.Wr
 	if o.asJSON {
 		return printResponse(w, c, reply)
 	}
-	for _, line := range reply.Lines {
-		fmt.Fprintln(w, line)
+	if strings.TrimSpace(reply.Logs) == "" {
+		fmt.Fprintln(w, "Nothing in the log yet.")
+		return nil
 	}
+	fmt.Fprintln(w, strings.TrimRight(reply.Logs, "\n"))
 	return nil
 }
 
@@ -461,6 +721,7 @@ func listStorage(ctx context.Context, c *Client, o *options, _ []string, w io.Wr
 			MountPoint     string `json:"mount_point"`
 			TotalBytes     uint64 `json:"total_bytes"`
 			AvailableBytes uint64 `json:"available_bytes"`
+			Internal       bool   `json:"internal"`
 		} `json:"items"`
 	}
 	if err := c.Get(ctx, "/storage/locations", &reply); err != nil {
@@ -475,15 +736,34 @@ func listStorage(ctx context.Context, c *Client, o *options, _ []string, w io.Wr
 	}
 
 	rows := [][]string{{"ID", "NAME", "CONNECTED", "FREE", "OF"}}
+	external := false
 	for _, place := range reply.Items {
 		connected := "no"
 		if place.Mounted {
 			connected = "yes"
 		}
+		if place.Internal {
+			// "always" rather than "yes". The column asks whether the disk is
+			// plugged in, and for this one the question does not apply — a row
+			// saying "yes" invites somebody to wonder when it might say no.
+			connected = "always"
+		} else {
+			external = true
+		}
 		rows = append(rows, []string{place.ID, place.Name, connected,
 			humanBytes(place.AvailableBytes), humanBytes(place.TotalBytes)})
 	}
 	writeTable(w, rows)
+
+	// Said once, here, rather than at the moment somebody tries to schedule a
+	// backup and is refused. The refusal is correct and it arrives too late to
+	// be useful: by then they have decided backups are set up.
+	if !external {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Applications can keep their files on this server's own disk.")
+		fmt.Fprintln(w, "Backups cannot — a copy on the same disk as the original is")
+		fmt.Fprintln(w, "lost with it. Those need a disk you plug in.")
+	}
 	return nil
 }
 
@@ -760,26 +1040,110 @@ func networkCommand(args []string, stdout io.Writer) error {
 		return withClient("network status", rest, stdout, networkStatus)
 	case "wifi":
 		return wifiCommand(rest, stdout)
+	case "wake-on-lan":
+		return wakeOnLANCommand(rest, stdout)
 	default:
-		return usageError{fmt.Errorf("unknown network command %q — try status or wifi", action)}
+		return usageError{fmt.Errorf(
+			"unknown network command %q — try status, wifi or wake-on-lan", action)}
 	}
+}
+
+// wrapAt breaks a sentence over lines no longer than width.
+//
+// Needed because this is one of the few places where the words come from the
+// server rather than from this source file, so they cannot be wrapped by hand
+// where they are written. Terminals are not all 80 columns and this does not
+// ask: 72 is narrow enough to survive an ssh session in a small window, which is
+// where a server is usually being talked to.
+func wrapAt(text string, width int) string {
+	var out strings.Builder
+	column := 0
+	for i, word := range strings.Fields(text) {
+		switch {
+		case i == 0:
+		case column+1+len(word) > width:
+			out.WriteString("\n")
+			column = 0
+		default:
+			out.WriteString(" ")
+			column++
+		}
+		out.WriteString(word)
+		column += len(word)
+	}
+	return out.String()
+}
+
+// wakeOnLANCommand lets a magic packet start this server, or stops it.
+//
+// `homebasectl network wake-on-lan <interface> [on|off]`, defaulting to on,
+// because somebody typing this has read that their server can be woken and is
+// trying to make that true.
+func wakeOnLANCommand(args []string, stdout io.Writer) error {
+	return withClient("network wake-on-lan", args, stdout,
+		func(ctx context.Context, c *Client, o *options, rest []string, w io.Writer) error {
+			if len(rest) == 0 {
+				return usageError{errors.New(
+					"which network card? Run `homebasectl network` to see them")}
+			}
+			enabled := true
+			switch {
+			case len(rest) == 1:
+			case rest[1] == "on":
+			case rest[1] == "off":
+				enabled = false
+			default:
+				return usageError{fmt.Errorf("say on or off, not %q", rest[1])}
+			}
+
+			var result struct {
+				Interface string `json:"interface"`
+				Enabled   bool   `json:"enabled"`
+				Note      string `json:"note"`
+			}
+			if err := c.Post(ctx, "/network/wake-on-lan", map[string]any{
+				"interface": rest[0],
+				"enabled":   enabled,
+			}, &result); err != nil {
+				return err
+			}
+			if o.asJSON {
+				return printResponse(w, c, result)
+			}
+
+			if !result.Enabled {
+				fmt.Fprintf(w, "%s will no longer start this server.\n", result.Interface)
+				return nil
+			}
+			fmt.Fprintf(w, "%s will now start this server when a magic packet "+
+				"arrives, and after a restart too.\n\n", result.Interface)
+			fmt.Fprintf(w, "Try it: shut the server down, then from another machine on\n"+
+				"the same network run\n\n    homebasectl wake <its MAC address>\n\n")
+			if result.Note != "" {
+				fmt.Fprintln(w, wrapAt(result.Note, 72))
+			}
+			return nil
+		})
 }
 
 func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
 	var status struct {
-		Hostname   string `json:"hostname"`
-		MDNSName   string `json:"mdns_name"`
-		MDNSWorks  bool   `json:"mdns_works"`
-		Gateway    string `json:"gateway"`
-		Online     bool   `json:"online"`
-		Reachable  bool   `json:"reachable"`
-		Interfaces []struct {
-			Name      string   `json:"name"`
-			Kind      string   `json:"kind"`
-			Up        bool     `json:"up"`
-			Addresses []string `json:"addresses"`
-			MAC       string   `json:"mac"`
-			WakeOnLAN bool     `json:"wake_on_lan"`
+		Hostname          string   `json:"hostname"`
+		MDNSName          string   `json:"mdns_name"`
+		MDNSWorks         bool     `json:"mdns_works"`
+		Gateway           string   `json:"gateway"`
+		Online            bool     `json:"online"`
+		Reachable         bool     `json:"reachable"`
+		MissingInterfaces []string `json:"missing_interfaces"`
+		Interfaces        []struct {
+			Name               string   `json:"name"`
+			Kind               string   `json:"kind"`
+			Up                 bool     `json:"up"`
+			Addresses          []string `json:"addresses"`
+			MAC                string   `json:"mac"`
+			WakeOnLAN          bool     `json:"wake_on_lan"`
+			WakeOnLANSupported bool     `json:"wake_on_lan_supported"`
+			WakeOnLANKnown     bool     `json:"wake_on_lan_known"`
 		} `json:"interfaces"`
 	}
 	if err := c.Get(ctx, "/network", &status); err != nil {
@@ -803,6 +1167,18 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 		fmt.Fprintln(w, "Network:  connected")
 	}
 
+	// Said before the list, because it is the reason the list may be missing the
+	// card somebody is looking for.
+	if len(status.MissingInterfaces) > 0 {
+		fmt.Fprintf(w, "\nThe network configuration asks for %s, which this machine\n",
+			strings.Join(status.MissingInterfaces, " and "))
+		fmt.Fprintln(w, "does not have. That is usually a card that was renamed rather than")
+		fmt.Fprintln(w, "removed — the name comes from its slot, and a slot number moves when")
+		fmt.Fprintln(w, "other hardware is added or stops being detected.")
+		fmt.Fprintln(w, "\nMatch on the kind of device instead of the name, in /etc/netplan:")
+		fmt.Fprint(w, "\n    match:\n      name: \"en*\"\n\n")
+	}
+
 	for _, iface := range status.Interfaces {
 		if iface.Kind == "loopback" || iface.Kind == "container" {
 			continue
@@ -814,9 +1190,23 @@ func networkStatus(ctx context.Context, c *Client, o *options, _ []string, w io.
 			// and what a wake-up packet is addressed to — which is worth knowing
 			// before the machine is asleep, because nothing on a sleeping
 			// machine can tell you afterwards.
-			wake := "cannot be woken by a network packet"
-			if iface.WakeOnLAN {
+			// Three states, and the middle one is the only actionable one.
+			wake := "Homebase cannot tell whether this card can be woken"
+			switch {
+			case !iface.WakeOnLANKnown:
+				// Left as it is. Saying "cannot be woken" here was a confident
+				// false statement about hardware that supports it perfectly well.
+			case !iface.WakeOnLANSupported:
+				wake = "this card cannot be woken by a network packet"
+			case iface.WakeOnLAN:
 				wake = "can be woken with: homebasectl wake " + normaliseMAC(iface.MAC)
+			case iface.WakeOnLANSupported:
+				// The command Homebase can run, rather than the ethtool
+				// incantation this used to print. `ethtool -s` was also wrong in
+				// a way nobody would notice until it mattered: it lasts until
+				// the machine is restarted, which is the one moment the setting
+				// exists for.
+				wake = "could be woken — homebasectl network wake-on-lan " + iface.Name
 			}
 			fmt.Fprintf(w, "           %s — %s\n", normaliseMAC(iface.MAC), wake)
 		}
@@ -914,7 +1304,209 @@ func joinWifi(ctx context.Context, c *Client, o *options, rest []string, w io.Wr
 
 // --- System -----------------------------------------------------------------------
 
+// systemHistory shows how hot the machine has been, as a chart.
+//
+// A chart in a terminal rather than a table of numbers, because every question
+// worth asking here is about shape: is it hotter than it was, does it climb
+// whenever something transcodes, did cleaning the fan help. A column of two
+// thousand readings answers none of those and a line does.
+func systemHistory(ctx context.Context, c *Client, o *options, args []string, w io.Writer) error {
+	days := 7
+	if len(args) > 0 {
+		parsed, err := strconv.Atoi(args[0])
+		if err != nil || parsed < 1 || parsed > 365 {
+			return usageError{fmt.Errorf("how many days? — homebasectl system history 7")}
+		}
+		days = parsed
+	}
+
+	var history struct {
+		Samples []struct {
+			Time    string `json:"time"`
+			Celsius *int   `json:"celsius"`
+			FanRPM  *int   `json:"fan_rpm"`
+		} `json:"samples"`
+		Hottest   *int   `json:"hottest_celsius"`
+		Coolest   *int   `json:"coolest_celsius"`
+		Average   *int   `json:"average_celsius"`
+		Loudest   *int   `json:"loudest_rpm"`
+		Quietest  *int   `json:"quietest_rpm"`
+		Since     string `json:"since"`
+		Recording bool   `json:"recording"`
+	}
+	if err := c.Get(ctx, fmt.Sprintf("/system/history?days=%d&points=240", days), &history); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, history)
+	}
+
+	if len(history.Samples) == 0 {
+		// The two empty cases are different and only one needs doing something
+		// about, so they are not given the same sentence.
+		if history.Recording {
+			fmt.Fprintf(w, "Nothing recorded in the last %d days.\n", days)
+			fmt.Fprintln(w, "\nThe server was probably switched off. Readings are taken "+
+				"every five minutes\nwhile it is running.")
+			return nil
+		}
+		fmt.Fprintln(w, "No readings have been recorded yet.")
+		fmt.Fprintln(w, "\nThe first one is taken when the server starts, so this "+
+			"clears within a\nfew minutes of a restart.")
+		return nil
+	}
+
+	temperatures := make([]float64, 0, len(history.Samples))
+	speeds := make([]float64, 0, len(history.Samples))
+	for _, sample := range history.Samples {
+		if sample.Celsius != nil {
+			temperatures = append(temperatures, float64(*sample.Celsius))
+		}
+		if sample.FanRPM != nil {
+			speeds = append(speeds, float64(*sample.FanRPM))
+		}
+	}
+
+	fmt.Fprintf(w, "The last %d days — %d readings since %s\n\n",
+		days, len(history.Samples), shortTime(history.Since))
+
+	// A chart of three readings is a picture of nothing. Said plainly rather
+	// than drawn, because a wall of solid blocks looks like data.
+	if len(history.Samples) < 6 {
+		fmt.Fprintf(w, "Not enough readings yet to draw a chart — one is taken "+
+			"every five minutes.\n\n")
+		for _, sample := range history.Samples {
+			fmt.Fprintf(w, "  %s  ", shortTime(sample.Time))
+			if sample.Celsius != nil {
+				fmt.Fprintf(w, "%d °C", *sample.Celsius)
+			}
+			if sample.FanRPM != nil {
+				fmt.Fprintf(w, "  %d rpm", *sample.FanRPM)
+			}
+			fmt.Fprintln(w)
+		}
+		return nil
+	}
+
+	if len(temperatures) > 0 {
+		fmt.Fprintln(w, "Temperature")
+		drawChart(w, temperatures, "°C")
+		fmt.Fprintf(w, "  hottest %d °C, coolest %d °C, average %d °C\n\n",
+			valueOr(history.Hottest), valueOr(history.Coolest), valueOr(history.Average))
+	}
+	if len(speeds) > 0 {
+		fmt.Fprintln(w, "Fan")
+		drawChart(w, speeds, "rpm")
+		fmt.Fprintf(w, "  loudest %d rpm, quietest %d rpm\n\n",
+			valueOr(history.Loudest), valueOr(history.Quietest))
+	}
+
+	fmt.Fprintln(w, "The full record is a plain CSV, for anything a chart in a terminal")
+	fmt.Fprintln(w, "cannot answer:")
+	fmt.Fprintln(w, "\n    /var/log/homebase/thermal.csv")
+	return nil
+}
+
+func valueOr(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func shortTime(stamp string) string {
+	when, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return stamp
+	}
+	return when.Local().Format("2 Jan 15:04")
+}
+
+// drawChart plots a series with block characters.
+//
+// Eight rows and Unicode blocks rather than a sparkline, because the thing being
+// looked for is usually a slow climb over days, and one row of sparkline cannot
+// show a five-degree drift that matters. Width is fixed at 72 so it survives an
+// ssh session in a small window, which is where a server is usually talked to.
+func drawChart(w io.Writer, values []float64, unit string) {
+	const width, height = 72, 8
+	if len(values) == 0 {
+		return
+	}
+
+	low, high := values[0], values[0]
+	for _, value := range values {
+		low = min(low, value)
+		high = max(high, value)
+	}
+	// A flat series has no range to scale against. Centred rather than given a
+	// range above it, or a machine that has been perfectly steady draws as a
+	// line along the floor — which reads as "it stopped" rather than
+	// "it did not change".
+	if high-low < 1 {
+		low -= 0.5
+		high += 0.5
+	}
+
+	// Averaged into columns rather than sampled, so a single spike in a week of
+	// readings cannot vanish between two chosen points.
+	columns := make([]float64, width)
+	for i := range columns {
+		start := i * len(values) / width
+		end := (i + 1) * len(values) / width
+		if end <= start {
+			end = start + 1
+		}
+		var total float64
+		var count int
+		for j := start; j < end && j < len(values); j++ {
+			total += values[j]
+			count++
+		}
+		if count > 0 {
+			columns[i] = total / float64(count)
+		} else {
+			columns[i] = low
+		}
+	}
+
+	blocks := []rune(" ▁▂▃▄▅▆▇█")
+	for row := height - 1; row >= 0; row-- {
+		// The axis label on the top and bottom rows only. A number against
+		// every row is noise on a chart this short.
+		label := "     "
+		switch row {
+		case height - 1:
+			label = fmt.Sprintf("%4.0f ", high)
+		case 0:
+			label = fmt.Sprintf("%4.0f ", low)
+		}
+		fmt.Fprint(w, label)
+
+		for _, value := range columns {
+			// How far into this row the value reaches, as eighths.
+			scaled := (value - low) / (high - low) * float64(height)
+			within := scaled - float64(row)
+			switch {
+			case within >= 1:
+				fmt.Fprint(w, string(blocks[8]))
+			case within <= 0:
+				fmt.Fprint(w, " ")
+			default:
+				fmt.Fprint(w, string(blocks[int(within*8)+1]))
+			}
+		}
+		if row == height-1 {
+			fmt.Fprint(w, " "+unit)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
 func systemCommand(args []string, stdout io.Writer) error {
+	if len(args) > 0 && args[0] == "history" {
+		return withClient("system history", args[1:], stdout, systemHistory)
+	}
 	return withClient("system", args, stdout,
 		func(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
 			var info struct {
@@ -936,6 +1528,19 @@ func systemCommand(args []string, stdout io.Writer) error {
 					State   string `json:"state"`
 					Message string `json:"message"`
 				} `json:"temperature"`
+				Fan struct {
+					RPM        *int   `json:"rpm"`
+					Percent    *int   `json:"percent"`
+					Controlled string `json:"controlled"`
+					Message    string `json:"message"`
+				} `json:"fan"`
+				Graphics []struct {
+					Name             string `json:"name"`
+					Driver           string `json:"driver"`
+					RenderNode       string `json:"render_node"`
+					StablePath       string `json:"stable_path"`
+					AcceleratesVideo bool   `json:"accelerates_video"`
+				} `json:"graphics"`
 			}
 			if err := c.Get(ctx, "/system", &info); err != nil {
 				return err
@@ -950,12 +1555,46 @@ func systemCommand(args []string, stdout io.Writer) error {
 				info.CPU.Model, info.CPU.Cores, info.LoadAverage[0])
 			fmt.Fprintf(w, "Memory:  %s free of %s\n",
 				humanBytes(info.Memory.AvailableBytes), humanBytes(info.Memory.TotalBytes))
+
+			// The stable path, not the numbered one. renderD128 is assigned in
+			// probe order and moves when a driver changes; anybody who writes it
+			// into a configuration file is describing one boot.
+			for _, card := range info.Graphics {
+				note := ""
+				if !card.AcceleratesVideo {
+					note = " — no video acceleration"
+				}
+				fmt.Fprintf(w, "Video:   %s via %s%s\n", card.Name, card.Driver, note)
+				if card.StablePath != "" {
+					fmt.Fprintf(w, "         %s\n", card.StablePath)
+				}
+			}
 			if info.Temperature.Celsius != nil {
 				fmt.Fprintf(w, "Heat:    %d °C (%s)\n",
 					*info.Temperature.Celsius, info.Temperature.State)
 			}
-			if info.Temperature.Message != "" {
-				fmt.Fprintf(w, "\n%s\n", info.Temperature.Message)
+			// Beside the temperature, because neither number means anything
+			// alone: loud and cool is a fan fault, loud and hot is a dust
+			// problem, and they sound identical from across a room.
+			if info.Fan.RPM != nil || info.Fan.Percent != nil {
+				fmt.Fprint(w, "Fan:     ")
+				switch {
+				case info.Fan.RPM != nil && info.Fan.Percent != nil:
+					fmt.Fprintf(w, "%d rpm (%d%%)", *info.Fan.RPM, *info.Fan.Percent)
+				case info.Fan.RPM != nil:
+					fmt.Fprintf(w, "%d rpm", *info.Fan.RPM)
+				default:
+					fmt.Fprintf(w, "%d%%", *info.Fan.Percent)
+				}
+				if info.Fan.Controlled != "" {
+					fmt.Fprintf(w, ", %s controlled", info.Fan.Controlled)
+				}
+				fmt.Fprintln(w)
+			}
+			for _, message := range []string{info.Temperature.Message, info.Fan.Message} {
+				if message != "" {
+					fmt.Fprintf(w, "\n%s\n", message)
+				}
 			}
 			return nil
 		})
@@ -1031,10 +1670,34 @@ func vpnCommand(args []string, stdout io.Writer) error {
 		return withClient("vpn remove-device", rest, stdout, vpnRemoveDevice)
 	case "dns":
 		return withClient("vpn dns", rest, stdout, vpnDNS)
+	case "off", "disable":
+		return withClient("vpn off", rest, stdout, vpnDisable)
 	default:
 		return usageError{fmt.Errorf("unknown vpn command %q — try status, setup, "+
-			"add-device, remove-device or dns", action)}
+			"add-device, remove-device, dns or off", action)}
 	}
+}
+
+// vpnDisable closes the way in from outside.
+//
+// It existed as a promise before it existed as a command: `vpn.setup` named
+// `vpn.disable` as its rollback and nothing implemented it, so there was a way
+// to open a port to the internet and none to shut it.
+func vpnDisable(ctx context.Context, c *Client, o *options, _ []string, w io.Writer) error {
+	var status vpnStatusReply
+	if err := c.Post(ctx, "/network/vpn/disable", map[string]any{}, &status); err != nil {
+		return err
+	}
+	if o.asJSON {
+		return printResponse(w, c, status)
+	}
+	fmt.Fprintln(w, "Remote access is off, and the port is closed.")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "The devices you have set up keep their keys and will work")
+	fmt.Fprintln(w, "again the moment you switch it back on:")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "    homebasectl vpn setup <name>")
+	return nil
 }
 
 type vpnStatusReply struct {

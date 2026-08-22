@@ -189,11 +189,18 @@ type Operation struct {
 // `git grep 'hostclient\.'` lists every privileged thing core can do.
 
 type SystemInfo struct {
-	Hostname      string `json:"hostname"`
-	OS            string `json:"os"`
-	Kernel        string `json:"kernel"`
-	Architecture  string `json:"architecture"`
-	UptimeSeconds int64  `json:"uptime_seconds"`
+	Hostname     string `json:"hostname"`
+	OS           string `json:"os"`
+	Kernel       string `json:"kernel"`
+	Architecture string `json:"architecture"`
+	Graphics     []struct {
+		Name             string `json:"name"`
+		Driver           string `json:"driver"`
+		RenderNode       string `json:"render_node"`
+		StablePath       string `json:"stable_path,omitempty"`
+		AcceleratesVideo bool   `json:"accelerates_video"`
+	} `json:"graphics,omitempty"`
+	UptimeSeconds int64 `json:"uptime_seconds"`
 	CPU           struct {
 		Model   string `json:"model"`
 		Cores   int    `json:"cores"`
@@ -216,6 +223,23 @@ type SystemResources struct {
 
 	// Temperature, with a nil reading meaning "this machine cannot tell" rather
 	// than "cold". Every VM is in that state and so is some real hardware.
+	// Counters are running totals since boot. Rates are computed from the
+	// difference between two readings, by whoever has both.
+	Counters struct {
+		CPUBusy   uint64 `json:"cpu_busy"`
+		CPUTotal  uint64 `json:"cpu_total"`
+		NetworkRx uint64 `json:"network_rx"`
+		NetworkTx uint64 `json:"network_tx"`
+	} `json:"counters"`
+
+	Fan struct {
+		RPM        *int   `json:"rpm"`
+		Percent    *int   `json:"percent"`
+		Label      string `json:"label,omitempty"`
+		Controlled string `json:"controlled,omitempty"`
+		Message    string `json:"message,omitempty"`
+	} `json:"fan"`
+
 	Temperature struct {
 		Celsius *int   `json:"celsius"`
 		Sensor  string `json:"sensor,omitempty"`
@@ -240,14 +264,6 @@ func (c *Client) SystemResources(ctx context.Context) (*SystemResources, error) 
 	return &res, nil
 }
 
-// Reboot restarts the machine.
-//
-// confirm must be the hostname: hostd requires the target to be named so a
-// confirmation cannot be replayed against a different server.
-//
-// A successful return means the reboot was *accepted*, not that it finished.
-// Nothing can observe it finishing — the connection dies with the machine. See
-// the job system for how that is resolved afterwards.
 // Rename changes what the machine calls itself.
 func (c *Client) Rename(ctx context.Context, name string) (RenameResult, error) {
 	params := struct {
@@ -268,13 +284,35 @@ type RenameResult struct {
 	Message  string `json:"message"`
 }
 
+// Reboot restarts the machine.
+//
+// confirm must be the hostname: hostd requires the target to be named so a
+// confirmation cannot be replayed against a different server.
+//
+// A successful return means the reboot was *accepted*, not that it finished.
+// Nothing can observe it finishing — the connection dies with the machine. See
+// the job system for how that is resolved afterwards.
+
 func (c *Client) Reboot(ctx context.Context, confirm, reason string) error {
+	return c.power(ctx, "system.reboot", confirm, reason)
+}
+
+// Shutdown switches the machine off.
+//
+// The same contract as Reboot in every respect except one that no code here can
+// see: nothing brings the machine back. Whatever calls this is the last thing
+// that will be able to say so, so it had better have said it already.
+func (c *Client) Shutdown(ctx context.Context, confirm, reason string) error {
+	return c.power(ctx, "system.shutdown", confirm, reason)
+}
+
+func (c *Client) power(ctx context.Context, operation, confirm, reason string) error {
 	params := struct {
 		Confirm string `json:"confirm"`
 		Reason  string `json:"reason,omitempty"`
 	}{Confirm: confirm, Reason: reason}
 
-	err := c.Call(ctx, "system.reboot", params, true, nil)
+	err := c.Call(ctx, operation, params, true, nil)
 	// The machine may go down before the response arrives, which is success
 	// rather than failure. Distinguishing the two is impossible from here, so
 	// the job system settles it on the next boot instead of guessing now.
@@ -307,6 +345,13 @@ type NetworkInterface struct {
 	// That is silent — the value is absent rather than wrong — and it is the
 	// third time in this project a middle layer has quietly eaten a field.
 	WakeOnLAN bool `json:"wake_on_lan"`
+
+	// WakeOnLANSupported completes the three states: not supported, supported
+	// but switched off, on. Listed here for the same reason as the field above —
+	// anything this struct does not name is silently dropped between hostd and
+	// core, which has now happened twice.
+	WakeOnLANSupported bool `json:"wake_on_lan_supported"`
+	WakeOnLANKnown     bool `json:"wake_on_lan_known"`
 }
 
 // NetworkStatus is how the server is connected, and whether it is.
@@ -318,6 +363,13 @@ type NetworkStatus struct {
 	Interfaces  []NetworkInterface `json:"interfaces"`
 	Gateway     string             `json:"gateway,omitempty"`
 	Nameservers []string           `json:"nameservers,omitempty"`
+
+	// MissingInterfaces are named by the network configuration and are not on
+	// this machine — almost always a card that was renamed rather than removed,
+	// because the name comes from the PCI slot and a slot number moves when the
+	// enumeration does. Reported because the symptom otherwise is a server that
+	// boots perfectly and cannot be reached, with nothing to say why.
+	MissingInterfaces []string `json:"missing_interfaces,omitempty"`
 
 	// Online and Reachable are separate on purpose. A server with an address on
 	// a network whose broadband is down is a different problem from a server
@@ -333,6 +385,29 @@ func (c *Client) NetworkStatus(ctx context.Context) (*NetworkStatus, error) {
 		return nil, err
 	}
 	return &status, nil
+}
+
+// WakeOnLANResult is what changing the setting reports back.
+type WakeOnLANResult struct {
+	Interface string `json:"interface"`
+	Enabled   bool   `json:"enabled"`
+
+	// Note is what Homebase cannot do for you — the firmware half, which no
+	// running machine can read or change.
+	Note string `json:"note,omitempty"`
+}
+
+// SetWakeOnLAN lets a magic packet start this server, or stops it doing so.
+func (c *Client) SetWakeOnLAN(ctx context.Context, iface string, enabled bool) (*WakeOnLANResult, error) {
+	var result WakeOnLANResult
+	request := struct {
+		Interface string `json:"interface"`
+		Enabled   bool   `json:"enabled"`
+	}{iface, enabled}
+	if err := c.Call(ctx, "network.wake_on_lan", request, false, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // Component is one of the packages an installation is made of.

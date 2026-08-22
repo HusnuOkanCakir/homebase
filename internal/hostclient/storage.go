@@ -75,6 +75,11 @@ type Location struct {
 	TotalBytes     uint64 `json:"total_bytes"`
 	AvailableBytes uint64 `json:"available_bytes"`
 	Device         string `json:"device,omitempty"`
+
+	// Internal marks this server's own disk, which is always present and cannot
+	// be detached. Running out of space on it is a worse event than running out
+	// on an external disk, so the difference has to survive the trip to core.
+	Internal bool `json:"internal,omitempty"`
 }
 
 func (c *Client) Disks(ctx context.Context) ([]Disk, error) {
@@ -189,13 +194,16 @@ func (c *Client) AppStorage(ctx context.Context, id string) (*AppStorage, error)
 	return &storage, nil
 }
 
-// AssignStorage chooses which disk holds one of an application's storage slots.
-func (c *Client) AssignStorage(ctx context.Context, app, storageID, location string) error {
+// AssignStorage chooses which disk holds one of an application's storage slots,
+// and optionally which folder on it — so a media server can read the same folder
+// a laptop copies films into.
+func (c *Client) AssignStorage(ctx context.Context, app, storageID, location, folder string) error {
 	params := struct {
 		ID        string `json:"id"`
 		StorageID string `json:"storage_id"`
 		Location  string `json:"location"`
-	}{ID: app, StorageID: storageID, Location: location}
+		Folder    string `json:"folder,omitempty"`
+	}{ID: app, StorageID: storageID, Location: location, Folder: folder}
 	return c.Call(ctx, "app.assign_storage", params, true, nil)
 }
 

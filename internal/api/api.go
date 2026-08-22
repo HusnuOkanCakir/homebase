@@ -44,6 +44,21 @@ type Server struct {
 	version   string
 	started   time.Time
 	static    http.Handler
+
+	// thermalPath overrides where the temperature record is read from, so tests
+	// do not need a directory only root can create.
+	thermalPath string
+
+	// assistant is nil unless a local model was configured. Nil is the normal
+	// state: most installations have no model, and the endpoints say so rather
+	// than failing.
+	assistant *assistantConfig
+}
+
+// WithThermalLog points the history endpoint at a particular file.
+func (s *Server) WithThermalLog(path string) *Server {
+	s.thermalPath = path
+	return s
 }
 
 func NewServer(a *auth.Service, j *jobs.Manager, h *hostclient.Client, e *events.Recorder, log *slog.Logger, version string) *Server {
@@ -83,8 +98,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/auth/recovery-code", s.authenticated(s.handleReissueRecoveryCode))
 
 	mux.Handle("GET /api/v1/system", s.require(auth.PermSystemRead, s.handleSystem))
+	mux.Handle("GET /api/v1/system/history", s.require(auth.PermSystemRead, s.handleSystemHistory))
 	mux.Handle("POST /api/v1/system/reboot", s.require(auth.PermSystemManage, s.handleReboot))
+	mux.Handle("POST /api/v1/system/shutdown", s.require(auth.PermSystemManage, s.handleShutdown))
 	mux.Handle("POST /api/v1/system/name", s.require(auth.PermSystemManage, s.handleRename))
+
+	mux.Handle("GET /api/v1/assistant", s.require(auth.PermAssistantUse, s.handleAssistantStatus))
+	mux.Handle("POST /api/v1/assistant/chat", s.require(auth.PermAssistantUse, s.handleAssistantChat))
 
 	mux.Handle("GET /api/v1/jobs", s.require(auth.PermSystemRead, s.handleListJobs))
 	mux.Handle("GET /api/v1/jobs/{id}", s.require(auth.PermSystemRead, s.handleGetJob))
@@ -94,6 +114,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerStorageRoutes(mux)
 	s.registerBackupRoutes(mux)
 	s.registerNetworkRoutes(mux)
+	s.registerShareRoutes(mux)
 	s.registerUpdateRoutes(mux)
 	s.registerRecoveryToolRoutes(mux)
 	s.registerEventRoutes(mux)
@@ -407,11 +428,61 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.Us
 			"cores":   info.CPU.Cores,
 			"threads": info.CPU.Threads,
 		},
+		// Passed through rather than rebuilt field by field. This response is
+		// assembled by hand, which is a third place a field can be dropped
+		// between hostd and a browser — and three fields had already been lost
+		// that way in the two layers below it before anybody noticed.
+		"graphics":     info.Graphics,
 		"memory":       resources.Memory,
 		"load_average": resources.LoadAverage,
 		"power":        resources.Power,
 		"temperature":  resources.Temperature,
+		// Beside the temperature and never without it. A fan speed on its own
+		// says nothing: loud and cool is a fan fault, loud and hot is a
+		// heatsink full of dust, and they sound the same from across a room.
+		"fan": resources.Fan,
 	})
+}
+
+// handleSystemHistory returns how hot the machine has been.
+//
+// Read from the file rather than from a table, because the file is the record —
+// see internal/api/thermallog.go. It means this endpoint keeps working when the
+// database is being restored, which is one of the times somebody most wants to
+// know what the machine was doing.
+func (s *Server) handleSystemHistory(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+	// Days rather than an arbitrary count, because the question is always about
+	// a period: "the last week" is answerable and "the last two hundred
+	// readings" is not.
+	days := 7
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 365 {
+			days = parsed
+		}
+	}
+
+	// A cap on points rather than on time. A month at five-minute intervals is
+	// nine thousand readings, which is more than any chart can draw and more
+	// than any browser should be asked to parse — and thinning keeps the shape,
+	// which is the whole of what a chart is for.
+	points := 500
+	if raw := r.URL.Query().Get("points"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 && parsed <= 5000 {
+			points = parsed
+		}
+	}
+
+	history := readThermalHistory(s.thermalLogPath(), time.Duration(days)*24*time.Hour, points)
+	writeJSON(w, http.StatusOK, history)
+}
+
+// thermalLogPath is where the record is, overridable so tests do not need a
+// directory only root can create.
+func (s *Server) thermalLogPath() string {
+	if s.thermalPath != "" {
+		return s.thermalPath
+	}
+	return DefaultThermalLogPath
 }
 
 // handleRename changes what the machine calls itself.
@@ -453,6 +524,57 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request, user *auth
 }
 
 func (s *Server) handleReboot(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	s.handlePower(w, r, user, powerRequest{
+		operation: "system.reboot",
+		call:      s.host.Reboot,
+		confirm:   "Please confirm you want to restart this server.",
+		recovery:  "Confirm the restart, naming this server.",
+		asking:    "Asking the server to restart…",
+		going:     "The server is restarting.",
+		stage:     "restarting",
+		event:     "system.rebooted",
+		summary:   "This server was restarted from the dashboard.",
+	})
+}
+
+func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	s.handlePower(w, r, user, powerRequest{
+		operation: "system.shutdown",
+		call:      s.host.Shutdown,
+		confirm:   "Please confirm you want to switch this server off.",
+		recovery:  "Confirm the shutdown, naming this server.",
+		asking:    "Asking the server to switch off…",
+		going:     "The server is switching off.",
+		stage:     "switching_off",
+		event:     "system.shut_down",
+		// Recorded before the machine goes, and readable when it comes back.
+		// Somebody who finds a server switched off and does not know why is
+		// looking at a fault; this is what makes it a decision instead.
+		summary: "This server was switched off from the dashboard.",
+	})
+}
+
+// powerRequest is what differs between restarting and switching off.
+//
+// Which is: the words, and one method value. Everything that matters — asking
+// hostd for the real hostname, refusing a confirmation that names a different
+// machine, submitting a job that cannot report its own success — is the same
+// for both, and belongs in one place so that a fix to it is a fix to both.
+type powerRequest struct {
+	operation string
+	call      func(ctx context.Context, confirm, reason string) error
+	confirm   string
+	recovery  string
+	asking    string
+	going     string
+	stage     string
+	event     string
+	summary   string
+}
+
+func (s *Server) handlePower(w http.ResponseWriter, r *http.Request, user *auth.User,
+	action powerRequest) {
+
 	var body struct {
 		Reason  string `json:"reason,omitempty"`
 		Confirm string `json:"confirm"`
@@ -462,7 +584,7 @@ func (s *Server) handleReboot(w http.ResponseWriter, r *http.Request, user *auth
 	}
 
 	// Ask hostd for the hostname rather than trusting the client's idea of it:
-	// the confirmation has to name the machine actually being restarted.
+	// the confirmation has to name the machine actually being acted on.
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	info, err := s.host.SystemInfo(ctx)
@@ -474,16 +596,23 @@ func (s *Server) handleReboot(w http.ResponseWriter, r *http.Request, user *auth
 	if body.Confirm != info.Hostname {
 		s.writeError(w, r, http.StatusPreconditionRequired, apiError{
 			Code:        "system.confirmation_required",
-			Message:     "Please confirm you want to restart this server.",
+			Message:     action.confirm,
 			Detail:      "confirm must be the server's name",
 			Recoverable: true,
-			Recovery:    "Confirm the restart, naming this server.",
+			Recovery:    action.recovery,
 		})
 		return
 	}
 
+	// Written before the machine goes rather than after, because after it there
+	// is nothing left running to write it. The event outlives the boot; it is
+	// the only record of why a server that is off is off.
+	s.events.Warn(r.Context(), action.event, info.Hostname, action.going, action.summary)
+	s.log.Info("power state change requested", "operation", action.operation,
+		"by", user.Username, "reason", body.Reason)
+
 	job, err := s.jobs.Submit(r.Context(), jobs.Definition{
-		Operation: "system.reboot",
+		Operation: action.operation,
 		// Nothing can observe this finishing — the connection dies with the
 		// machine. The job resolves itself on the next start by comparing the
 		// kernel's boot id. See internal/jobs.
@@ -492,14 +621,14 @@ func (s *Server) handleReboot(w http.ResponseWriter, r *http.Request, user *auth
 		IdempotencyKey: r.Header.Get("Idempotency-Key"),
 		CreatedBy:      user.ID,
 		Run: func(ctx context.Context, report *jobs.Reporter) error {
-			report.Progress("requesting_restart", nil, "Asking the server to restart…")
-			if err := s.host.Reboot(ctx, info.Hostname, body.Reason); err != nil {
+			report.Progress("requesting", nil, action.asking)
+			if err := action.call(ctx, info.Hostname, body.Reason); err != nil {
 				return hostErrorToJobError(err)
 			}
-			report.Progress("restarting", nil, "The server is restarting.")
+			report.Progress(action.stage, nil, action.going)
 			// Deliberately does not return success. If this process is still
-			// alive in a moment the reboot did not happen, and the next start
-			// resolves the job either way.
+			// alive in a moment nothing happened, and the next start resolves
+			// the job either way.
 			<-ctx.Done()
 			return ctx.Err()
 		},

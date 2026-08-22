@@ -267,6 +267,7 @@ func (s *Server) handleAssignStorage(w http.ResponseWriter, r *http.Request, use
 
 	var body struct {
 		StorageID string `json:"storage_id"`
+		Folder    string `json:"folder,omitempty"`
 		Location  string `json:"location"`
 	}
 	if !s.decode(w, r, &body) {
@@ -282,7 +283,10 @@ func (s *Server) handleAssignStorage(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	// Long enough for the container to be rebuilt, which is what this does now:
+	// bind mounts are fixed when a container is created, so a change of disk
+	// that only restarts it changes nothing at all.
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
 	defer cancel()
 
 	// Resolved before a job exists, so an unknown application or an unknown slot
@@ -302,14 +306,14 @@ func (s *Server) handleAssignStorage(w http.ResponseWriter, r *http.Request, use
 		recorded:    app.Name + " was given a disk to keep its files on.",
 		stage:       storageStage{"assigning", 50, "Setting up storage for " + app.Name + "…"},
 		run: func(ctx context.Context) error {
-			return s.host.AssignStorage(ctx, appID, body.StorageID, body.Location)
+			return s.host.AssignStorage(ctx, appID, body.StorageID, body.Location, body.Folder)
 		},
 		done: func(report *jobs.Reporter) {
 			// Said explicitly: nothing already written moves, and the change
 			// only takes effect on the next start.
 			report.Progress("assigned", percent(100),
-				app.Name+" will use that disk the next time it starts. "+
-					"Anything it has already saved stays where it is.")
+				app.Name+" is using that disk. Anything it had already saved "+
+					"is still where it was.")
 		},
 	})
 }

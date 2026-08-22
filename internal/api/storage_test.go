@@ -210,11 +210,20 @@ func TestAssigningStorageSaysNothingIsMoved(t *testing.T) {
 	if job.Message != nil {
 		message = strings.ToLower(*job.Message)
 	}
-	if !strings.Contains(message, "stays where it is") {
+	if !strings.Contains(message, "still where it was") {
 		t.Errorf("the message does not say existing data stays put: %q", message)
 	}
-	if !strings.Contains(message, "next time it starts") {
-		t.Errorf("the message does not say when it takes effect: %q", message)
+
+	// This asserted "next time it starts" until it was tried on a real server.
+	//
+	// The claim was false, and the test was holding it in place: Docker fixes
+	// bind mounts when a container is created, so an application given a
+	// different disk went on reading the old one through any number of
+	// restarts. The operation rebuilds the container now, and the message must
+	// not promise a restart that would not have worked.
+	if strings.Contains(message, "next time it starts") {
+		t.Errorf("the message promises a restart will apply this, and it will "+
+			"not — mounts are fixed when the container is created: %q", message)
 	}
 }
 

@@ -128,7 +128,7 @@ export function Backup({ canManage }: Props) {
   return (
     <>
       {error ? (
-        <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+        <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
       ) : null}
 
       {job ? <JobProgress job={job} /> : null}
@@ -653,7 +653,7 @@ function JobProgress({ job }: { job: Job }) {
       <Message
         tone="error"
         title={job.error?.message ?? "That did not work."}
-        detail={job.error?.detail}
+        technical={job.error?.detail}
         recovery={job.error?.recovery}
       />
     );

@@ -468,6 +468,156 @@ Milestone 0 — contracts and project machinery. No product code.
   packet — the one fact about waking it that has to be known *before* it sleeps, because
   nothing on a sleeping machine can answer
 
+Four found by installing on the first real laptop, an ASUS with a spinning disk
+and Windows on it:
+
+- **The installer died before it started.** Probing seven Windows partitions on a
+  5400 rpm drive took 91 seconds against subiquity's 90-second timeout. The seed
+  now clears the target disk in `early-commands`, which run before the probe —
+  and refuses to guess when there is more than one candidate disk, because a slow
+  probe is a worse experience while wiping the wrong disk is a different category
+  of thing
+- **`installer devices` refused a stick that would have worked.** A 4 GB floor
+  picked by guessing, against a 3.43 GB requirement the writer had been computing
+  correctly all along
+- **The system disk was reported as mounted at `/var/tmp`**, because the mount
+  table kept whichever entry came last and `PrivateTmp=yes` on hostd's unit gives
+  it a private `/var/tmp` on the root device
+- **Remote access opens its own port, and can be switched off.** `vpn.setup` had
+  always named `vpn.disable` as its rollback and nothing implemented it — so
+  there was a way to configure a service reachable from the internet and none to
+  shut it. Neither did anything touch the firewall, which denies inbound by
+  default, so the tunnel ran behind a closed port and looked from a phone exactly
+  like a wrong key
+- **One firewall helper rather than one per feature.** The decision about who may
+  reach a port — the house only, or the whole internet — is worth having in a
+  single reviewable place. Wireguard is the only thing in Homebase that asks for
+  the second, and it is the one service whose purpose is being reachable from
+  outside
+- **The fan is reported, and so is who is driving it.** A loud laptop has two
+  completely different problems behind it — a fan somebody pinned, or a heatsink
+  full of dust — and from across a room they are the same sound. Reporting only:
+  on the first real laptop, full load reached 89 °C with the fan still climbing,
+  past the 84 °C its processor throttles at, and a manual setting on a machine
+  like that is a way to cook one that is already struggling
+- **An application sharing a folder now creates files the rest of the machine can
+  use.** The service group is its *primary* group, not a supplementary one — a
+  supplementary group governs what a process can read, never what it creates, so
+  qBittorrent's downloads came out owned by qBittorrent's own group and the file
+  server could read but not replace them. The set-group-id bit is the usual
+  remedy and `RestrictSUIDSGID=yes` forbids it
+- **The network configuration no longer names an interface.** subiquity writes the
+  name it saw at install time, and that name is not a property of the card — the
+  kernel derives it from the PCI slot. On the first real laptop a wireless card
+  was not detected on one boot, the ethernet moved from slot 5 to slot 4 and was
+  renamed, and a configuration naming the old name produced a server that booted
+  perfectly, brought up no interface, obtained no address, and could not be
+  reached at all. Matched on the kind of device now, and `homebasectl network`
+  says so when a configuration asks for a card that is not there
+- **qBittorrent is pinned to 5.0.5.** 5.1 changed its login reply from `200 OK`
+  with the body `Ok.` to an empty `204`, and Sonarr checks the body — so the
+  newest version of each, both correct alone, report "Authentication Failure"
+  against credentials that are right. A catalogue is a tested combination, not a
+  set of latest versions
+- **Prowlarr, Sonarr, Radarr and Jellyseerr.** Ask for a film or an episode in
+  Jellyseerr and it is found, downloaded, renamed and filed into Jellyfin
+- **An image may declare that it cannot run as an arbitrary user.** Every
+  linuxserver.io entrypoint starts as root, corrects ownership of what it was
+  given, and drops to the account in `PUID`/`PGID`. Granting it means uid 0 with
+  five named capabilities — CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID — and a
+  written reason a reviewer can check. The alternative, holding every application
+  to an unprivileged uid, excludes most of what people want on a home server
+- **An application can declare which others it must reach**, and Homebase puts
+  them on a network they share. None of the obvious routes work: containers on
+  Docker's default bridge cannot resolve each other, the server's `.local` name
+  does not resolve inside a container, and the bridge gateway is the host where
+  the firewall drops it — correctly, since a rule letting containers reach the
+  host's ports would let every container reach every one of them
+- **Applications made of more than one container.** A manifest declares
+  supporting containers — a database, a cache — and each joins a private network
+  of the application's own, publishes no port on any interface, and cannot ask
+  for one. Started before the application and stopped after it; removed with it,
+  network and all
+- **qBittorrent**, downloading into a folder the media server reads. Pointed at
+  the same storage location as the shared folders, so a finished file is renamed
+  into place rather than copied — a 40 GB film moved between disks is minutes and
+  twice the space
+- **A manifest can say what is left to do**, shown once after installing and on
+  the application's own screen. For several applications that is the difference
+  between working and usable: one that is running, reachable, and asking for a
+  password nobody was given is indistinguishable from one that is broken
+- **Two applications can no longer claim the same port.** Each manifest is valid
+  alone, so the collision only exists across the catalogue — and without the
+  check the second one fails at container creation while the symptom is that the
+  *first* stopped working
+- **Processor, memory and network on the dashboard**, beside the temperature and
+  fan, as charts over a day, a week or a month. Counters are recorded as running
+  totals and differenced on the way out, so a rate can be recomputed years later
+  at whatever resolution somebody asks for — and a counter that has gone
+  backwards is a reboot, not negative traffic
+- **A record of how hot it has been**, sampled every five minutes into a plain
+  CSV at `/var/log/homebase/thermal.csv`, with `homebasectl system history` and a
+  chart on the dashboard. One reading tells you almost nothing: 58 °C is fine, or
+  it is the start of an afternoon that ends in thermal shutdown, and the
+  difference is entirely in what the last week looked like
+
+Five more found by watching one person try to use it, which is a different
+activity from testing it:
+
+- **The share login refused the name it was created with.** The Unix account is
+  namespaced, which is what stops a file-sharing password from also being a
+  login, and is not something anybody should have to type. Samba's username map
+  translates; the authentication box coming back for ever was the first thing
+  the first user hit
+- **There was no way to open an installed application.** The address existed and
+  nothing offered it. The dashboard has an Open button now, `homebasectl apps
+  open` exists, and install, start and restart print the address when they finish
+- **`apps stop` and `apps restart` had never worked.** Both need the name
+  confirmed and only `uninstall` sent it
+- **Changing an application's disk never took effect.** A container's folders are
+  fixed when it is built, so restarting one keeps the folders it was built with —
+  and the message promised a restart would apply it. There was a test holding
+  that claim in place
+- **Pointing an application at a shared folder took the folder away from the file
+  server**, because user-selected storage was handed to the application's own
+  account. It belongs to the service group, and the container joins that group
+- **`homebase.local` sometimes resolved to a Docker bridge address**, because
+  avahi answered on every interface it could see. A machine asking for the server
+  by name got back something unroutable, or its own bridge
+- **`ls` on a shared folder said "Permission denied"** to the person who had just
+  been told its path
+
+- **Folders on the network, over SMB.** `homebasectl share add backup internal` publishes a
+  folder that Windows, macOS and Linux all mount without installing anything. The file
+  server is fetched when the first folder is shared rather than with Homebase, the port is
+  opened to private address ranges only and closed again when the last share goes, and the
+  accounts have no shell and no password on the machine — a password saved in a Windows
+  dialog for years is not a credential for anything that administers the server
+
+Three more found by installing an application and trying to use it:
+
+- **Applications required a disk that was not in the machine.** A server with a
+  1 TB drive could not run one without an external disk beside it. The server's
+  own disk is a storage location now — chosen by name, never fallen back to,
+  never a backup destination, and it cannot be removed or erased
+- **Nothing could reach an installed application.** Containers bound to
+  127.0.0.1 on a port Docker chose, on the reasoning that Homebase proxies them.
+  There is no such proxy, and nothing reported the port. A manifest now declares
+  whether an application is reachable from the network, and may only do so if it
+  has its own accounts
+- **`homebasectl apps logs` had never worked**, and there was no way to give an
+  application a disk from a terminal at all
+- **Wake-on-LAN was reported as unsupported on hardware that supports it**, for
+  the same reason, and is now read over ethtool's netlink interface — a family
+  hostd is permitted. `homebasectl network wake-on-lan <card>` switches it on and
+  hostd reapplies it at every boot; `homebasectl wake` now names the firmware
+  settings that stop it working, because on the machine this was found on both
+  software halves were correct and it still would not start
+- **The internet check had never worked on any installation.** hostd is forbidden
+  `AF_INET` by its own unit, so it could not dial and returned false everywhere —
+  including on a machine downloading Ubuntu updates while it said so. Moved to
+  core, which is allowed a socket, and verified on the machine that found it
+
 ### Fixed
 
 Three bugs of the same shape, each shipped in the commit before the test that caught it, and

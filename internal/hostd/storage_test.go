@@ -562,3 +562,63 @@ func names(disks []Disk) []string {
 	}
 	return out
 }
+
+// A device appears in mountinfo once per mount, and the root filesystem appears
+// several times — `PrivateTmp=yes` on hostd's own unit gives it a private /tmp
+// and /var/tmp backed by the same disk.
+//
+// Keeping whichever came last reported the system disk as mounted at /var/tmp on
+// the first real laptop Homebase was installed on. The lab never showed it,
+// because fewer services are running there and the ordering happened to differ.
+func TestTheSystemDiskIsReportedAsMountedAtRoot(t *testing.T) {
+	// Real lines from that machine, in the order they appeared.
+	mountinfo := `26 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw
+31 26 8:1 / /boot/efi rw,relatime shared:9 - vfat /dev/sda1 rw
+612 26 8:2 /var/tmp /var/tmp rw,relatime shared:1 - ext4 /dev/sda2 rw
+`
+	path := filepath.Join(t.TempDir(), "mountinfo")
+	if err := os.WriteFile(path, []byte(mountinfo), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mounts := readMounts(path)
+
+	if got := mounts["sda2"].point; got != "/" {
+		t.Errorf("the system disk is reported at %q, want \"/\" — a disk carrying "+
+			"the running system is that, whatever else it is also mounted as", got)
+	}
+	if got := mounts["sda1"].point; got != "/boot/efi" {
+		t.Errorf("the EFI partition is reported at %q, want /boot/efi", got)
+	}
+}
+
+// The order of the file must not decide the answer.
+func TestTheAnswerDoesNotDependOnMountOrder(t *testing.T) {
+	reversed := `612 26 8:2 /var/tmp /var/tmp rw,relatime shared:1 - ext4 /dev/sda2 rw
+26 1 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw
+`
+	path := filepath.Join(t.TempDir(), "mountinfo")
+	if err := os.WriteFile(path, []byte(reversed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readMounts(path)["sda2"].point; got != "/" {
+		t.Errorf("with the lines reversed the disk is reported at %q, want \"/\"", got)
+	}
+}
+
+// Between two ordinary mounts, the shorter path wins — /boot/efi rather than a
+// bind mount of something inside it.
+func TestTheShorterMountPointWins(t *testing.T) {
+	both := `31 26 8:1 / /boot/efi rw,relatime shared:9 - vfat /dev/sda1 rw
+700 31 8:1 / /var/lib/something/deep/efi rw,relatime shared:9 - vfat /dev/sda1 rw
+`
+	path := filepath.Join(t.TempDir(), "mountinfo")
+	if err := os.WriteFile(path, []byte(both), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := readMounts(path)["sda1"].point; got != "/boot/efi" {
+		t.Errorf("reported at %q, want /boot/efi", got)
+	}
+}

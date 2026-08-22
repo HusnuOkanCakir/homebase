@@ -106,7 +106,7 @@ export function Updates({ canManage }: { canManage: boolean }) {
   return (
     <>
       {error ? (
-        <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+        <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
       ) : null}
 
       {status && status.interrupted ? (
@@ -145,7 +145,7 @@ export function Updates({ canManage }: { canManage: boolean }) {
       ) : null}
 
       <section className="card">
-        <h2>This server</h2>
+        <h2>Updates</h2>
 
         <dl className="facts">
           <dt>Version</dt>

@@ -5,8 +5,14 @@
   "description": "Describes an installable application. A manifest in app-store/ is a claim that the Homebase project has verified this application installs, starts, stops, survives a reboot, backs up and uninstalls cleanly. Manifests are runtime-neutral by design: they describe an image and its requirements, never Docker-specific invocations, so that changing the container runtime is a hostd change rather than a catalogue rewrite.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "manifest_version", "name", "container", "storage", "health"],
-
+  "required": [
+    "id",
+    "manifest_version",
+    "name",
+    "container",
+    "storage",
+    "health"
+  ],
   "properties": {
     "manifest_version": {
       "description": "Schema version this manifest targets. Incremented when a breaking change is made to this schema.",
@@ -14,37 +20,41 @@
       "minimum": 1,
       "maximum": 1
     },
-
     "id": {
       "description": "Stable identifier. Used as a directory name under /srv/homebase/apps/ and as an API path segment, so it is deliberately restrictive.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$"
     },
-
     "name": {
       "description": "Display name, as the application calls itself.",
       "type": "string",
       "minLength": 1,
       "maxLength": 60
     },
-
     "summary": {
       "description": "One sentence, for someone deciding whether they want this. Written for a person who does not know what a container is.",
       "type": "string",
       "maxLength": 200
     },
-
-    "homepage": { "type": "string", "format": "uri" },
-
+    "after_install": {
+      "description": "What the person who installed this still has to do, shown once when it finishes. Plain prose, never a template and never a command Homebase runs — it is a sentence, and the only thing that reads it is a human being.\n\nFor the applications that need it this is the difference between working and usable: an application that is running, reachable, and asking for a password nobody was given is indistinguishable from one that is broken.",
+      "type": "string",
+      "maxLength": 600
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri"
+    },
     "license": {
       "description": "SPDX identifier of the application's own licence.",
       "type": "string"
     },
-
     "container": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["image"],
+      "required": [
+        "image"
+      ],
       "properties": {
         "image": {
           "description": "Image reference without a tag. The tag lives in 'version' so that pinning is explicit and reviewable.",
@@ -64,25 +74,27 @@
         "command": {
           "description": "Override the image entrypoint. Discouraged; prefer an image that does not need it.",
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "environment": {
           "description": "Environment variables. Values must never contain a secret — reference one with credential_ref instead. Names allow mixed case: the all-caps convention is a convention, and real applications do not follow it — Jellyfin uses JELLYFIN_PublishedServerUrl. The pattern still excludes anything a shell would treat specially.",
           "type": "object",
           "patternProperties": {
-            "^[A-Za-z_][A-Za-z0-9_]*$": { "type": "string" }
+            "^[A-Za-z_][A-Za-z0-9_]*$": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         }
       }
     },
-
     "revision": {
       "description": "Revision of this manifest, independent of the application version. Incremented whenever this file changes. Named 'revision' rather than 'version' because three fields called version — schema, manifest, image tag — would be one too many.",
       "type": "integer",
       "minimum": 1
     },
-
     "network": {
       "type": "object",
       "additionalProperties": false,
@@ -93,12 +105,44 @@
           "minimum": 1,
           "maximum": 65535
         },
-        "protocol": { "enum": ["http", "https", "tcp", "udp"], "default": "http" },
+        "protocol": {
+          "enum": [
+            "http",
+            "https",
+            "tcp",
+            "udp"
+          ],
+          "default": "http"
+        },
         "path": {
           "description": "Base path the web interface is served under.",
           "type": "string",
           "pattern": "^/",
           "default": "/"
+        },
+        "reachable_from": {
+          "description": "Who can open this application directly. \"server\" publishes it on loopback only, so nothing outside the machine can reach it. \"network\" publishes it on the local network at a fixed port. \"network\" is only for applications that authenticate their own users, and saying so is a review decision about that specific application — an application with no login of its own, published here, is one that nothing is guarding.",
+          "enum": [
+            "server",
+            "network"
+          ],
+          "default": "server"
+        },
+        "host_port": {
+          "description": "Port on the server this application answers on, when reachable_from is \"network\". Defaults to internal_port, and **matching them is strongly preferred**.\n\nAn application that differs sees a Host header naming a port it is not listening on, and some reject every request for it. qBittorrent does: published on 8081 while listening on 8080 it answered a bare `401 Unauthorized` to everything, including its own login page, with nothing in its log to say why. Where an application can be told which port to listen on, tell it — and only state this when it cannot.",
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "reaches": {
+          "description": "Other applications this one must be able to connect to, by id.\n\nHomebase joins both to a network they share, and the address is the other application's id — Sonarr reaches qBittorrent at `qbittorrent:8081`, the port being the one that application listens on inside its container.\n\nIt exists because none of the obvious routes work. Containers on Docker's default bridge cannot resolve each other at all; the server's own `.local` name does not resolve inside a container; and the bridge gateway is the host, where the firewall drops it — correctly, since a rule permitting containers to reach the host's ports would permit every container to reach every one of them.\n\nA declaration here is not a grant of anything the other application would not otherwise give: it is reachable on that port by whatever is on that network, and nothing joins it without saying so here.",
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+          },
+          "uniqueItems": true
         },
         "host_network": {
           "description": "Share the host network namespace. This removes network isolation and requires written justification in review — it is not a convenience setting.",
@@ -108,12 +152,58 @@
         "discovery": {
           "description": "Protocols the application needs on the local network, such as DLNA or mDNS.",
           "type": "array",
-          "items": { "enum": ["mdns", "ssdp", "dlna", "wsdd"] },
+          "items": {
+            "enum": [
+              "mdns",
+              "ssdp",
+              "dlna",
+              "wsdd"
+            ]
+          },
           "uniqueItems": true
+        },
+        "extra_ports": {
+          "description": "Further ports this application answers on, beyond `internal_port`.\n\nMost applications have one. A DNS server has two and they are not alike: the resolver every device in the house talks to, and a web interface one person opens occasionally. Serving both from one port is not something a manifest can arrange.\n\nHeld to the same rules as the main port — reserved ports, collisions across the catalogue, and the rule that reaching the network is decided per application rather than per port. An application on loopback may not declare them.",
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "internal_port",
+              "purpose"
+            ],
+            "properties": {
+              "internal_port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "host_port": {
+                "description": "The port on the server. Defaults to internal_port.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "protocol": {
+                "description": "tcp unless stated. DNS needs both, which is two entries rather than a field meaning “and also”.",
+                "type": "string",
+                "enum": [
+                  "tcp",
+                  "udp"
+                ]
+              },
+              "purpose": {
+                "description": "What this port is for, in words. Nothing reads it at runtime — it is required so that a second port appearing in a diff has to be explained.",
+                "type": "string",
+                "minLength": 10,
+                "maxLength": 200
+              }
+            }
+          }
         }
       }
     },
-
     "storage": {
       "description": "Storage the application needs. Locations are declared by role; Homebase decides where they live. An absolute host path is never permitted here.",
       "type": "array",
@@ -121,19 +211,35 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "mount_path"],
+        "required": [
+          "id",
+          "type",
+          "mount_path"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
           "type": {
             "description": "'private' is created under /srv/homebase/apps/<id>/ and visible only to this application. 'user-selected' must be explicitly assigned by the user before the application starts.",
-            "enum": ["private", "user-selected"]
+            "enum": [
+              "private",
+              "user-selected"
+            ]
           },
           "mount_path": {
             "description": "Where it appears inside the container.",
             "type": "string",
             "pattern": "^/[^\\0]*$"
           },
-          "access": { "enum": ["read-write", "read-only"], "default": "read-write" },
+          "access": {
+            "enum": [
+              "read-write",
+              "read-only"
+            ],
+            "default": "read-write"
+          },
           "description": {
             "description": "Shown to the user when they are asked to assign this location.",
             "type": "string",
@@ -147,39 +253,74 @@
         }
       }
     },
-
     "health": {
       "description": "How Homebase decides the application is working. Required: an application that cannot be checked cannot be managed, and an unhealthy application that reports nothing is indistinguishable from a healthy one.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "properties": {
-        "type": { "enum": ["http", "tcp", "command", "none"] },
-        "path": { "type": "string", "pattern": "^/" },
+        "type": {
+          "enum": [
+            "http",
+            "tcp",
+            "command",
+            "none"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
         "expected_status": {
           "type": "integer",
           "minimum": 100,
           "maximum": 599,
           "default": 200
         },
-        "interval_seconds": { "type": "integer", "minimum": 5, "default": 30 },
-        "timeout_seconds": { "type": "integer", "minimum": 1, "default": 5 },
+        "interval_seconds": {
+          "type": "integer",
+          "minimum": 5,
+          "default": 30
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 5
+        },
         "start_period_seconds": {
           "description": "Grace period after start before failures count. Some applications take minutes to become ready on old hardware.",
           "type": "integer",
           "minimum": 0,
           "default": 30
         },
-        "failures_before_unhealthy": { "type": "integer", "minimum": 1, "default": 3 }
+        "failures_before_unhealthy": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        }
       },
       "allOf": [
         {
-          "if": { "properties": { "type": { "const": "http" } }, "required": ["type"] },
-          "then": { "required": ["path"] }
+          "if": {
+            "properties": {
+              "type": {
+                "const": "http"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "path"
+            ]
+          }
         }
       ]
     },
-
     "permissions": {
       "description": "What the application is allowed beyond the default. Everything here defaults to the most restrictive value; each exception is reviewed individually.",
       "type": "object",
@@ -187,22 +328,56 @@
       "properties": {
         "gpu": {
           "description": "GPU access, for example Jellyfin transcoding. 'optional' means use it when present.",
-          "enum": ["none", "optional", "required"],
+          "enum": [
+            "none",
+            "optional",
+            "required"
+          ],
           "default": "none"
         },
         "devices": {
           "description": "Host devices to expose, by role rather than by path.",
           "type": "array",
-          "items": { "enum": ["dri", "dvb", "serial", "usb-storage"] },
+          "items": {
+            "enum": [
+              "dri",
+              "dvb",
+              "serial",
+              "usb-storage"
+            ]
+          },
           "uniqueItems": true
         },
         "capabilities": {
-          "description": "Linux capabilities to add. All are dropped by default. Adding one is a security review.",
+          "description": "Linux capabilities to add. All are dropped by default. Adding one is a security review.\n\nNET_BIND_SERVICE is the mildest and is what a name server needs: it permits binding a port below 1024 and nothing else. It exists here so that an application needing port 53 can have it without being given a root elevation, which is what the alternative would have been.",
           "type": "array",
           "items": {
-            "enum": ["NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_NICE", "DAC_READ_SEARCH"]
+            "enum": [
+              "NET_BIND_SERVICE",
+              "NET_ADMIN",
+              "NET_RAW",
+              "SYS_ADMIN",
+              "SYS_NICE",
+              "DAC_READ_SEARCH"
+            ]
           },
           "uniqueItems": true
+        },
+        "starts_as_root": {
+          "description": "This image cannot run as an arbitrary user: its entrypoint starts as root, corrects ownership of the folders it was given, and drops to its own account. Every linuxserver.io image works this way, and so do many others.\n\nGranting it means the container runs as uid 0 with five capabilities it would otherwise not have — CHOWN, DAC_OVERRIDE, FOWNER, SETUID and SETGID — which together let it rewrite ownership anywhere in its own bind mounts and become any user inside itself. It cannot escape the container, and it is still a real relaxation of the default: what protects the rest of the machine is that the mounts are the only paths it can reach.\n\n**The alternative was considered and rejected**: holding every application to running as an unprivileged uid excludes most of what people want to run on a home server. So this exists, is declared per application, is shown to whoever installs it, and requires the reason to be written down here.\n\nHomebase passes PUID and PGID so the entrypoint drops to the account Homebase chose. An image that honours neither must not be granted this.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reason"
+          ],
+          "properties": {
+            "reason": {
+              "description": "Why this image cannot run unprivileged, in words a reviewer can check against the image's own entrypoint.",
+              "type": "string",
+              "minLength": 40,
+              "maxLength": 400
+            }
+          }
         },
         "privileged": {
           "description": "Reserved so that a manifest cannot set it silently. It must be false; a privileged container is a root shell on the host, and no catalogue application will be granted one.",
@@ -213,35 +388,74 @@
           "description": "Run with a read-only root filesystem. Should be true wherever the image tolerates it.",
           "type": "boolean",
           "default": true
+        },
+        "runs_as_root": {
+          "description": "This image is root for its whole life. It never drops privileges, and it does not honour PUID or PGID.\n\nDistinct from `starts_as_root`, which is granted on the promise that the entrypoint drops to the account Homebase chose. An image that honours neither and is granted that anyway runs as root for ever under a label saying it does not — so the other case is named rather than smuggled through the first.\n\nNeither is strictly safer. Root lasts longer here; what makes it acceptable is the constraint that comes with it, which hostd enforces and which is not negotiable: **every storage slot must be `private`.** The dangerous form of permanent root is the one holding DAC_OVERRIDE over somebody's photographs, and an application that can only reach a directory Homebase created for it cannot get there.\n\nThe capabilities granted are the same five as `starts_as_root`. Declaring both is an error: it says the entrypoint does and does not drop privileges.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reason"
+          ],
+          "properties": {
+            "reason": {
+              "description": "Why this image cannot run unprivileged and cannot drop, in words a reviewer can check against the image's own entrypoint.",
+              "type": "string",
+              "minLength": 40,
+              "maxLength": 400
+            }
+          }
         }
+      },
+      "not": {
+        "required": [
+          "starts_as_root",
+          "runs_as_root"
+        ]
       }
     },
-
     "resources": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "memory_limit_bytes": { "type": "integer", "minimum": 67108864 },
+        "memory_limit_bytes": {
+          "type": "integer",
+          "minimum": 67108864
+        },
         "memory_minimum_bytes": {
           "description": "Below this, installation is refused rather than allowed to fail confusingly later.",
           "type": "integer",
           "minimum": 0
         },
-        "cpu_shares": { "type": "integer", "minimum": 2, "maximum": 262144 },
-        "disk_minimum_bytes": { "type": "integer", "minimum": 0 }
+        "cpu_shares": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 262144
+        },
+        "disk_minimum_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
-
     "credentials": {
       "description": "Credentials this application needs. The manifest names them; values live in the secrets store and are resolved at the point of use. A credential value must never appear in a manifest.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["ref", "description"],
+        "required": [
+          "ref",
+          "description"
+        ],
         "properties": {
-          "ref": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-          "description": { "type": "string", "maxLength": 200 },
+          "ref": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          },
           "generate": {
             "description": "Generate a strong value at install time rather than asking the user.",
             "type": "boolean",
@@ -255,72 +469,200 @@
         }
       }
     },
-
     "capabilities": {
       "description": "Read-only questions the Stage 2 AI operator may ask about this application, and actions it may propose. Declared per application so that an operator's reach is enumerable rather than emergent. Anything not listed here is not available to it, whatever it proposes.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "risk"],
+        "required": [
+          "name",
+          "risk"
+        ],
         "properties": {
           "name": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
-            "examples": ["adblock.get_status", "media.search"]
+            "examples": [
+              "adblock.get_status",
+              "media.search"
+            ]
           },
-          "description": { "type": "string", "maxLength": 200 },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          },
           "risk": {
             "description": "Determines how the policy engine handles a proposal. 'read' changes nothing; 'critical' destroys data irreversibly.",
-            "enum": ["read", "low", "medium", "high", "critical"]
+            "enum": [
+              "read",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
           },
           "confirmation": {
-            "enum": ["none", "optional", "required", "explicit"],
+            "enum": [
+              "none",
+              "optional",
+              "required",
+              "explicit"
+            ],
             "default": "required"
           },
           "rollback": {
             "description": "Capability that undoes this one, or null where it cannot be undone. Null is permitted but must be deliberate.",
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       }
     },
-
     "events": {
       "description": "Structured events this application can raise. Declared so that consumers never have to parse log text to learn what happened.",
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["type", "severity"],
+        "required": [
+          "type",
+          "severity"
+        ],
         "properties": {
-          "type": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-          "severity": { "enum": ["info", "warning", "error", "critical"] },
-          "description": { "type": "string", "maxLength": 200 },
-          "recoverable": { "type": "boolean" }
+          "type": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "error",
+              "critical"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "recoverable": {
+            "type": "boolean"
+          }
         }
       }
     },
-
     "sensitive_fields": {
       "description": "Configuration keys whose values must be redacted in logs, API responses, diagnostic bundles and anything shown to the AI operator.",
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "uniqueItems": true
     },
-
     "requires": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "min_homebase_version": { "type": "string" },
+        "min_homebase_version": {
+          "type": "string"
+        },
         "architectures": {
           "type": "array",
-          "items": { "enum": ["amd64", "arm64"] },
+          "items": {
+            "enum": [
+              "amd64",
+              "arm64"
+            ]
+          },
           "uniqueItems": true,
-          "default": ["amd64"]
+          "default": [
+            "amd64"
+          ]
         }
       }
+    },
+    "services": {
+      "description": "Supporting containers this application cannot run without — a database, a cache. The application itself is `container`; these are everything it talks to.\n\nThey are **never reachable from anywhere but this application**. Each one joins a private network of the application's own and publishes no port at all, on any interface, ever — a database that a manifest could publish is a database somebody publishes. What the application connects to is the service's `name`, which is its address on that network.\n\nStorage here is always private. A database on a disk somebody can unplug is a database that vanishes, and unlike a media folder there is nothing sensible to do about its absence.",
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "image"
+        ],
+        "properties": {
+          "name": {
+            "description": "What the application connects to it as, and what its container is named after. It becomes a hostname on the private network.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,20}[a-z0-9]$"
+          },
+          "image": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+([._/-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)*$"
+          },
+          "version": {
+            "description": "Image tag. 'latest' is not permitted, for the same reason as the application's own.",
+            "type": "string",
+            "pattern": "^(?!latest$)[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "environment": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "storage": {
+            "description": "Private directories for this service. Never user-selected.",
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "mount_path"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                },
+                "mount_path": {
+                  "type": "string",
+                  "pattern": "^/"
+                },
+                "backup": {
+                  "description": "Whether a backup copies it. A database's files are usually the wrong thing to copy while it is running; prefer an export.",
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "provides": {
+      "description": "A service of the machine's own that this application takes over. It unlocks exactly one thing: a port on the reserved list.\n\nThose ports are reserved because the machine itself uses them, and an application that quietly took one would break the machine in a way nobody would connect to having installed something. But name resolution is a thing an application can legitimately *become*, and refusing that outright would mean no name-blocking application could exist here.\n\nSo the reservation stays and the exception is declared, in a root-owned file reviewed in a diff. \"dns\" unlocks port 53 and no other port, only one application in the catalogue may claim it, and claiming it without publishing on 53 is an error.",
+      "type": "string",
+      "enum": [
+        "dns"
+      ]
+    },
+    "icon": {
+      "description": "One character shown on the application's tile, usually an emoji.\n\nNot a URL and not a file. Every alternative — an image shipped in the package, a logo fetched at runtime — is either a licensing question about somebody else's trademark or a request the dashboard is forbidden from making. One character renders in any theme at any size and costs nothing.\n\nOptional: without it the tile shows the application's first letter.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8
     }
   }
 }

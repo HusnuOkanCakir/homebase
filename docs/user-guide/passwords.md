@@ -44,7 +44,7 @@ Two things happen that are worth knowing before you start:
 
 ## Checking you still have one
 
-Sign in, open **Security**, and it will tell you whether a recovery code exists and when it
+Sign in, open **Settings**, and it will tell you whether a recovery code exists and when it
 was created. It will not show you the code — Homebase keeps it the same way it keeps your
 password, scrambled beyond reading, so that somebody who steals the disk out of your server
 does not get a key with it.
@@ -75,7 +75,7 @@ $ sudo homebasectl recovery-code --user rosa
 
 ## If you never wrote one down
 
-Sign in — while you still can — open **Security**, and choose **Create a new recovery
+Sign in — while you still can — open **Settings**, and choose **Create a new recovery
 code**. Do it now rather than later. The moment you need it is the moment you cannot get it.
 
 ## What about backups?

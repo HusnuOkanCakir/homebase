@@ -1,8 +1,7 @@
 package hostd
 
 import (
-	"context"
-	"errors"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -112,35 +111,121 @@ func TestLinkLocalAddressesAreNotReportedAsBeingOnANetwork(t *testing.T) {
 }
 
 // "The machine is fine, the internet is not" has to be expressible.
-func TestAServerWithAnAddressButNoInternetSaysSo(t *testing.T) {
-	services := &NetworkServices{
-		dial: func(context.Context, string) error { return errors.New("no route") },
-	}
+// The internet check moved to core.
+//
+// It lived here and could never have worked: homebase-hostd.service sets
+// RestrictAddressFamilies=AF_UNIX AF_NETLINK, so this process cannot open an
+// internet socket at all. It returned false on every machine that ever ran it,
+// including one downloading Ubuntu updates while it said so.
+//
+// The tests that were here injected a fake dialler, so they exercised the logic
+// while never asking whether hostd could execute it — and passed for four
+// milestones. They are in internal/api now, next to the code, along with one
+// that dials for real.
 
-	result, err := services.status(context.Background(), struct{}{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	status, ok := result.(networkStatusResult)
-	if !ok {
-		t.Fatalf("unexpected result type %T", result)
-	}
-	if status.Online {
-		t.Error("reported the internet as reachable when every attempt failed")
+// A list field is an array or it is absent — never `null`.
+//
+// A nil slice in Go encodes as JSON `null`, so a field that is an array while
+// there is something in it and null when there is not is a trap laid for every
+// client. It went off exactly once and took a whole screen with it: removing
+// the last remote-access device made the network page unreachable, because the
+// page did `devices.length` on what had become null. The page was not the bug.
+func TestListFieldsAreNeverNull(t *testing.T) {
+	// A machine with nothing at all — no interfaces, no devices, no shares.
+	for name, encode := range map[string]func() ([]byte, error){
+		"network": func() ([]byte, error) {
+			// A machine with no interfaces at all — which is a VM with its
+			// network removed, and is the state that produced the bug.
+			return json.Marshal(netScanner{
+				classNet:   t.TempDir(),
+				routes:     "/nonexistent",
+				resolvConf: "/nonexistent",
+				hostname:   func() (string, error) { return "x", nil },
+				interfaces: func() ([]net.Interface, error) { return nil, nil },
+				addrsOf:    func(net.Interface) ([]net.Addr, error) { return nil, nil },
+			}.status())
+		},
+		"vpn": func() ([]byte, error) {
+			return json.Marshal(VPNStatus{Port: 51820, Devices: []VPNDevice{}})
+		},
+		"shares": func() ([]byte, error) {
+			return json.Marshal(ShareStatus{Users: []string{}, Shares: []ShareState{}})
+		},
+	} {
+		body, err := encode()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		for _, field := range []string{"interfaces", "devices", "shares", "users"} {
+			value, present := decoded[field]
+			if present && value == nil {
+				t.Errorf("%s.%s is null; a client that indexes into it crashes", name, field)
+			}
+		}
 	}
 }
 
-func TestOnlineWhenSomethingAnswers(t *testing.T) {
-	services := &NetworkServices{
-		dial: func(context.Context, string) error { return nil },
+// --- A configuration naming a card that is not there ------------------------------
+
+// The failure this catches took a working server off the network for an evening.
+//
+// A wireless card was not detected on one boot, which moved the ethernet from PCI
+// slot 5 to slot 4 and renamed it. The configuration named the old name, so
+// nothing was brought up and no address was obtained. The machine booted
+// perfectly, the card was fine, and the only way to find out was a keyboard, a
+// screen, and knowing to compare two names.
+func TestAConfiguredInterfaceThatIsNotThereIsReported(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "50-cloud-init.yaml"), []byte(
+		"network:\n  version: 2\n  ethernets:\n    enp5s0:\n      dhcp4: true\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
-	result, _ := services.status(context.Background(), struct{}{})
-	status := result.(networkStatusResult)
+	missing := configuredButAbsent(dir, []NetworkInterface{{Name: "enp4s0"}, {Name: "lo"}})
+	if len(missing) != 1 || missing[0] != "enp5s0" {
+		t.Fatalf("got %v, want [enp5s0]", missing)
+	}
 
-	// Only meaningful when there is a route to try over; the scanner reads the
-	// real machine here, so this asserts the pairing rather than the value.
-	if status.Gateway != "" && !status.Online {
-		t.Error("something answered but the result says offline")
+	// And says nothing once the card is there under that name.
+	if got := configuredButAbsent(dir, []NetworkInterface{{Name: "enp5s0"}}); len(got) != 0 {
+		t.Errorf("reported %v about an interface that exists", got)
+	}
+}
+
+// A name inside `match:` is a pattern, not a device. `name: "en*"` is the fix for
+// this whole class of problem, and reporting it as a missing card would turn the
+// remedy into a permanent warning.
+func TestAMatchPatternIsNotReportedAsMissing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "50-homebase.yaml"), []byte(
+		"network:\n  version: 2\n  ethernets:\n    wired:\n      match:\n"+
+			"        name: \"en*\"\n      dhcp4: true\n      optional: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := configuredButAbsent(dir, []NetworkInterface{{Name: "enp4s0"}}); len(got) != 0 {
+		t.Errorf("the configuration Homebase writes reported %v as missing", got)
+	}
+}
+
+// Ordinary netplan keys are not interface names. "ethernets" is the one that
+// would otherwise be reported on every machine for ever.
+func TestNetplanKeysAreNotMistakenForInterfaces(t *testing.T) {
+	for _, key := range []string{
+		"network", "version", "ethernets", "wifis", "dhcp4", "match", "name",
+		"optional", "renderer", "wired", "en", "eth",
+	} {
+		if looksLikeInterface(key) {
+			t.Errorf("%q was taken for an interface name", key)
+		}
+	}
+	for _, key := range []string{"enp5s0", "enp4s0", "eth0", "eno1", "ens18", "wlp4s0"} {
+		if !looksLikeInterface(key) {
+			t.Errorf("%q was not recognised as an interface name", key)
+		}
 	}
 }

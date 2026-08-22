@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -43,6 +44,15 @@ type NetworkStatus struct {
 
 	// Nameservers are what it asks to turn names into addresses.
 	Nameservers []string `json:"nameservers,omitempty"`
+
+	// MissingInterfaces are named by the network configuration and are not on
+	// this machine.
+	//
+	// Almost always a renamed card rather than a removed one: the name comes
+	// from the PCI slot, and a slot number moves when the enumeration does. It
+	// is reported because the symptom otherwise is a server that boots
+	// perfectly and cannot be reached, with nothing anywhere to say why.
+	MissingInterfaces []string `json:"missing_interfaces,omitempty"`
 }
 
 // NetworkInterface is one way this machine is attached to a network.
@@ -73,15 +83,137 @@ type NetworkInterface struct {
 	// goes to sleep. A laptop in a cupboard that cannot be woken is one somebody
 	// has to walk to.
 	WakeOnLAN bool `json:"wake_on_lan"`
+
+	// WakeOnLANSupported is whether the card *could* be woken, whether or not it
+	// currently is.
+	//
+	// Three states rather than two, and the middle one is the only actionable
+	// one. The first real laptop reported `Supports Wake-on: pumbg` and
+	// `Wake-on: d` — the hardware does magic packets and the setting is off. To
+	// say "cannot be woken" there is accurate and useless: what somebody needs
+	// to know is that it could be, and that switching it on is a thing Homebase
+	// can do for them.
+	WakeOnLANSupported bool `json:"wake_on_lan_supported"`
+
+	// WakeOnLANKnown is whether Homebase could find out at all.
+	//
+	// A third state rather than folding failure into "not supported", which is
+	// what the first implementation did — and it did it on every machine, since
+	// it read the setting through an ioctl on an AF_INET socket that this
+	// process is forbidden to open. It is answered over netlink now, so on a
+	// real installation this is true; a container, a kernel older than 5.6 or an
+	// interface with no driver behind it can still leave it false, and there the
+	// only honest report is that Homebase does not know.
+	WakeOnLANKnown bool `json:"wake_on_lan_known"`
 }
 
 // Reachable reports whether this interface is carrying an address.
 func (n NetworkInterface) Reachable() bool { return n.Up && len(n.Addresses) > 0 }
 
+// configuredButAbsent names interfaces the network configuration asks for and
+// this machine does not have.
+//
+// The failure it exists for took a working server off the network for an evening.
+// A wireless card was not detected on one boot, which moved the ethernet from
+// PCI slot 5 to slot 4 and renamed it — and the configuration named the old name,
+// so nothing was brought up, no address was obtained, and the machine could not
+// be reached at all. It booted perfectly. The card was fine. The only way to
+// find out was a keyboard, a screen, and knowing to compare two names.
+//
+// Homebase writes a configuration that matches on the kind of device rather than
+// the name, so it cannot happen through anything Homebase installed. This is for
+// the other cases: a machine somebody configured by hand, an upgrade from before
+// that fix, or a distribution that put its own file back.
+func configuredButAbsent(netplanDir string, present []NetworkInterface) []string {
+	files, err := filepath.Glob(filepath.Join(netplanDir, "*.yaml"))
+	if err != nil {
+		return nil
+	}
+	have := map[string]bool{}
+	for _, iface := range present {
+		have[iface.Name] = true
+	}
+
+	var missing []string
+	seen := map[string]bool{}
+	for _, file := range files {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		for _, name := range namedInterfaces(string(content)) {
+			if have[name] || seen[name] {
+				continue
+			}
+			seen[name] = true
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+// namedInterfaces pulls interface names out of a netplan file.
+//
+// Deliberately crude — a key at any depth whose name looks like an interface and
+// which is not inside a `match:` block. A YAML parser would be more correct and
+// would need a dependency hostd is not allowed (ADR-0002), and being wrong here
+// costs a diagnostic message rather than a decision: nothing acts on this.
+func namedInterfaces(content string) []string {
+	var found []string
+	inMatch := false
+	matchIndent := 0
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+
+		// A name under `match:` is a pattern, not a device — `name: "en*"` is
+		// the fix for this whole problem and must not be reported as missing.
+		if inMatch && indent <= matchIndent {
+			inMatch = false
+		}
+		if strings.HasPrefix(trimmed, "match:") {
+			inMatch, matchIndent = true, indent
+			continue
+		}
+		if inMatch {
+			continue
+		}
+
+		key, _, isKey := strings.Cut(trimmed, ":")
+		if !isKey {
+			continue
+		}
+		if looksLikeInterface(strings.TrimSpace(key)) {
+			found = append(found, strings.TrimSpace(key))
+		}
+	}
+	return found
+}
+
+// looksLikeInterface recognises the shapes the kernel produces — enp5s0, eth0,
+// wlp4s0, eno1 — without matching every other key in a netplan file.
+func looksLikeInterface(key string) bool {
+	if len(key) < 3 || strings.ContainsAny(key, " \"'#") {
+		return false
+	}
+	for _, prefix := range []string{"enp", "eno", "ens", "eth", "wlp", "wlan", "wls"} {
+		if strings.HasPrefix(key, prefix) && len(key) > len(prefix) {
+			// A digit somewhere after the prefix, which every kernel name has
+			// and words like "ethernets" do not.
+			return strings.ContainsAny(key[len(prefix):], "0123456789")
+		}
+	}
+	return false
+}
+
 const (
 	sysClassNet    = "/sys/class/net"
 	procNetRoute   = "/proc/net/route"
 	resolvConfPath = "/etc/resolv.conf"
+	// netplanConfigDir is where the network configuration lives. Read only to
+	// notice a name in it that this machine does not have.
+	netplanConfigDir = "/etc/netplan"
 )
 
 // netScanner is where the network state is read from. Fields rather than
@@ -92,6 +224,9 @@ type netScanner struct {
 	classNet   string
 	routes     string
 	resolvConf string
+	// netplanDir is where the network configuration lives, so that a test can
+	// point it at a tree it wrote rather than at the machine's own.
+	netplanDir string
 	hostname   func() (string, error)
 	interfaces func() ([]net.Interface, error)
 	addrsOf    func(net.Interface) ([]net.Addr, error)
@@ -102,6 +237,7 @@ func systemNetScanner() netScanner {
 		classNet:   sysClassNet,
 		routes:     procNetRoute,
 		resolvConf: resolvConfPath,
+		netplanDir: netplanConfigDir,
 		hostname:   os.Hostname,
 		interfaces: net.Interfaces,
 		addrsOf:    func(i net.Interface) ([]net.Addr, error) { return i.Addrs() },
@@ -112,7 +248,9 @@ func systemNetScanner() netScanner {
 func ReadNetworkStatus() NetworkStatus { return systemNetScanner().status() }
 
 func (s netScanner) status() NetworkStatus {
-	status := NetworkStatus{}
+	// An empty list, never nil — a nil slice encodes as JSON `null` and breaks
+	// the first client that indexes into it. See readVPNStatus.
+	status := NetworkStatus{Interfaces: []NetworkInterface{}}
 
 	if name, err := s.hostname(); err == nil {
 		status.Hostname = strings.TrimSuffix(strings.ToLower(name), ".local")
@@ -128,6 +266,10 @@ func (s netScanner) status() NetworkStatus {
 
 	status.Gateway = s.defaultGateway()
 	status.Nameservers = s.nameservers()
+
+	// A name in the configuration that this machine does not have. Reported
+	// last, because it is only interesting once everything real has been listed.
+	status.MissingInterfaces = configuredButAbsent(s.netplanDir, status.Interfaces)
 	return status
 }
 
@@ -142,7 +284,8 @@ func (s netScanner) describe(iface net.Interface) NetworkInterface {
 		MAC: iface.HardwareAddr.String(),
 	}
 
-	described.WakeOnLAN = wakeOnLANEnabled(s.classNet, iface.Name)
+	described.WakeOnLAN, described.WakeOnLANSupported, described.WakeOnLANKnown =
+		readWakeOnLAN(iface.Name)
 
 	addrs, err := s.addrsOf(iface)
 	if err != nil {
@@ -231,23 +374,4 @@ func (s netScanner) nameservers() []string {
 		}
 	}
 	return servers
-}
-
-// wakeOnLANEnabled reports whether a card will start the machine when a magic
-// packet arrives.
-//
-// Read from sysfs rather than by running `ethtool`, the same rule as everything
-// else in this file: parsing a tool's output means depending on its formatting
-// and its presence, and the kernel answers directly.
-//
-// `device/power/wakeup` is "enabled" or "disabled". It is the device's wakeup
-// capability rather than specifically the magic-packet flag — the distinction
-// matters to a kernel developer and not to somebody deciding whether their
-// server can be woken, and a card with wakeup disabled certainly cannot be.
-func wakeOnLANEnabled(classNet, name string) bool {
-	raw, err := os.ReadFile(filepath.Join(classNet, name, "device", "power", "wakeup"))
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(raw)) == "enabled"
 }

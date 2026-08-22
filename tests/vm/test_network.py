@@ -50,6 +50,8 @@ CLIENT = "homebase-client"
 # The shared segment both machines sit on.
 LAN = 7
 
+NET_PASSWORD = "a-sufficiently-long-password"
+
 
 class TestFailure(Exception):
     pass
@@ -136,6 +138,20 @@ def install_server(vm: VM, packages: list[Path]) -> None:
           "It is a dependency of homebase-core; if it is missing, the package "
           "no longer declares it.")
 
+    # An administrator, because the network status is now read through core —
+    # which is where the internet check had to move to, since hostd is forbidden
+    # from opening a socket. Reading it needs a session.
+    ssh(vm, ["curl", "--silent", "--insecure",
+             "-c", "/tmp/net-cookies", "-b", "/tmp/net-cookies",
+             "-H", "Content-Type: application/json",
+             "-d", json.dumps({"username": "alex", "password": NET_PASSWORD}),
+             "https://127.0.0.1/api/v1/setup"], check=False)
+    signed_in = ssh(vm, ["curl", "--silent", "--insecure",
+                         "-c", "/tmp/net-cookies", "-b", "/tmp/net-cookies",
+                         "-o", "/dev/null", "-w", "%{http_code}",
+                         "https://127.0.0.1/api/v1/network"], check=False).stdout.strip()
+    check(signed_in == "200", f"and the network status is readable ({signed_in})")
+
 
 def verify_ports(vm: VM) -> None:
     step("What the server listens on")
@@ -214,6 +230,20 @@ def verify_honest_when_the_internet_is_gone(vm: VM) -> None:
     """A server with no internet is not a broken server, and must not say so."""
     step("What it says when the internet is gone")
 
+    # First, that it says so when the internet *is* there.
+    #
+    # This assertion did not exist, and its absence is why the internet check
+    # went four milestones without working: the only thing checked was that
+    # `online` is false once the interface is down, which was true for a reason
+    # that had nothing to do with the interface. A check that can only ever
+    # answer "no" passes every test that only asks when the answer should be no.
+    before = network_status(vm)
+    check(before["online"] is True,
+          "before anything is unplugged, it knows the internet is reachable",
+          f"online={before.get('online')} — this VM has NAT'd internet access "
+          f"and can reach 1.1.1.1. If this fails, the check cannot answer "
+          f"'yes' at all, which is exactly the bug this assertion exists for.")
+
     # The NAT interface is how this machine reaches the world. Taking it down
     # leaves the shared segment up, which is exactly the shape of a household
     # whose broadband has failed: the network is fine, the internet is not.
@@ -238,16 +268,24 @@ def verify_honest_when_the_internet_is_gone(vm: VM) -> None:
 
 
 def network_status(vm: VM) -> dict:
-    """Ask hostd directly, over its socket, the way core does."""
-    out = ssh(vm, ["sudo", "curl", "--silent", "--unix-socket",
-                   "/run/homebase/hostd.sock", "-X", "POST",
-                   "-H", "Content-Type: application/json", "-d", "{}",
-                   "http://localhost/v1/op/network.status"], check=False).stdout
+    """Ask core, the way anything real does.
+
+    This asked hostd directly over its socket, and that is how the internet check
+    went four milestones without working. hostd's unit forbids it AF_INET, so it
+    could never dial anything and always answered `online: false` — and the only
+    assertion here was that `online` is false, after the interface was taken
+    down. It passed for the wrong reason every time.
+
+    The check lives in core now, because reaching 1.1.1.1 needs no privilege.
+    Asking core is also simply more honest: it is the surface everything uses.
+    """
+    out = ssh(vm, ["curl", "--silent", "--insecure",
+                   "-c", "/tmp/net-cookies", "-b", "/tmp/net-cookies",
+                   "https://127.0.0.1/api/v1/network"], check=False).stdout
     try:
-        body = json.loads(out)
+        return json.loads(out)
     except json.JSONDecodeError as exc:
-        raise TestFailure(f"could not read network.status: {exc}\n{out[:400]}") from exc
-    return body.get("result", body)
+        raise TestFailure(f"could not read /network: {exc}\n{out[:400]}") from exc
 
 
 def main() -> int:

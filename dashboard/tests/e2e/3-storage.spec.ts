@@ -17,7 +17,7 @@ import { test, expect, type Page } from "@playwright/test";
  * Runs after 1-first-run.spec.ts, which creates the administrator.
  */
 
-const ADMIN = "okan";
+const ADMIN = "alex";
 const PASSWORD = "a-sufficiently-long-password";
 const SERVER_NAME = process.env["HOMEBASE_HOSTNAME"] ?? "homebase-dash";
 
@@ -110,7 +110,7 @@ test("preparing a blank disk, and setting it up", async ({ page }) => {
 test("an application says it needs a disk, and takes the one it is given", async ({ page }) => {
   await signIn(page);
 
-  await page.getByRole("button", { name: "Applications", exact: true }).click();
+  await page.getByRole("button", { name: "Apps", exact: true }).click();
   await page.locator("button.app-row", { hasText: "File Browser" }).click();
 
   // Before anything else on the screen: it cannot run yet, and why.

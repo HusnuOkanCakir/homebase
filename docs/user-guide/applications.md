@@ -11,7 +11,7 @@ after a power cut, without you needing to know how any of that works.
 
 ## Installing one
 
-Open the dashboard, choose **Applications**, and pick one from the list. Each one has a
+Open the dashboard, choose **Apps**, and pick one from the list. Each one has a
 sentence saying what it is for.
 
 Press **Install**. Downloading takes a few minutes on a home connection — a media server is
@@ -33,6 +33,37 @@ stopped, restarted, rebooted, removed — by the people who wrote Homebase, and 
 running on your server was described by anything except the Homebase project. The
 reasoning is in
 [ADR-0012](https://github.com/HusnuOkanCakir/homebase/blob/main/docs/decisions/0012-hostd-owns-the-catalogue.md).
+
+### The media applications, and how they fit together
+
+Several of them are one system rather than several things, and it is not obvious from the
+list which. There are two routes to watching something, and they are for different wants.
+
+**To keep it.** Ask in **Jellyseerr**; **Sonarr** and **Radarr** decide what to fetch;
+**Prowlarr** knows where to look; **qBittorrent** does the fetching; **Jellyfin** plays it,
+on a television, a phone or a browser, and remembers where you stopped. This takes as long
+as the download takes. Afterwards the file is yours: watch it again, on anything, with no
+connection at all.
+
+Install them together and Homebase wires them to each other. They still need their own
+first-run setup — each has its own idea of accounts and API keys, and Homebase does not
+invent those for you.
+
+**To watch it once.** **Stremio** plays while it fetches, so it starts in about half a
+minute and keeps nothing. Watch something twice and it is fetched twice. It also finds
+nothing by itself until you install an addon from inside it.
+
+Both can be installed at once and they do not conflict. Stremio is the one to reach for when
+you want to see one thing now; the rest are for a series you are following.
+
+!!! note "About your processor"
+
+    Playing a film usually costs nothing — the file is sent as it is and the television
+    decodes it. Converting one *while* it plays is what costs, and an old laptop with no
+    hardware video support will struggle with HEVC (also called H.265 or x265) in
+    particular. If playback stutters, that is usually why. In Sonarr and Radarr you can set
+    a release profile that does not contain `x265`, `HEVC` or `h265`, and get H.264 files
+    instead, which every machine of the last fifteen years decodes without effort.
 
 ## Starting, stopping and restarting
 
@@ -96,9 +127,10 @@ The applications you had stopped stay stopped.
 
 ## What Homebase does not do yet
 
-- **No backups.** This is Milestone 5. Until then, anything on this server should not be
-  the only copy.
-- **No storage choices.** Applications keep their files on the server's own disk. Attaching
-  a separate disk and pointing an application at it is Milestone 4.
 - **No updating an application to a newer version.** Each one is pinned to a tested version,
-  and moving it is Milestone 8.
+  and moving it is Milestone 8. A version in the catalogue is a combination that has been
+  run together, not the newest one published.
+- **No proxy in front of them.** An application reachable from the rest of the house is
+  reached on its own port, over plain HTTP, and guards itself with its own accounts. Which
+  applications may do that is decided per application in the catalogue and reviewed in a
+  diff.

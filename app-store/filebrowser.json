@@ -1,12 +1,13 @@
 {
   "manifest_version": 1,
-  "revision": 1,
+  "revision": 2,
   "id": "filebrowser",
   "name": "File Browser",
   "summary": "Put files on your server and get them back, from any device.",
+  "icon": "📁",
+  "after_install": "Sign in as “admin” with the password “admin”, then change it immediately under Settings, User Management — until you do, anyone on your network who finds this page is signed in as an administrator of it. File Browser does not issue a password of its own and does not print one anywhere, so this is the only pair that works.",
   "homepage": "https://filebrowser.org",
   "license": "Apache-2.0",
-
   "container": {
     "image": "filebrowser/filebrowser",
     "version": "v2.32.0",
@@ -15,13 +16,13 @@
       "FB_ROOT": "/files"
     }
   },
-
   "network": {
     "internal_port": 80,
     "protocol": "http",
-    "path": "/"
+    "path": "/",
+    "reachable_from": "network",
+    "host_port": 8080
   },
-
   "storage": [
     {
       "id": "config",
@@ -40,24 +41,20 @@
       "backup": true
     }
   ],
-
   "health": {
     "type": "http",
     "path": "/health",
     "interval_seconds": 30,
     "start_period_seconds": 20
   },
-
   "permissions": {
     "read_only_root": false
   },
-
   "resources": {
     "memory_limit_bytes": 268435456,
     "memory_minimum_bytes": 134217728,
     "disk_minimum_bytes": 104857600
   },
-
   "credentials": [
     {
       "ref": "filebrowser-admin",
@@ -65,7 +62,6 @@
       "generate": true
     }
   ],
-
   "capabilities": [
     {
       "name": "files.get_status",
@@ -82,7 +78,6 @@
       "rollback": null
     }
   ],
-
   "events": [
     {
       "type": "storage_unavailable",
@@ -91,10 +86,13 @@
       "recoverable": true
     }
   ],
-
-  "sensitive_fields": ["admin_password"],
-
+  "sensitive_fields": [
+    "admin_password"
+  ],
   "requires": {
-    "architectures": ["amd64", "arm64"]
+    "architectures": [
+      "amd64",
+      "arm64"
+    ]
   }
 }

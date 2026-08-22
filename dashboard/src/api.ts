@@ -133,6 +133,23 @@ const post = <T>(path: string, body?: unknown, timeoutMs?: number) =>
 
 // --- Types -------------------------------------------------------------------
 
+/** What the local assistant is, and whether it can be used at all. */
+export interface AssistantStatus {
+  available: boolean;
+  /** The model being served, named for reading rather than for loading. */
+  model?: string;
+  /** Why it is unavailable, in a sentence meant for a person. */
+  reason?: string;
+  max_turns: number;
+  max_chars: number;
+}
+
+export interface AssistantMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+
 export interface Health {
   status: "ok" | "degraded";
   version: string;
@@ -221,6 +238,17 @@ export interface NetworkInterface {
   up: boolean;
   addresses?: string[];
   mac?: string;
+  /**
+   * Whether a magic packet will switch this machine on.
+   *
+   * Three states, not two. `wake_on_lan_known: false` means the card would not
+   * say — which is different from a card that said no, and a screen that
+   * offered "wake it over the network" on the strength of a guess would be
+   * telling somebody their server can be switched back on when it cannot.
+   */
+  wake_on_lan?: boolean;
+  wake_on_lan_supported?: boolean;
+  wake_on_lan_known?: boolean;
 }
 
 /**
@@ -241,6 +269,41 @@ export interface NetworkStatus {
   reachable: boolean;
 }
 
+/**
+ * A folder published onto the local network over SMB.
+ *
+ * `available` and being shared are separate: a share whose disk has been
+ * unplugged is still configured and still listed, it simply has nothing behind
+ * it. Hiding it would be reporting the configuration wrongly to fix a disk.
+ */
+export interface SharedFolder {
+  name: string;
+  location: string;
+  read_only: boolean;
+  added_at: string;
+  path: string;
+  available: boolean;
+  /** What to type on Windows, composed by the server: \\name\share. */
+  address: string;
+}
+
+export interface ShareStatus {
+  /** Whether the file server is on this machine at all. It is not part of the
+   *  base installation — a listening service that is off until asked for is one
+   *  that cannot be misconfigured. */
+  installed: boolean;
+  /** Whether it is actually serving. Separate from being installed and from
+   *  there being shares: "configured but not running" is a real state, and the
+   *  one worth saying loudly, because from the other end it looks identical to
+   *  a share that was never made. */
+  running: boolean;
+  shares: SharedFolder[];
+  /** The accounts that may connect. Names only — Homebase cannot read a
+   *  password back and would not report one if it could. */
+  users: string[];
+  server_name: string;
+}
+
 export interface SystemInfo {
   hostname: string;
   os: string;
@@ -249,6 +312,23 @@ export interface SystemInfo {
   virtualised: boolean;
   uptime_seconds: number;
   cpu: { model: string; cores: number; threads: number };
+  /**
+   * The graphics hardware, and the name for it that will still be right after
+   * a reboot.
+   *
+   * `render_node` is what every other tool prints. `stable_path` is what to
+   * actually configure an application with — the numbering in the first one is
+   * assigned in probe order, and on this project's own test machine installing
+   * a driver made two cards swap numbers, silently pointing the media server at
+   * a different chip than the one it had been using.
+   */
+  graphics?: {
+    name: string;
+    driver: string;
+    render_node: string;
+    stable_path?: string;
+    accelerates_video: boolean;
+  }[];
   memory: { total_bytes: number; available_bytes: number };
   load_average: [number, number, number];
   power: {
@@ -269,6 +349,62 @@ export interface SystemInfo {
     /** Only set when something is worth telling somebody. */
     message?: string;
   };
+  /**
+   * What the cooling is doing, and who is deciding.
+   *
+   * Only meaningful beside the temperature: loud and cool is a fan fault, loud
+   * and hot is a heatsink full of dust, and from across a room they are the
+   * same sound. `rpm: null` is a machine with no sensor — never zero, which
+   * would read as a seized fan.
+   */
+  fan: {
+    rpm: number | null;
+    percent: number | null;
+    label?: string;
+    controlled?: "firmware" | "manual" | "full";
+    message?: string;
+  };
+}
+
+/** One reading from the record. */
+/**
+ * One reading.
+ *
+ * Everything measurable is nullable, and null is not zero. A machine with no
+ * thermal sensor, a reading taken before there was a previous one to subtract
+ * from, a counter that reset across a reboot — all of those are "not measured",
+ * and a zero would draw as a cold, idle, silent server that was doing nothing.
+ */
+export interface ThermalSample {
+  time: string;
+  celsius: number | null;
+  fan_rpm: number | null;
+  fan_percent: number | null;
+  /** Busy time between this reading and the one before it. */
+  cpu_percent: number | null;
+  memory_percent: number | null;
+  download_bytes_per_second: number | null;
+  upload_bytes_per_second: number | null;
+  state?: string;
+  load?: number;
+}
+
+export interface ThermalHistory {
+  samples: ThermalSample[];
+  hottest_celsius: number | null;
+  coolest_celsius: number | null;
+  average_celsius: number | null;
+  loudest_rpm: number | null;
+  quietest_rpm: number | null;
+  since?: string;
+  /**
+   * Whether readings are being taken at all.
+   *
+   * An empty history on a newly installed machine and an empty history because
+   * the recorder is broken look identical, and only one of them needs anybody
+   * to do something.
+   */
+  recording: boolean;
 }
 
 export type JobState =
@@ -318,6 +454,8 @@ export interface Application {
   id: string;
   name: string;
   summary?: string;
+  /** One character for the tile — an emoji, usually. Absent is normal. */
+  icon?: string;
   state: ApplicationState;
   /** Null where the state is unknown; `false` would be a claim nobody can make. */
   installed: boolean | null;
@@ -332,10 +470,47 @@ export interface Application {
   image: string;
   version?: string;
   internal_port?: number;
+  /**
+   * Where to open it, and whether anything other than this machine can.
+   *
+   * Both, because the address alone cannot say which. An application on
+   * loopback has a real address that is not there from the computer showing
+   * this page, and a link to it would fail in a way that looks like the server
+   * being broken.
+   */
+  url?: string;
+  reachable_from_network: boolean;
+  /**
+   * What the person who installed it still has to do.
+   *
+   * For several applications this is the difference between working and
+   * usable: one that is running, reachable, and asking for a password nobody
+   * was given is indistinguishable from one that is broken.
+   */
+  after_install?: string;
   started_at: string | null;
   exit_code: number | null;
   /** Where its data lives, so a user can be told what uninstalling leaves behind. */
   data_path: string;
+  /**
+   * A privilege this application holds that most do not — absent for the ones
+   * that need none.
+   *
+   * Shown before it is installed, not after. The point of declaring a
+   * relaxation per application is that somebody can decline it, and a
+   * disclosure that arrives once the container is running is a notification
+   * rather than a choice.
+   */
+  elevation?: AppElevation;
+}
+
+export interface AppElevation {
+  /** "starts_as_root" or "runs_as_root" — one gives root up, the other does not. */
+  kind: string;
+  /** One sentence, composed by the server rather than by the manifest's author. */
+  summary: string;
+  /** The manifest's own words, for somebody who wants them. */
+  reason: string;
 }
 
 export interface ApplicationList {
@@ -461,6 +636,55 @@ export interface WifiStatus {
   bars?: number;
   configured: boolean;
   has_wired_connection: boolean;
+}
+
+/**
+ * Remote access, over Wireguard.
+ *
+ * `configured` and `running` are separate facts, and so is `ever_connected`: a
+ * tunnel that is set up, running, and has never seen a handshake is almost
+ * always a router that has not been told to forward the port — the one part of
+ * this Homebase cannot do and the only part that usually goes wrong.
+ */
+export interface VPNStatus {
+  configured: boolean;
+  running: boolean;
+  hostname?: string;
+  port: number;
+  devices: VPNDevice[];
+  ever_connected: boolean;
+  dns: {
+    configured: boolean;
+    provider?: string;
+    name?: string;
+    last_result?: string;
+    last_checked?: string;
+    message?: string;
+  };
+  message?: string;
+}
+
+export interface VPNDevice {
+  name: string;
+  address: string;
+  public_key: string;
+  last_handshake?: string;
+  transfer_rx?: number;
+  transfer_tx?: number;
+}
+
+/**
+ * A device's configuration, returned exactly once by the call that created it.
+ *
+ * It contains the device's private key and is stored nowhere. Losing it means
+ * removing the device and adding it again — which is why the server says so in
+ * `message` rather than leaving the interface to imply it.
+ */
+export interface NewVPNDevice extends VPNDevice {
+  config: string;
+  /** The same configuration as a PNG data URI, for scanning with a phone. */
+  qr_image?: string;
+  message: string;
 }
 
 export interface WifiNetwork {
@@ -635,6 +859,25 @@ export const api = {
   system: () => get<SystemInfo>("/system"),
 
   /**
+   * Whether this machine has a local model, and what it is.
+   *
+   * Answered even when there is none — `available: false` with a reason — so
+   * the dashboard can say what is missing instead of hiding a tab silently.
+   */
+  assistant: () => get<AssistantStatus>("/assistant"),
+
+  /**
+   * How hot the machine has been, and how hard its fan has worked.
+   *
+   * `points` is capped because a month at five-minute intervals is nine
+   * thousand readings — more than a chart this size can draw and more than a
+   * browser should be asked to parse. The server thins rather than truncates,
+   * so the shape survives.
+   */
+  systemHistory: (days = 7, points = 200) =>
+    get<ThermalHistory>(`/system/history?days=${days}&points=${points}`),
+
+  /**
    * How the server is connected. Slower than most reads, because deciding
    * whether the internet is reachable means waiting for something not to answer.
    */
@@ -683,6 +926,18 @@ export const api = {
 
   reboot: (confirm: string, reason?: string) =>
     post<Job>("/system/reboot", reason === undefined ? { confirm } : { confirm, reason }),
+
+  /**
+   * Switch the server off.
+   *
+   * The same shape as a reboot and the same confirmation, because to the API
+   * they are the same operation. The difference is entirely in what the caller
+   * must have said first: a restart explains itself by ending, and this does
+   * not — so whatever calls this is the last thing that will be able to tell
+   * somebody how to switch the machine on again.
+   */
+  shutdown: (confirm: string, reason?: string) =>
+    post<Job>("/system/shutdown", reason === undefined ? { confirm } : { confirm, reason }),
 
   job: (id: string) => get<Job>(`/jobs/${encodeURIComponent(id)}`),
 
@@ -789,6 +1044,47 @@ export const api = {
 
   createBackup: (location: string, includeData: boolean) =>
     post<Job>("/backups", { location, include_data: includeData }),
+
+  // --- File sharing ---------------------------------------------------------
+
+  shares: () => get<ShareStatus>("/shares"),
+
+  /** Long: the first share installs the file server, which is a download. */
+  addShare: (name: string, location: string, readOnly: boolean) =>
+    post<ShareStatus>("/shares", { name, location, read_only: readOnly }, 600_000),
+
+  /** Stops publishing it. The files stay exactly where they are. */
+  removeShare: (name: string) =>
+    post<ShareStatus>("/shares/remove", { name }, 120_000),
+
+  setSharePassword: (username: string, password: string) =>
+    post<ShareStatus>("/shares/users", { username, password }, 120_000),
+
+  removeShareUser: (username: string) =>
+    post<ShareStatus>("/shares/users/remove", { username }, 60_000),
+
+  // --- Remote access ------------------------------------------------------------
+
+  vpn: () => get<VPNStatus>("/network/vpn"),
+
+  /** Switching it on writes a configuration, starts the tunnel and opens a port
+   *  in the firewall — so it is allowed longer than an ordinary request. */
+  setUpVPN: (hostname: string) =>
+    post<VPNStatus>("/network/vpn", { hostname }, 120_000),
+
+  /** Closes the port first, then stops the tunnel. The keys are kept. */
+  disableVPN: () => post<VPNStatus>("/network/vpn/disable", undefined, 60_000),
+
+  addVPNDevice: (name: string) =>
+    post<NewVPNDevice>("/network/vpn/devices", { name }, 60_000),
+
+  removeVPNDevice: (name: string) =>
+    post<VPNStatus>("/network/vpn/devices/remove", { name }, 60_000),
+
+  setVPNDNS: (provider: string, name: string, token: string) =>
+    post<VPNStatus>("/network/vpn/dns", { provider, name, token }, 120_000),
+
+  clearVPNDNS: () => post<VPNStatus>("/network/vpn/dns/clear", undefined, 60_000),
 
   // --- Wireless ---------------------------------------------------------------
 
@@ -937,4 +1233,130 @@ export function watchJob(
   return () => {
     stopped = true;
   };
+}
+
+/**
+ * Ask the local model something, and receive the answer as it is written.
+ *
+ * Streaming rather than a single response, because this hardware writes about
+ * six or seven tokens a second: a paragraph is thirty seconds and a long answer
+ * is over a minute. Waiting that long at a blank screen is indistinguishable
+ * from a server that has hung, and people reload — which on a machine with one
+ * inference slot makes the wait longer, not shorter.
+ *
+ * It does not go through `request`, which buffers the whole body and imposes a
+ * fifteen-second timeout. Both are right for every other call and wrong for this
+ * one.
+ *
+ * Returns a function that stops the answer. Aborting the request is what frees
+ * the server's single slot, so "stop" has to actually cancel rather than just
+ * hide the output.
+ */
+export function askAssistant(
+  messages: AssistantMessage[],
+  handlers: {
+    onToken: (text: string) => void;
+    /** `reason` is "length" when the answer hit the token ceiling. */
+    onDone: (reason: string) => void;
+    onError: (error: unknown) => void;
+  },
+  options: { think?: boolean } = {},
+): () => void {
+  const controller = new AbortController();
+
+  const run = async () => {
+    let response: Response;
+    try {
+      response = await fetch(BASE + "/assistant/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, think: options.think ?? false }),
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+    } catch (cause) {
+      if (!controller.signal.aborted) handlers.onError(new NetworkError(cause));
+      return;
+    }
+
+    if (!response.ok) {
+      // The refusals — busy, too long, no model — are ordinary JSON, because
+      // they happen before any streaming starts.
+      let body: ApiErrorBody | undefined;
+      try {
+        body = ((await response.json()) as { error?: ApiErrorBody }).error;
+      } catch {
+        /* fall through to the generic message */
+      }
+      handlers.onError(
+        new ApiError(
+          response.status,
+          body ?? { code: "http." + response.status, message: "Something went wrong." },
+        ),
+      );
+      return;
+    }
+
+    if (!response.body) {
+      handlers.onError(new NetworkError("this browser cannot read a streamed answer"));
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE frames are separated by a blank line. A frame can arrive split
+        // across reads, so only whole ones are taken and the remainder is kept.
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          boundary = buffer.indexOf("\n\n");
+
+          let event = "message";
+          let data = "";
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event: ")) event = line.slice(7);
+            else if (line.startsWith("data: ")) data += line.slice(6);
+            // Lines beginning ":" are comments — the heartbeat and the
+            // "connected" marker — and are meant to be ignored.
+          }
+          if (!data) continue;
+
+          if (event === "token") {
+            const parsed = JSON.parse(data) as { text?: string };
+            if (parsed.text) handlers.onToken(parsed.text);
+          } else if (event === "done") {
+            handlers.onDone((JSON.parse(data) as { reason?: string }).reason ?? "stop");
+            return;
+          } else if (event === "failed") {
+            handlers.onError(
+              new ApiError(500, {
+                code: "assistant.interrupted",
+                message: "The answer stopped part-way through.",
+                recoverable: true,
+                recovery: "Ask again.",
+              }),
+            );
+            return;
+          }
+        }
+      }
+      // The stream ended without saying so. Treat it as finished rather than as
+      // an error: the text already on screen is real and worth keeping.
+      handlers.onDone("stop");
+    } catch (cause) {
+      if (!controller.signal.aborted) handlers.onError(new NetworkError(cause));
+    }
+  };
+
+  void run();
+  return () => controller.abort();
 }

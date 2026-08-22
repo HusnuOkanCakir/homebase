@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -25,6 +26,8 @@ import (
 func (s *Server) registerNetworkRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/network", s.require(auth.PermNetworkDiag, s.handleNetwork))
 
+	mux.Handle("POST /api/v1/network/wake-on-lan", s.require(auth.PermNetworkModify, s.handleWakeOnLAN))
+
 	mux.Handle("GET /api/v1/network/wifi", s.require(auth.PermNetworkDiag, s.handleWifiStatus))
 	mux.Handle("POST /api/v1/network/wifi/scan", s.require(auth.PermNetworkDiag, s.handleWifiScan))
 	mux.Handle("POST /api/v1/network/wifi", s.require(auth.PermNetworkModify, s.handleWifiConnect))
@@ -32,6 +35,7 @@ func (s *Server) registerNetworkRoutes(mux *http.ServeMux) {
 
 	mux.Handle("GET /api/v1/network/vpn", s.require(auth.PermNetworkDiag, s.handleVPNStatus))
 	mux.Handle("POST /api/v1/network/vpn", s.require(auth.PermNetworkModify, s.handleVPNSetup))
+	mux.Handle("POST /api/v1/network/vpn/disable", s.require(auth.PermNetworkModify, s.handleVPNDisable))
 	mux.Handle("POST /api/v1/network/vpn/devices", s.require(auth.PermNetworkModify, s.handleAddVPNDevice))
 	mux.Handle("POST /api/v1/network/vpn/devices/remove", s.require(auth.PermNetworkModify, s.handleRemoveVPNDevice))
 	mux.Handle("POST /api/v1/network/vpn/dns", s.require(auth.PermNetworkModify, s.handleSetDNS))
@@ -50,10 +54,101 @@ func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request, _ *auth.U
 		return
 	}
 
+	// Whether anything outside this network answers.
+	//
+	// Asked here rather than in hostd, and that is structural rather than
+	// tidiness: hostd's unit sets RestrictAddressFamilies=AF_UNIX AF_NETLINK, so
+	// it cannot open an internet socket and the check returned false on every
+	// machine that ever ran it. Reaching 1.1.1.1 needs no privilege at all, so
+	// it belongs on this side of the boundary.
+	//
+	// Only asked when there is a route to ask over: without a gateway the answer
+	// is already known and the attempt would cost the caller a timeout.
+	if status.Gateway != "" {
+		status.Online = reachesTheInternet(ctx)
+	}
+
 	writeJSON(w, http.StatusOK, status)
 }
 
+// reachesTheInternet answers whether anything outside this network responded.
+//
+// A TCP connection rather than a ping: ICMP is blocked on plenty of networks,
+// and "the internet is down" is the wrong conclusion to draw from a firewall.
+//
+// Port 443 rather than 53. It dialled the public resolvers on 53 and reported a
+// working connection as broken on the first real network Homebase met — plenty
+// of networks block outbound TCP/53 to public resolvers, and some ISPs do it as
+// policy. Almost nothing blocks 443, because blocking it breaks the web.
+//
+// Two organisations, because one being down is not evidence about the internet.
+// Reached by address rather than by name: this is a question about connectivity,
+// and resolving a name first would make a broken resolver look like a broken
+// connection.
+func reachesTheInternet(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	for _, address := range []string{
+		"1.1.1.1:443", "8.8.8.8:443",
+		"1.1.1.1:53", "8.8.8.8:53",
+	} {
+		var dialer net.Dialer
+		conn, err := dialer.DialContext(ctx, "tcp", address)
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+	}
+	return false
+}
+
 // --- Wireless ------------------------------------------------------------------
+
+// handleWakeOnLAN switches magic-packet waking on or off for one card.
+func (s *Server) handleWakeOnLAN(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var request struct {
+		Interface string `json:"interface"`
+		Enabled   *bool  `json:"enabled"`
+	}
+	if !s.decode(w, r, &request) {
+		return
+	}
+	// A pointer, so that a body omitting the field is refused rather than read
+	// as "switch it off". This endpoint is reached by a person who has just been
+	// told their server can be woken; silently doing the opposite of what they
+	// asked, because they left out a field, is the kind of thing nobody finds
+	// out about until the machine will not start.
+	if request.Enabled == nil {
+		s.writeError(w, r, http.StatusBadRequest, apiError{
+			Code:        "request.missing_field",
+			Message:     "Homebase needs to know whether to switch this on or off.",
+			Detail:      "enabled is required",
+			Recoverable: true,
+			Recovery:    "Say whether the server should be startable over the network.",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := s.host.SetWakeOnLAN(ctx, request.Interface, *request.Enabled)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	message := "This server can now be started over the network."
+	if !*request.Enabled {
+		message = "This server can no longer be started over the network."
+	}
+	s.events.Info(r.Context(), "network.wake_on_lan_changed", request.Interface, message)
+	s.log.Info("wake-on-LAN changed", "interface", request.Interface,
+		"enabled", *request.Enabled, "by", user.Username)
+
+	writeJSON(w, http.StatusOK, result)
+}
 
 func (s *Server) handleWifiStatus(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -206,6 +301,30 @@ func (s *Server) handleVPNSetup(w http.ResponseWriter, r *http.Request, user *au
 // The response carries a private key — the only response in the API that does,
 // apart from the recovery code at setup. It is stored nowhere and cannot be
 // asked for again.
+// handleVPNDisable closes the way in from outside.
+func (s *Server) handleVPNDisable(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	ctx, cancel := context.WithTimeout(r.Context(), 1*time.Minute)
+	defer cancel()
+
+	status, err := s.host.DisableVPN(ctx)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	// A warning rather than an ordinary note. Somebody away from home who
+	// relies on this has just been disconnected, and the event log is where
+	// they will look to find out why.
+	s.events.Warn(r.Context(), "network.vpn_disabled", "",
+		"remote access was switched off",
+		"This server can no longer be reached from outside the house. The "+
+			"devices already set up keep their keys and will work again when "+
+			"it is switched back on.")
+	s.log.Info("remote access disabled", "by", user.Username)
+
+	writeJSON(w, http.StatusOK, status)
+}
+
 func (s *Server) handleAddVPNDevice(w http.ResponseWriter, r *http.Request, user *auth.User) {
 	var body struct {
 		Name string `json:"name"`

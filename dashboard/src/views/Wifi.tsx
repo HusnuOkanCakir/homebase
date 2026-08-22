@@ -113,7 +113,7 @@ export function Wifi({ canManage }: Props) {
       <h2>Wireless</h2>
 
       {error ? (
-        <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+        <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
       ) : null}
 
       {joined ? (

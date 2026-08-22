@@ -87,6 +87,10 @@ func main() {
 	appServices := hostd.NewAppServices(apps, *dockerSock, *appData, *stateDir).WithStorage(storage)
 	hostd.RegisterAppOperations(registry, appServices)
 
+	// Sharing folders onto the local network. Registered after storage because
+	// a share is a folder on a disk storage already knows about.
+	hostd.RegisterShareOperations(registry, hostd.NewShareServices(storage, *stateDir))
+
 	hostd.RegisterBackupOperations(registry, hostd.NewBackupServices(
 		storage, appServices, *databasePath, *configDir, *stateDir, buildVersion()))
 
@@ -111,14 +115,14 @@ func main() {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	if err := run(log, registry, apps, *socketPath, *auditPath, *peerUser); err != nil {
+	if err := run(log, registry, apps, storage, *socketPath, *auditPath, *peerUser); err != nil {
 		log.Error("hostd failed", "error", err)
 		os.Exit(1)
 	}
 }
 
 func run(log *slog.Logger, registry *hostd.Registry, apps *hostd.Catalogue,
-	socketPath, auditPath, peerUser string) error {
+	storage *hostd.StorageServices, socketPath, auditPath, peerUser string) error {
 	if os.Geteuid() != 0 {
 		// Not fatal: it is useful to run hostd unprivileged while developing,
 		// and the operations that need root will fail on their own terms with a
@@ -165,6 +169,26 @@ func run(log *slog.Logger, registry *hostd.Registry, apps *hostd.Catalogue,
 	for name, reason := range apps.Rejected() {
 		log.Error("rejected an application manifest", "file", name, "reason", reason)
 	}
+
+	// This server's own disk is offered as a place to keep files, so the place
+	// has to be there. See internal/hostd/ops_storage.go.
+	if err := storage.PrepareInternalLocation(); err != nil {
+		log.Warn("could not create the directory for this server's own disk",
+			"error", err)
+	}
+
+	// Wake-on-LAN is a property of the card, and the driver resets it on every
+	// boot. Reapplied here rather than through a systemd .link file, because a
+	// .link file that matches a device and says nothing about NamePolicy= takes
+	// over its naming as well — a file about waking up that can rename an
+	// interface and leave a server unreachable. See internal/hostd/wol.go.
+	hostd.ApplyWakeOnLAN(log)
+
+	// A configuration written before the forwarding rules existed reaches this
+	// server and nothing else on the network. Repaired here rather than left for
+	// whoever next adds a device, because a machine with devices already paired
+	// is exactly the one where nobody will.
+	hostd.RepairVPNForwarding(context.Background(), log)
 
 	log.Info("hostd listening",
 		"socket", listener.Addr().String(),

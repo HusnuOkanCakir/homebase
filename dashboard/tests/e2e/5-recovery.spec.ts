@@ -13,7 +13,7 @@ import { test, expect, type Page } from "@playwright/test";
  * followed it.
  */
 
-const ADMIN = "okan";
+const ADMIN = "alex";
 const PASSWORD = "a-sufficiently-long-password";
 const RECOVERED_PASSWORD = "a-password-chosen-after-recovery";
 const SERVER_NAME = process.env["HOMEBASE_HOSTNAME"] ?? "homebase-dash";
@@ -158,7 +158,7 @@ test("the old password no longer works, and neither does the spent code", async 
 // --- Helpers -----------------------------------------------------------------
 
 async function openSecurity(page: Page) {
-  await page.getByRole("button", { name: "Security", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Your recovery code" })).toBeVisible();
 }
 

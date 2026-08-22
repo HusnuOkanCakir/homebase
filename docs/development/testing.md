@@ -173,6 +173,102 @@ worth it after anything that changes how the product is reached or installed.
 The installer suite is left out of that loop deliberately — it takes fifteen
 minutes on its own and boots a real Ubuntu ISO.
 
+### A check that can only answer "no"
+
+The internet check lived in `hostd`, whose unit sets
+`RestrictAddressFamilies=AF_UNIX AF_NETLINK`. It could not open a socket, so it
+returned `false` on every machine that ever ran it, for four milestones.
+
+Two tests covered it and neither could fail.
+
+The unit tests injected a fake dialler. They exercised the logic exactly as
+intended and never asked whether the process was permitted to do the thing —
+which is the one question that mattered.
+
+The VM test asserted `online is False`, and only after taking the interface down.
+It passed every time, for a reason that had nothing to do with the interface.
+
+**A check that can only answer "no" passes every test that only asks when the
+answer should be no.** When a function has one interesting output, assert the
+other one too — and at least once, in the process that will really run it, with
+the sandbox it will really have. The VM test now checks `online is True` before
+unplugging anything, and there is a test in `internal/api` that opens a real
+socket rather than a fake one.
+
+### Reaching it the way the product does, not the way the test can
+
+The application test proved a container serves HTTP by asking Docker for its port
+and connecting from inside the VM. It passed for four milestones while installed
+applications were unreachable from anywhere: they were bound to loopback on a
+port Docker chose, and no part of Homebase reported it.
+
+The test was not wrong about the container. It answered a question nobody had —
+"does this image work" — instead of the one that matters, which is whether a
+person on the sofa can open it.
+
+**Reach the thing under test through the path a user has.** If that path does not
+exist, the test cannot be written, and *that* is the finding.
+
+### Watching somebody use it is a test, and it is the one that finds the most
+
+Milestone 12 was finished, tested from another machine with a client written for
+the purpose, and documented. Then one person opened a file manager and none of it
+worked: the login refused the name it was created with, there was no way to open
+an installed application, `apps stop` and `apps restart` had never worked,
+changing an application's disk did nothing, and the server's own name sometimes
+resolved to a Docker bridge.
+
+Seven bugs, all found in under an hour, none of them by a suite.
+
+They are not coverage gaps. Every one of those paths was exercised. They are the
+difference between *working* and *usable*, and nothing in this repository was
+measuring it — because a test knows the prefix on the account name, knows which
+field the confirmation goes in, and never has to find the address of the thing it
+just installed.
+
+There is no assertion that catches this class. The practice is: **after a
+milestone passes, use it as a person would, on the machine somebody actually
+has, and write down every point at which you had to already know something.**
+Each of those is a bug even when the code is correct.
+
+### A chart that passes its checks and still cannot be read
+
+The colour of a chart is computable — lightness band, chroma floor, separation
+under three kinds of colour blindness, contrast against the surface it is drawn
+on — so it is computed rather than judged. The palette in the dashboard was run
+through a validator, and an ordering that looked more sensible was the one that
+failed it.
+
+That check says nothing about layout. Rendering the same charts with a day of
+realistic readings and looking at the picture found five things no assertion had:
+the card was capped at a width that squeezed five plots into half a screen, the
+axis labels ran off the left edge, temperature was drawn from 0 °C so forty
+degrees of range lived in the top tenth, the legend keys ran together as one
+word, and an axis read `10279k` where it meant `9.8 MB`.
+
+**Render it and look at it.** A screenshot of the real markup with plausible data
+is a minute's work and is the only thing that catches geometry.
+
+### A health check that passes while nobody can get in
+
+qBittorrent installed, started, passed its health check and reported itself
+running. Every request to it — its own login page included — was answered with a
+bare `401 Unauthorized`, with nothing in its log to say why.
+
+The cause was that Homebase published it on 8081 while it listened on 8080.
+qBittorrent validates the Host header against the port it is serving on, and
+rejects anything else. Its health check passed because that check asks the
+container whether it answers, and it did: it answered 401.
+
+**A health check answers "is this process alive", not "can somebody use this".**
+Where the two can differ, only using it finds out — and the way this one was
+found was a person opening the address in a browser and reading the word
+"Unauthorized".
+
+The general lesson is in the schema now: publish an application on the port it
+listens on. Where the two must differ, something has to be told, and the thing
+that gets told is usually the application.
+
 ### Tests that depend on chance
 
 `vm-test-backup` built a deliberately-wrong restore confirmation with `backup_id.upper()`.

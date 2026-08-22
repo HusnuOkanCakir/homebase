@@ -1,0 +1,62 @@
+{
+  "manifest_version": 1,
+  "revision": 1,
+  "id": "radarr",
+  "name": "Radarr",
+  "summary": "Ask for a film and it finds, downloads and files it into your library.",
+  "icon": "🎞️",
+  "after_install": "Radarr handles films, and is set up like Sonarr: a qBittorrent download client with host qbittorrent and port 8081, and /data/films as its root folder.",
+  "homepage": "https://wiki.servarr.com",
+  "license": "GPL-3.0-only",
+  "container": {
+    "image": "lscr.io/linuxserver/radarr",
+    "version": "5.14.0",
+    "environment": {
+      "TZ": "Etc/UTC"
+    }
+  },
+  "network": {
+    "internal_port": 7878,
+    "protocol": "http",
+    "path": "/",
+    "reachable_from": "network",
+    "reaches": [
+      "qbittorrent"
+    ]
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config",
+      "access": "read-write",
+      "description": "Radarr's own settings and database.",
+      "backup": true
+    },
+    {
+      "id": "data",
+      "type": "user-selected",
+      "mount_path": "/data",
+      "access": "read-write",
+      "description": "One folder holding both your downloads and your library. It must be a single location: a finished file is moved into place by being linked, which only works within one disk.",
+      "backup": false
+    }
+  ],
+  "health": {
+    "type": "http",
+    "path": "/",
+    "interval_seconds": 30,
+    "start_period_seconds": 60
+  },
+  "permissions": {
+    "read_only_root": false,
+    "starts_as_root": {
+      "reason": "The linuxserver.io entrypoint starts as root, corrects ownership of its configuration and media folders, then drops to the account given in PUID and PGID using s6. It has no option to run as an arbitrary user."
+    }
+  },
+  "resources": {
+    "memory_limit_bytes": 1073741824,
+    "memory_minimum_bytes": 268435456,
+    "disk_minimum_bytes": 536870912
+  }
+}

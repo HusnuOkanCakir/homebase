@@ -246,7 +246,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
     step("The way back in from the console")
 
     listing = ssh(vm, ["sudo", "homebasectl", "list-accounts"], check=False)
-    check("okan" in listing.stdout,
+    check("alex" in listing.stdout,
           f"the accounts on this server are listed ({listing.stdout.strip()})",
           listing.stdout + listing.stderr)
 
@@ -271,7 +271,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
          "-o", "/dev/null", "-w", "%{http_code}",
          "-X", "POST", "-H", "Content-Type: application/json",
          "-d", json.dumps({
-             "username": "okan",
+             "username": "alex",
              "recovery_code": code,
              "new_password": "a-password-set-from-the-console-code",
          }),
@@ -288,7 +288,7 @@ def verify_the_console_way_back_in(vm: VM) -> None:
          "-o", "/dev/null", "-w", "%{http_code}",
          "-X", "POST", "-H", "Content-Type: application/json",
          "-d", json.dumps({
-             "username": "okan",
+             "username": "alex",
              "recovery_code": code,
              "new_password": "another-password-entirely-here",
          }),

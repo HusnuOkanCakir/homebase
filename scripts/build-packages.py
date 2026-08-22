@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD = REPO_ROOT / "build"
 OUT = REPO_ROOT / "dist"
 
-MAINTAINER = "Husnu Okan Cakir <h.okancakir@gmail.com>"
+MAINTAINER = "The Homebase Project <4hg92s4k@anonaddy.me>"
 HOMEPAGE = "https://github.com/HusnuOkanCakir/homebase"
 SECTION = "admin"
 
@@ -111,6 +111,20 @@ if [ "$1" = "configure" ]; then
     # the first connection and is not running the rest of the time.
     if [ -d /run/systemd/system ]; then
         systemctl enable --now homebase-hostd.socket >/dev/null 2>&1 || true
+
+        # Stop the running service, so the next request starts the new binary.
+        #
+        # hostd is socket-activated: systemd owns the socket and the process
+        # comes and goes. An upgrade replaces the binary on disk and leaves any
+        # already-running process alone, so whether a request is served by the
+        # old code or the new one depends on when the previous one happened to
+        # exit. That produced an upgrade where two applications installed
+        # minutes apart were built by different versions — one got the new
+        # networking and one did not, with nothing to say why.
+        #
+        # Stopped rather than restarted: the socket brings it back on the next
+        # connection, and stopping cannot fail because nothing is listening.
+        systemctl stop homebase-hostd.service >/dev/null 2>&1 || true
 
         # Looking for updates on its own. The unit it starts does nothing at
         # all until an update source is configured, so enabling it here is
@@ -215,8 +229,38 @@ if [ "$1" = "configure" ]; then
     install -d -o homebase -g homebase -m 0750 /var/lib/homebase
     install -d -o homebase -g homebase -m 0750 /var/log/homebase
 
-    if [ ! -d /srv/homebase ]; then
-        install -d -o homebase -g homebase -m 0750 /srv/homebase
+    # 0755 rather than 0750, and this is the one directory here that is
+    # deliberately traversable by anybody with an account on the machine.
+    #
+    # It was 0750, which meant somebody who had just shared a folder, been told
+    # the path, and typed `ls` on it got "Permission denied" from their own
+    # server. The obvious fix — adding the administrator to the `homebase`
+    # group — is the wrong one: that group owns the hostd socket, so it is
+    # the privilege boundary, and joining it is a way to reach every privileged
+    # operation without sudo.
+    #
+    # Traversal costs nothing. Everything below keeps its own mode: application
+    # data stays private to the account that owns it, and shared folders are
+    # group-writable because that is what they are for.
+    install -d -o homebase -g homebase -m 0755 /srv/homebase
+
+    # Do not publish the container bridge.
+    #
+    # avahi answers for <hostname>.local on every interface it can see, and
+    # once Docker is installed that includes docker0 at 172.17.0.1. A laptop
+    # asking for the server's name then gets an address that is either
+    # unroutable or — if it runs Docker too — its own bridge, and the server
+    # becomes intermittently unreachable by name with nothing to point at.
+    if [ -f /etc/avahi/avahi-daemon.conf ] &&
+       ! grep -q "^deny-interfaces=" /etc/avahi/avahi-daemon.conf; then
+        # Bracket expressions rather than backslash escapes, and `a` rather than
+        # a substitution containing a newline. This text is a Python string inside
+        # a Python script, so an escape here is consumed before sed ever sees it —
+        # which is how the first attempt shipped an unterminated `s` command and
+        # failed the whole install on a machine that was working.
+        sed -i '/^[[]server[]]$/a deny-interfaces=docker0,br-' \\
+            /etc/avahi/avahi-daemon.conf
+        systemctl restart avahi-daemon >/dev/null 2>&1 || true
     fi
 
     systemctl daemon-reload >/dev/null 2>&1 || true
@@ -323,10 +367,33 @@ def build_hostd(version: str, binaries: Path) -> Path:
     install_file(REPO_ROOT / "packaging/ddns-run",
                  root / "usr/libexec/homebase/ddns-run", 0o755)
 
+    # The file server is fetched on demand rather than depended on, so that a
+    # Homebase nobody asked to share anything has no SMB server on it at all.
+    install_file(REPO_ROOT / "packaging/install-samba",
+                 root / "usr/libexec/homebase/install-samba", 0o755)
+
+    # Creating the account somebody opens a shared folder with. Separate from
+    # hostd because hostd may not write /etc/passwd — see the unit file.
+    install_file(REPO_ROOT / "packaging/share-account",
+                 root / "usr/libexec/homebase/share-account", 0o755)
+
+    # Opening a port when a feature needs one, and closing it again when it
+    # does not. One helper rather than one per feature: the decision about who
+    # may reach a port is worth having in a single reviewable place.
+    install_file(REPO_ROOT / "packaging/firewall",
+                 root / "usr/libexec/homebase/firewall", 0o755)
+
+    install_file(REPO_ROOT / "packaging/dns-resolver",
+                 root / "usr/libexec/homebase/dns-resolver", 0o755)
+
     for unit in ("homebase-hostd.service", "homebase-hostd.socket",
                  "homebase-update-check.service", "homebase-update-apply.service",
                  "homebase-update-check.timer", "homebase-repair.service",
-                 "homebase-ddns.service", "homebase-ddns.timer"):
+                 "homebase-ddns.service", "homebase-ddns.timer",
+                 "homebase-install-samba.service",
+                 "homebase-share-account.service",
+                 "homebase-firewall.service",
+                 "homebase-dns-resolver.service"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,

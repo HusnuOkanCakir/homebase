@@ -103,18 +103,31 @@ func (w *SpaceWatcher) consider(ctx context.Context, location hostclient.Locatio
 
 	used := usedPercent(location)
 
+	// The system disk filling up is a different event from an external disk
+	// filling up, and needs different words. An external disk that fills stops
+	// one application; this one stops the server — updates, backups, logs, the
+	// database, and every application at once.
+	critical := "Applications using this disk are about to stop being able to " +
+		"save anything. Delete something, or move it to another disk."
+	warning := "About a tenth of the disk is left. It is worth deciding now what " +
+		"to remove, rather than when it is full."
+	if location.Internal {
+		critical = "This is the disk the server itself runs from. When it fills, " +
+			"updates, backups and every application stop together. Delete " +
+			"something now, or move it onto another disk."
+		warning = "About a tenth of the server's own disk is left. Anything kept " +
+			"here shares space with the system itself, so it is worth moving " +
+			"large things — films especially — onto a disk of their own."
+	}
+
 	switch {
 	case used >= criticalThreshold:
 		w.announce(ctx, location, criticalThreshold, used, events.SeverityCritical,
-			fmt.Sprintf("%s is almost completely full.", location.Name),
-			"Applications using this disk are about to stop being able to save "+
-				"anything. Delete something, or move it to another disk.")
+			fmt.Sprintf("%s is almost completely full.", location.Name), critical)
 
 	case used >= warningThreshold:
 		w.announce(ctx, location, warningThreshold, used, events.SeverityWarning,
-			fmt.Sprintf("%s is running out of space.", location.Name),
-			"About a tenth of the disk is left. It is worth deciding now what "+
-				"to remove, rather than when it is full.")
+			fmt.Sprintf("%s is running out of space.", location.Name), warning)
 
 	case used <= clearThreshold:
 		w.clear(ctx, location, used)

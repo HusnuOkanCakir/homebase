@@ -43,6 +43,49 @@ autoinstall:
     allow-pw: false
     authorized-keys: @AUTHORIZED_KEYS@
 
+  # Clear the partition table before the installer looks at the disk.
+  #
+  # early-commands run before subiquity probes the block devices, and that is the
+  # whole point of doing it here. On the first real laptop this was tried on — an
+  # ASUS with a 5400 rpm 1 TB drive carrying seven Windows partitions — probing
+  # took 91 seconds against subiquity's 90-second timeout and the install died
+  # with a Python traceback and a root shell. Probing a blank disk takes about a
+  # second.
+  #
+  # This destroys nothing the install was not about to destroy: the user has
+  # already answered "yes" to a prompt that says the whole disk will be erased,
+  # and the storage section below erases it. What it must not do is pick the
+  # *wrong* disk, so:
+  #
+  #   - removable devices are excluded, which keeps the installer's own USB safe
+  #   - the medium this booted from is excluded by name as well, in case it does
+  #     not report itself as removable
+  #   - **if there is more than one candidate, nothing is wiped at all**
+  #
+  # That last rule is the important one. A machine with one disk is the machine
+  # Homebase is for, and there the target is unambiguous. A machine with two is
+  # exactly where a guess could destroy something somebody wanted, so it does not
+  # guess — it leaves the disk alone and lets the installer proceed as it would
+  # have. The slow probe is a worse experience than a fast one; wiping the wrong
+  # disk is a different category of thing.
+  early-commands:
+    - |
+      set -u
+      medium=$(findmnt -no SOURCE /cdrom 2>/dev/null | sed 's/p\?[0-9]*$//' \
+               | xargs -r basename || true)
+      candidates=$(lsblk -dno NAME,RM,TYPE \
+                   | awk -v m="$medium" '$3=="disk" && $2==0 && $1!=m {print $1}')
+      count=$(printf '%s\n' "$candidates" | grep -c . || true)
+      if [ "$count" = "1" ]; then
+          target="/dev/$candidates"
+          echo "homebase: clearing $target before probing" >&2
+          wipefs -a "$target" >&2 || true
+          sgdisk --zap-all "$target" >&2 || true
+          partprobe "$target" >&2 || true
+      else
+          echo "homebase: $count candidate disks, leaving them alone" >&2
+      fi
+
   # The whole disk. No resizing, no dual boot, nothing preserved.
   #
   # The device is deliberately not named: a seed that says /dev/sda is right on
@@ -193,6 +236,47 @@ autoinstall:
     - rm -f /target/etc/update-motd.d/10-help-text
     - rm -f /target/etc/update-motd.d/50-motd-news
     - rm -f /target/etc/update-motd.d/00-header
+
+    # The network configuration must not name an interface.
+    #
+    # subiquity writes the name it saw during installation — enp5s0, and that
+    # name is not a property of the card. The kernel derives it from the PCI
+    # slot, and a slot number moves whenever the enumeration does.
+    #
+    # The first real laptop demonstrated it. Its wireless card was not detected
+    # on one boot, the ethernet moved from slot 5 to slot 4, and a configuration
+    # naming enp5s0 produced a server that booted perfectly, brought no
+    # interface up, obtained no address, and could not be reached at all. The
+    # card was fine; it came back on the next boot with its old name. Anybody
+    # without a keyboard and a screen to hand would have called that a dead
+    # server.
+    #
+    # Matched on the kind of device instead. Two entries because a machine with
+    # predictable naming switched off calls them eth0, and `optional` so a boot
+    # with no cable in does not wait ninety seconds for one.
+    - rm -f /target/etc/netplan/50-cloud-init.yaml
+    - |
+      cat > /target/etc/netplan/50-homebase.yaml <<'NETPLAN'
+      # Written by the Homebase installer.
+      #
+      # Any wired device, rather than the name one happened to have at install
+      # time — a name comes from the PCI slot order and changes when the
+      # hardware enumeration does.
+      network:
+        version: 2
+        ethernets:
+          wired:
+            match:
+              name: "en*"
+            dhcp4: true
+            optional: true
+          wired-legacy:
+            match:
+              name: "eth*"
+            dhcp4: true
+            optional: true
+      NETPLAN
+    - chmod 600 /target/etc/netplan/50-homebase.yaml
 
     # A firewall that allows what the dashboard needs and nothing else. The
     # server sits on a home network with a smart television and a doorbell

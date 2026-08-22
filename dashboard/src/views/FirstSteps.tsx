@@ -17,7 +17,7 @@ import { RenameServer } from "../components/RenameServer";
 
 interface Props {
   system: SystemInfo;
-  onGo: (where: "storage" | "backup" | "applications") => void;
+  onGo: (where: "storage" | "apps") => void;
 }
 
 interface Progress {
@@ -99,8 +99,8 @@ export function FirstSteps({ system, onGo }: Props) {
       title: "Install something",
       why: "An application is what makes the server useful — somewhere to keep files, or to watch what is on it.",
       action: (
-        <button className="quiet" onClick={() => onGo("applications")}>
-          Go to Applications
+        <button className="quiet" onClick={() => onGo("apps")}>
+          Go to Apps
         </button>
       ),
     },
@@ -109,8 +109,8 @@ export function FirstSteps({ system, onGo }: Props) {
       title: "Make a backup",
       why: "Nothing here is backed up until you do this. A second disk you can unplug is what stands between a failed drive and losing everything on it.",
       action: (
-        <button className="quiet" onClick={() => onGo("backup")}>
-          Go to Backup
+        <button className="quiet" onClick={() => onGo("storage")}>
+          Go to Storage
         </button>
       ),
     },

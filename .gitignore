@@ -72,3 +72,14 @@ Thumbs.db
 # is committed deliberately.
 .claude/settings.local.json
 bin/
+
+# Research spikes live on their own branches, never on main.
+#
+# `research/` is tracked on perf/qwen38-* and deliberately absent here: it is an
+# experiment in what a Stage 2 agent might run on this hardware, not part of the
+# product, and merging it would put a model lab in the release history.
+#
+# Ignored rather than merely uncommitted because `git add -A` swept the whole
+# directory into an unrelated commit once already — the working tree holds those
+# files whenever anybody has checked out one of those branches.
+research/

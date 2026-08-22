@@ -181,7 +181,7 @@ func (h *harness) signedIn(t *testing.T) map[string]string {
 	t.Helper()
 
 	rec := h.do("POST", "/api/v1/setup",
-		`{"username":"okan","password":"`+goodPassword+`"}`, nil)
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("setup returned %d: %s", rec.Code, rec.Body.String())
 	}

@@ -1,0 +1,48 @@
+{
+  "manifest_version": 1,
+  "revision": 1,
+  "id": "flaresolverr",
+  "name": "FlareSolverr",
+  "summary": "Gets past the anti-bot checks some search sites use, for Prowlarr.",
+  "icon": "🔓",
+  "after_install": "Nothing to open — this has no interface. Tell Prowlarr about it: Settings, Indexers, add a FlareSolverr proxy with the host http://flaresolverr:8191, give it the tag \"cloudflare\", then put that same tag on each indexer that needs it. Only tag the ones that fail, because every request through here drives a real browser and is far slower than a direct one.",
+  "homepage": "https://github.com/FlareSolverr/FlareSolverr",
+  "license": "MIT",
+  "container": {
+    "image": "ghcr.io/flaresolverr/flaresolverr",
+    "version": "v3.3.21",
+    "environment": {
+      "LOG_LEVEL": "info",
+      "TZ": "Etc/UTC"
+    }
+  },
+  "network": {
+    "internal_port": 8191,
+    "protocol": "http",
+    "path": "/"
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/config",
+      "access": "read-write",
+      "description": "Scratch space. Nothing here is worth keeping.",
+      "backup": false
+    }
+  ],
+  "health": {
+    "type": "http",
+    "path": "/health",
+    "interval_seconds": 60,
+    "start_period_seconds": 60
+  },
+  "permissions": {
+    "read_only_root": false
+  },
+  "resources": {
+    "memory_limit_bytes": 1610612736,
+    "memory_minimum_bytes": 536870912,
+    "disk_minimum_bytes": 1073741824
+  }
+}

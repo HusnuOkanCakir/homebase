@@ -1,0 +1,77 @@
+{
+  "manifest_version": 1,
+  "revision": 1,
+  "id": "adguard",
+  "name": "AdGuard Home",
+  "summary": "Blocks adverts and trackers for every device in the house, and stops your provider seeing or faking the names you look up.",
+  "icon": "🛡️",
+  "after_install": "Work through the short setup, leaving both ports as they are, then choose a username and password. Afterwards, under Settings, DNS settings: put https://dns.cloudflare.com/dns-query in the upstream box — that is the part that stops your provider reading and rewriting your lookups — and under Access settings allow only your own network. Nothing is blocked for any device until you point that device at this server. Do one laptop first and live with it for a day.",
+  "homepage": "https://adguard.com/adguard-home.html",
+  "license": "GPL-3.0",
+  "provides": "dns",
+  "container": {
+    "image": "docker.io/adguard/adguardhome",
+    "version": "v0.107.78"
+  },
+  "network": {
+    "internal_port": 3000,
+    "host_port": 3080,
+    "protocol": "http",
+    "path": "/",
+    "reachable_from": "network",
+    "extra_ports": [
+      {
+        "internal_port": 53,
+        "protocol": "udp",
+        "purpose": "The resolver itself. This is what a phone, a laptop or a television asks when it wants to know where a name is."
+      },
+      {
+        "internal_port": 53,
+        "protocol": "tcp",
+        "purpose": "The same resolver over TCP, which is used for answers too large for a single datagram."
+      },
+      {
+        "internal_port": 80,
+        "host_port": 3081,
+        "purpose": "AdGuard's interface after its first-run setup finishes, which moves off the setup port."
+      }
+    ]
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/opt/adguardhome/conf",
+      "access": "read-write",
+      "description": "Its settings: which lists are on, which devices may use it, and where it forwards to.",
+      "backup": true
+    },
+    {
+      "id": "data",
+      "type": "private",
+      "mount_path": "/opt/adguardhome/work",
+      "access": "read-write",
+      "description": "The query log and statistics. A record of every name every device in the house looked up, so it is deliberately not backed up.",
+      "backup": false
+    }
+  ],
+  "health": {
+    "type": "tcp",
+    "interval_seconds": 30,
+    "start_period_seconds": 30
+  },
+  "permissions": {
+    "read_only_root": false,
+    "capabilities": [
+      "NET_BIND_SERVICE"
+    ],
+    "runs_as_root": {
+      "reason": "It refuses to start at all on first launch unless getuid is 0: \"this is the first launch of adguard home; you must run it as administrator\". Docker's cap-add does not reach a non-root user, and --no-permcheck covers a different check. Its storage is private only."
+    }
+  },
+  "resources": {
+    "memory_limit_bytes": 536870912,
+    "memory_minimum_bytes": 134217728,
+    "disk_minimum_bytes": 536870912
+  }
+}

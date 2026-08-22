@@ -21,7 +21,7 @@ import (
 //
 // An allowlist rather than a check for newlines, because an allowlist fails
 // closed. It includes the apostrophe, which is not decoration: an iPhone is
-// called "Okan's iPhone" out of the box, and a device-naming rule that rejects
+// called "Alex's iPhone" out of the box, and a device-naming rule that rejects
 // what the device calls itself is a rule people work around by typing something
 // worse.
 var validDeviceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 '._-]{0,30}$`)
@@ -54,6 +54,20 @@ func RegisterVPNOperations(r *Registry, services *NetworkServices) {
 		Timeout:     2 * time.Minute,
 		Rollback:    "vpn.disable",
 		Handler:     Typed(services.vpnSetup),
+	})
+
+	r.MustRegister(Operation{
+		Name:    "vpn.disable",
+		Summary: "Switch remote access off, keeping the keys.",
+		// Medium. It closes a way in rather than opening one, and it is
+		// reversible without reissuing anything — but it disconnects whoever is
+		// using it, possibly somebody away from home relying on it.
+		Risk:        RiskMedium,
+		Permissions: []string{"network.modify"},
+		Confirm:     ConfirmRequired,
+		Timeout:     1 * time.Minute,
+		Rollback:    "vpn.setup, with the same name",
+		Handler:     Typed(services.vpnDisable),
 	})
 
 	r.MustRegister(Operation{
@@ -112,6 +126,30 @@ func RegisterVPNOperations(r *Registry, services *NetworkServices) {
 }
 
 func (s *NetworkServices) vpnStatus(ctx context.Context, _ struct{}) (any, error) {
+	return readVPNStatus(ctx), nil
+}
+
+// vpnDisable stops remote access and closes the port behind it.
+//
+// The keys stay. "Switch this off" and "forget every device I have set up" are
+// different intentions, and collapsing them would mean that turning the VPN off
+// for an afternoon costs re-issuing a configuration to every phone in the house.
+//
+// This existed as a promise before it existed as an operation: `vpn.setup`
+// named `vpn.disable` as its rollback and nothing implemented it, so there was
+// no way to close a port that setup opens to the whole internet.
+func (s *NetworkServices) vpnDisable(ctx context.Context, _ struct{}) (any, error) {
+	if err := disableVPN(ctx); err != nil {
+		return nil, &Error{
+			Code:        "vpn.disable_failed",
+			Message:     "Homebase could not switch remote access off.",
+			Detail:      err.Error(),
+			Recoverable: true,
+			Recovery: "Check `systemctl status wg-quick@wg0`. The port is closed " +
+				"either way, so nothing can reach it from outside.",
+			Status: 500,
+		}
+	}
 	return readVPNStatus(ctx), nil
 }
 

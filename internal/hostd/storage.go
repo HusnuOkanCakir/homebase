@@ -446,13 +446,47 @@ func readMounts(path string) map[string]mount {
 			continue
 		}
 
-		result[filepath.Base(source)] = mount{
+		device := filepath.Base(source)
+		candidate := mount{
 			point:    point,
 			readOnly: hasOption(options, "ro"),
 			source:   source,
 		}
+
+		// A device appears here once per mount, and the root filesystem appears
+		// several times: `PrivateTmp=yes` on hostd's own unit gives it a private
+		// /tmp and /var/tmp backed by the same disk, and every bind mount adds
+		// another line.
+		//
+		// This used to keep whichever came last, which on a real machine is
+		// whatever systemd happened to mount most recently — so the system disk
+		// was reported as mounted at /var/tmp. It looked fine in the lab, where
+		// fewer services are running, and absurd on the first laptop Homebase
+		// was installed on.
+		//
+		// Keeping the *best* mount rather than the last one is deterministic
+		// regardless of ordering.
+		if existing, seen := result[device]; !seen || betterMount(candidate, existing) {
+			result[device] = candidate
+		}
 	}
 	return result
+}
+
+// betterMount says which of two mounts of the same device to report.
+//
+// `/` wins outright: a disk carrying the running system is that, whatever else
+// it is also mounted as. Otherwise the shortest path wins, which prefers
+// /boot/efi over a bind mount of something inside it, and is stable rather than
+// depending on the order of a file.
+func betterMount(candidate, existing mount) bool {
+	if existing.point == "/" {
+		return false
+	}
+	if candidate.point == "/" {
+		return true
+	}
+	return len(candidate.point) < len(existing.point)
 }
 
 func hasOption(options, want string) bool {

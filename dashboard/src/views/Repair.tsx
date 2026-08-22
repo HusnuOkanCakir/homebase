@@ -61,7 +61,7 @@ export function Repair({ serverName }: Props) {
   return (
     <>
       {error ? (
-        <Message tone="error" title={error.title} detail={error.detail} recovery={error.recovery} />
+        <Message tone="error" title={error.title} technical={error.detail} recovery={error.recovery} />
       ) : null}
 
       {/* --- 1. Find out what is wrong ------------------------------------- */}

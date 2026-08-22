@@ -192,14 +192,18 @@ func RegisterAppOperations(r *Registry, services *AppServices) {
 	r.MustRegister(Operation{
 		Name:    "app.assign_storage",
 		Summary: "Choose which disk holds one of an application's storage locations.",
-		// Medium: it changes where an application's files live, taking effect the
-		// next time it starts. Nothing is moved and nothing is deleted — data
-		// already written to the old location stays where it is.
+		// Medium: it changes where an application's files live. Nothing is moved
+		// and nothing is deleted — data already written to the old location
+		// stays where it is.
 		Risk:        RiskMedium,
 		Permissions: []string{"apps.manage", "storage.modify"},
 		Confirm:     ConfirmRequired,
-		Timeout:     30 * time.Second,
-		Handler:     Typed(services.assignStorage),
+		// Three minutes, not thirty seconds. This used to record an assignment
+		// and nothing else, which is instant; it now rebuilds the container,
+		// because Docker fixes bind mounts at creation and a restart keeps the
+		// old ones. Stopping alone is allowed thirty seconds of grace.
+		Timeout: 3 * time.Minute,
+		Handler: Typed(services.assignStorage),
 	})
 
 	r.MustRegister(Operation{
@@ -254,6 +258,7 @@ type AppStatus struct {
 	ID      string   `json:"id"`
 	Name    string   `json:"name"`
 	Summary string   `json:"summary,omitempty"`
+	Icon    string   `json:"icon,omitempty"`
 	State   AppState `json:"state"`
 
 	// Installed is null where the state is unknown. false is a claim that it is
@@ -274,6 +279,88 @@ type AppStatus struct {
 	// DataPath is where this application's data lives, so a user can be told
 	// what uninstalling will leave behind.
 	DataPath string `json:"data_path"`
+
+	// HostPort is the port on this machine the application answers on, read
+	// back from the runtime rather than assumed — a container asked to take any
+	// free port only reveals which one afterwards.
+	//
+	// Nothing reported this until it was noticed that nothing could: an
+	// application would install, start, pass its health check and be reachable
+	// at an address no part of Homebase would tell anybody.
+	HostPort int `json:"host_port,omitempty"`
+
+	// ReachableFromNetwork distinguishes an application other machines can open
+	// from one bound to loopback. Without it, an address is worse than no
+	// address: 127.0.0.1:32768 is a real place that is not there from the
+	// laptop somebody is reading it on.
+	ReachableFromNetwork bool `json:"reachable_from_network"`
+
+	// Path is the base path the web interface is served under.
+	Path string `json:"path,omitempty"`
+
+	// Services is what each supporting container is doing, for an application
+	// made of more than one. Reported because "Immich is not running" and
+	// "Immich's database is not running" need different answers, and without
+	// this they produce the same one.
+	Services []ServiceState `json:"services,omitempty"`
+
+	// AfterInstall is what is still left for a person to do — carried on the
+	// status rather than only on the install result, so that somebody who
+	// closed the terminal can still find out.
+	AfterInstall string `json:"after_install,omitempty"`
+
+	// URL is where to open it, composed here so that there is one answer rather
+	// than one per interface. Empty until the application is running and has a
+	// port, because an address that is not yet listening is worse than none.
+	URL string `json:"url,omitempty"`
+
+	// Elevation is the privilege this application was granted beyond the
+	// default, and why — empty for the ones that need none.
+	//
+	// Reported because the schema says it is. Both root permissions justify
+	// themselves partly on being "declared per application and shown to whoever
+	// installs it", and for a while the second half of that was not true of any
+	// of them: the reason was written in a manifest nobody reading the
+	// dashboard could see. A relaxation that is only visible in a file the user
+	// does not have is not a disclosure.
+	Elevation *AppElevation `json:"elevation,omitempty"`
+}
+
+// AppElevation is a privilege an application holds that most do not.
+type AppElevation struct {
+	// Kind is "starts_as_root" or "runs_as_root". The distinction is the whole
+	// point: one gives up root as soon as it has started, the other never does.
+	Kind string `json:"kind"`
+
+	// Summary is one sentence, written here rather than in the manifest, so
+	// that what a person is told does not depend on how carefully a manifest
+	// author phrased it.
+	Summary string `json:"summary"`
+
+	// Reason is the manifest's own words, for somebody who wants them.
+	Reason string `json:"reason"`
+}
+
+// describeElevation turns a manifest's declaration into something worth showing.
+func describeElevation(permissions ManifestPermissions) *AppElevation {
+	switch {
+	case permissions.StartsAsRoot != nil:
+		return &AppElevation{
+			Kind: "starts_as_root",
+			Summary: "Starts with administrator rights inside its container, then gives " +
+				"them up. It can only ever reach the folders Homebase gives it.",
+			Reason: permissions.StartsAsRoot.Reason,
+		}
+	case permissions.RunsAsRoot != nil:
+		return &AppElevation{
+			Kind: "runs_as_root",
+			Summary: "Keeps administrator rights inside its container the whole time it " +
+				"is running. It is only allowed a folder of its own — it cannot be " +
+				"pointed at your files.",
+			Reason: permissions.RunsAsRoot.Reason,
+		}
+	}
+	return nil
 }
 
 // --- Handlers ----------------------------------------------------------------
@@ -307,16 +394,80 @@ func (s *AppServices) status(ctx context.Context, params AppRef) (any, error) {
 	return s.statusFor(ctx, manifest, s.docker.ping(ctx) == nil), nil
 }
 
+// appURL is where to open an application.
+//
+// The machine's own name rather than an address, because the address changes
+// when the router feels like it and the name does not. `.local` is what the rest
+// of Homebase advertises itself as and what the installer tells people to type.
+//
+// A loopback application gets a loopback URL, which is correct and is why the
+// reachable flag travels beside it: 127.0.0.1:32768 is a real place, and it is
+// not there from the laptop somebody is reading it on.
+func appURL(manifest Manifest, hostPort int) string {
+	if hostPort == 0 {
+		return ""
+	}
+	scheme := manifest.Network.Protocol
+	if scheme != "http" && scheme != "https" {
+		// DLNA and the rest are not things a browser opens.
+		return ""
+	}
+	host := "127.0.0.1"
+	if manifest.Network.PublishedToNetwork() {
+		if name, err := os.Hostname(); err == nil && name != "" {
+			host = name + ".local"
+		}
+	}
+	path := manifest.Network.Path
+	if path == "" {
+		path = "/"
+	}
+	return fmt.Sprintf("%s://%s:%d%s", scheme, host, hostPort, path)
+}
+
+// appURLPlaceholder is the one thing a manifest may ask Homebase to fill in.
+//
+// Stremio needs it. Its interface runs in the browser and talks to a streaming
+// server in the same container, so it has to be told an address that works from
+// *outside* the machine — and that address contains the server's name, which a
+// file in the catalogue cannot know and which changes when somebody renames it.
+const appURLPlaceholder = "{{APP_URL}}"
+
+// expandManifestValue fills in the placeholders a manifest may use.
+//
+// Deliberately one placeholder, computed here, not a template language. The
+// value is composed by Homebase from what it already knows; a manifest cannot
+// name a variable, read the environment, or reach anything it was not given.
+// The point of ADR-0012 is that a manifest describes an application rather than
+// programming the machine, and a general substitution facility is the first step
+// away from that.
+func expandManifestValue(value string, manifest Manifest) string {
+	if !strings.Contains(value, appURLPlaceholder) {
+		return value
+	}
+	// Empty for an application on loopback, which is correct: there is no
+	// address other machines could use, and inventing one would be worse than
+	// the application noticing it was given nothing.
+	return strings.ReplaceAll(value, appURLPlaceholder,
+		appURL(manifest, manifest.Network.PublishedPort()))
+}
+
 func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp bool) AppStatus {
 	status := AppStatus{
 		ID:           manifest.ID,
 		Name:         manifest.Name,
 		Summary:      manifest.Summary,
+		Icon:         manifest.Icon,
+		Elevation:    describeElevation(manifest.Permissions),
 		State:        StateUnknown,
 		Image:        manifest.Container.Image,
 		Version:      manifest.Container.Version,
 		InternalPort: manifest.Network.InternalPort,
 		DataPath:     s.appDataDir(manifest.ID),
+
+		ReachableFromNetwork: manifest.Network.PublishedToNetwork(),
+		Path:                 manifest.Network.Path,
+		AfterInstall:         manifest.AfterInstall,
 	}
 
 	if !dockerUp {
@@ -338,6 +489,11 @@ func (s *AppServices) statusFor(ctx context.Context, manifest Manifest, dockerUp
 	}
 
 	status.Installed = boolPtr(true)
+	status.Services = s.serviceStates(ctx, manifest)
+	if manifest.Network.InternalPort > 0 {
+		_, status.HostPort = state.publishedPort(manifest.Network.InternalPort)
+		status.URL = appURL(manifest, status.HostPort)
+	}
 	switch {
 	// Checked before Running, because Docker reports both while a container is
 	// being brought back after it exited. An application crash-looping every two
@@ -440,7 +596,7 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 	// have somewhere to land. Owned by the service account, mode 0750.
 	// The account this application runs as, and which owns everything it can
 	// reach. Created on first install and reused afterwards.
-	as, err := ensureAppOwner(s.stateDir, manifest.ID)
+	as, err := s.effectiveOwner(manifest)
 	if err != nil {
 		return nil, internalError("preparing an account for " + manifest.Name + ": " + err.Error())
 	}
@@ -450,12 +606,25 @@ func (s *AppServices) install(ctx context.Context, params AppRef) (any, error) {
 		return nil, err
 	}
 
+	// Everything the application needs, before the application. A database that
+	// comes up after the thing using it produces a crash loop whose reason is
+	// visible only in a log nobody is reading — and the network has to exist
+	// before a container can be created on it at all.
+	if err := s.startServices(ctx, manifest, as); err != nil {
+		return nil, err
+	}
+
 	config := s.buildContainer(manifest, binds, as)
 	if _, err := s.docker.createContainer(ctx, name, config); err != nil {
 		return nil, wrapDockerError(err,
 			"create_failed",
 			"Homebase downloaded "+manifest.Name+" but could not set it up.",
 			"Try installing it again. If it keeps failing, check the server logs.")
+	}
+
+	// Before it starts, so its first connection already resolves.
+	if err := s.connectExtraNetworks(ctx, manifest); err != nil {
+		return nil, err
 	}
 
 	if err := s.docker.startContainer(ctx, name); err != nil {
@@ -540,6 +709,14 @@ func (s *AppServices) restart(ctx context.Context, params AppRef) (any, error) {
 		return nil, err
 	}
 
+	// The supporting containers first, and idempotently: a restart is also how
+	// somebody recovers an application whose database stopped.
+	if as, err := s.effectiveOwner(manifest); err == nil {
+		if err := s.startServices(ctx, manifest, as); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := s.docker.restartContainer(ctx, containerName(manifest.ID), stopGraceSeconds); err != nil {
 		return nil, wrapDockerError(err, "restart_failed",
 			manifest.Name+" would not restart.",
@@ -573,6 +750,16 @@ func (s *AppServices) uninstall(ctx context.Context, params AppRef) (any, error)
 			"Homebase could not remove "+manifest.Name+".", "")
 	}
 
+	// Everything the application needed, and the network they shared. After the
+	// application, because a network with a container still attached cannot be
+	// removed — and Docker reports that as the network being in use by
+	// something else, which sends somebody looking in the wrong place.
+	//
+	// Failures here are reported and not fatal: the application is already
+	// gone, and refusing to say so because a database container lingered would
+	// leave somebody unable to tell what state their machine is in.
+	leftBehind := s.removeServices(ctx, manifest)
+
 	// The container is gone, so there is no state left to describe. Leaving the
 	// marker would make a fresh install of the same application report itself as
 	// stopped before anybody had stopped it.
@@ -587,8 +774,12 @@ func (s *AppServices) uninstall(ctx context.Context, params AppRef) (any, error)
 	return map[string]any{
 		"id":        manifest.ID,
 		"installed": false,
-		"data_kept": kept,
-		"data_path": dataPath,
+		// Reported rather than fatal. The application is gone either way, and
+		// refusing to say so because a database container lingered would leave
+		// somebody unable to tell what state their machine is in.
+		"left_behind": leftBehind,
+		"data_kept":   kept,
+		"data_path":   dataPath,
 		"message": manifest.Name + " has been removed. Its data has been kept, so " +
 			"reinstalling will pick up where you left off.",
 	}, nil
@@ -708,6 +899,9 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 		// The application's own account, which is also what owns every file it
 		// can reach. Without this the container runs as root with no
 		// CAP_DAC_OVERRIDE and cannot write its own data directory.
+		//
+		// Left empty for an image that starts as root, which is the whole point
+		// of that declaration — see below.
 		User: as.String(),
 		Cmd:  manifest.Container.Command,
 		Labels: map[string]string{
@@ -737,17 +931,93 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 	}
 
 	for key, value := range manifest.Container.Environment {
-		config.Env = append(config.Env, key+"="+value)
+		config.Env = append(config.Env, key+"="+expandManifestValue(value, manifest))
+	}
+
+	config.HostConfig.GroupAdd = supplementaryGroups(manifest)
+
+	// An image that cannot run as an arbitrary user.
+	//
+	// Two declarations reach here and the container they build is identical, so
+	// the code is. What differs is what the manifest promised and what was
+	// checked against it, both of which happened before this point:
+	//
+	//   starts_as_root — the entrypoint corrects ownership of what it was given
+	//   and drops to PUID and PGID. Homebase supplies those, so the files it
+	//   creates belong to the same uid and shared group as everything else here,
+	//   and the elevation lasts only as long as the entrypoint does.
+	//
+	//   runs_as_root — it does not drop, and never will. Accepted only from an
+	//   application whose every storage slot is private; catalogue validation
+	//   refuses the combination that would matter, which is permanent root over
+	//   a folder somebody else's files are in.
+	//
+	// Five capabilities either way, named, and nothing else: CapDrop=ALL still
+	// runs first. An image granted this can rewrite ownership anywhere in its
+	// own bind mounts and become any user inside itself; it cannot reach a path
+	// that is not mounted into it, which is what bounds the grant.
+	//
+	// PUID and PGID are passed in both cases. An image that ignores them is
+	// unaffected, and an image that honours them was going to be told anyway —
+	// there is nothing to gain by working out which this is a second time.
+	if manifest.Permissions.Elevated() {
+		config.User = ""
+		config.HostConfig.CapAdd = append(config.HostConfig.CapAdd, rootCapabilities...)
+		config.Env = append(config.Env,
+			"PUID="+strconv.Itoa(as.uid),
+			"PGID="+strconv.Itoa(as.gid),
+		)
+	}
+
+	// The application's own network, when it has supporting containers to
+	// reach. Named rather than the default bridge so that "database" resolves
+	// to its database and to nothing else on the machine.
+	// Its own network always, plus one for each application it reaches.
+	//
+	// Docker attaches only the first network at creation, so the primary one is
+	// named in NetworkMode and the rest are connected once the container exists.
+	config.HostConfig.NetworkMode = networkName(manifest.ID)
+	config.NetworkingConfig = &networkingConfig{
+		EndpointsConfig: map[string]endpointConfig{
+			networkName(manifest.ID): {Aliases: []string{manifest.ID}},
+		},
 	}
 
 	if manifest.Network.InternalPort > 0 && !manifest.Network.HostNetwork {
 		port := fmt.Sprintf("%d/tcp", manifest.Network.InternalPort)
 		config.ExposedPorts = map[string]struct{}{port: {}}
-		config.HostConfig.PortBindings = map[string][]portBinding{
-			// Bound to localhost, not 0.0.0.0. Applications are reached through
-			// Homebase, which is what applies authentication — an application
-			// published straight onto the LAN is one nothing is guarding.
-			port: {{HostIP: "127.0.0.1", HostPort: "0"}},
+
+		// Loopback on a port Docker picks, unless the manifest says this
+		// application is reachable from the network — which only an application
+		// with its own accounts may say. See ManifestNetwork.ReachableFrom.
+		binding := portBinding{HostIP: "127.0.0.1", HostPort: "0"}
+		if manifest.Network.PublishedToNetwork() {
+			// A fixed port, and the one the application is known by: Jellyfin is
+			// 8096 to every client that looks for it, and a port that changes
+			// each time the container is recreated is an address nobody can
+			// write down, bookmark, or put in a television.
+			binding = portBinding{
+				HostIP:   "0.0.0.0",
+				HostPort: strconv.Itoa(manifest.Network.PublishedPort()),
+			}
+		}
+		config.HostConfig.PortBindings = map[string][]portBinding{port: {binding}}
+
+		// The rest, for an application that answers on more than one — a DNS
+		// server on 53 with a web interface somewhere else.
+		//
+		// Only when the application is published at all. An extra port on a
+		// loopback application would be a second random port nothing reports,
+		// which is the fault ReachableFrom was added to fix.
+		if manifest.Network.PublishedToNetwork() {
+			for _, extra := range manifest.Network.ExtraPorts {
+				key := fmt.Sprintf("%d/%s", extra.InternalPort, extra.Transport())
+				config.ExposedPorts[key] = struct{}{}
+				config.HostConfig.PortBindings[key] = []portBinding{{
+					HostIP:   "0.0.0.0",
+					HostPort: strconv.Itoa(extra.Published()),
+				}}
+			}
 		}
 	}
 	if manifest.Network.HostNetwork {
@@ -796,6 +1066,104 @@ func (s *AppServices) buildContainer(manifest Manifest, binds []string, as owner
 	}
 
 	return config
+}
+
+// effectiveOwner is the account an application runs as.
+//
+// The primary group is the service group for an application that has been given
+// a folder somebody else also writes into — and that is the difference between
+// sharing a folder and merely being able to read one.
+//
+// A supplementary group lets a process *read* what the group owns. It does not
+// change what the process *creates*: a new file takes the writer's primary
+// group, so qBittorrent writing into the shared downloads folder produced files
+// owned by qBittorrent's own group, which Jellyfin could read and not delete,
+// and the file server could read and not replace. The error was
+// "Access to the path '/media/downloads/shows' is denied", from an application
+// that had been given that path.
+//
+// The set-group-id bit on the directory is the usual remedy and is unavailable:
+// hostd's unit sets RestrictSUIDSGID=yes and the kernel refuses it. Making the
+// group primary achieves the same thing and needs no bit.
+//
+// An application with only private storage keeps a group of its own, because
+// nothing else has any business in its files.
+func (s *AppServices) effectiveOwner(manifest Manifest) (owner, error) {
+	as, err := ensureAppOwner(s.stateDir, manifest.ID)
+	if err != nil {
+		return owner{}, err
+	}
+	for _, storage := range manifest.Storage {
+		if storage.Type != "user-selected" {
+			continue
+		}
+		gid, err := serviceGroupID()
+		if err != nil {
+			// The group is created by the package, so its absence means a
+			// broken installation rather than a machine without sharing. The
+			// application still runs; it simply cannot share.
+			break
+		}
+		as.gid = gid
+		break
+	}
+	return as, nil
+}
+
+// supplementaryGroups are the host groups an application's process joins.
+//
+// A container runs as a uid of its own with no groups at all, which is the right
+// default and is why this exists: everything it is allowed to reach beyond its
+// own files is reachable only through group membership, and each one below is
+// there because without it a declared permission did nothing.
+//
+// Nothing is added that the manifest did not already ask for. This grants access
+// to what a manifest declares; it does not decide what may be declared.
+func supplementaryGroups(manifest Manifest) []string {
+	var gids []string
+	add := func(name string) {
+		group, err := user.LookupGroup(name)
+		if err != nil {
+			return
+		}
+		for _, existing := range gids {
+			if existing == group.Gid {
+				return
+			}
+		}
+		gids = append(gids, group.Gid)
+	}
+
+	// The service group, for an application given a folder somebody else also
+	// writes into. User-selected storage belongs to the group rather than to the
+	// application, so the file server and the backup can reach it too — without
+	// this, pointing Jellyfin at a shared folder produced a media server that
+	// could see the directory and nothing inside it.
+	for _, storage := range manifest.Storage {
+		if storage.Type == "user-selected" {
+			add(serviceAccount)
+			break
+		}
+	}
+
+	// The groups that own the device nodes.
+	//
+	// Passing /dev/dri through is not the same as being able to open it: the
+	// render nodes are root:render and the cards are root:video, and a container
+	// that is a member of neither gets "Failed to open the given device" from
+	// every one of them. Jellyfin declared the device, was given the device, and
+	// could not use it — hardware transcoding was impossible on every
+	// installation, silently, with the manifest saying it was available.
+	for _, device := range manifest.Permissions.Devices {
+		switch device {
+		case "dri":
+			add("render")
+			add("video")
+		case "dvb":
+			add("video")
+		}
+	}
+	return gids
 }
 
 // deviceePaths maps the schema's device roles to host paths. A manifest declares
@@ -919,13 +1287,13 @@ func (s *AppServices) requireStorage(manifest Manifest) error {
 // Split from locateUserSelected because requireStorage runs before the image is
 // downloaded, purely to answer "can this run at all" — and a check that creates
 // directories and changes their ownership is not a check.
-func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment, as owner) (string, error) {
+func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestStorage, assignments map[string]Assignment, _ owner) (string, error) {
 	hostPath, err := s.locateUserSelected(manifest, storage, assignments)
 	if err != nil {
 		return "", err
 	}
 
-	if err := os.MkdirAll(hostPath, 0o750); err != nil {
+	if err := os.MkdirAll(hostPath, 0o775); err != nil {
 		return "", &Error{
 			Code:        "app.storage_unavailable",
 			Message:     "Homebase could not use that disk for " + manifest.Name + ".",
@@ -936,10 +1304,21 @@ func (s *AppServices) prepareUserSelected(manifest Manifest, storage ManifestSto
 		}
 	}
 	if os.Geteuid() == 0 {
-		// Recursive: on a machine that installed this application before it had
-		// an account of its own, the files are still owned by the shared
-		// service account and the container could not read them.
-		if err := giveTo(hostPath, as); err != nil {
+		// Shared with the service group rather than given to the application.
+		//
+		// This used to hand the whole tree to the application's own account,
+		// recursively. That is right for data the application owns and wrong
+		// for this: user-selected storage is by definition a place the *user*
+		// also uses. Pointing Jellyfin at the folder shared over SMB took that
+		// folder away from the file server — the directories became the
+		// application's, and copying a film into them from a laptop stopped
+		// working with a permission error at the far end.
+		//
+		// The group everything on this server shares is `homebase`. The
+		// application's account is a member of it, so it can read and write
+		// here; Samba forces the same group on what it creates; and neither
+		// takes the folder from the other.
+		if err := shareWithServiceGroup(hostPath); err != nil {
 			return "", internalError("setting ownership on " + hostPath + ": " + err.Error())
 		}
 	}
@@ -976,8 +1355,8 @@ func (s *AppServices) locateUserSelected(manifest Manifest, storage ManifestStor
 			Message:     manifest.Name + " needs somewhere to keep its files.",
 			Detail:      described,
 			Recoverable: true,
-			Recovery: "Choose a disk for " + manifest.Name + " in the storage " +
-				"settings, then try again.",
+			Recovery: "Choose where " + manifest.Name + " should keep its files, " +
+				"then try again. This server's own disk is one of the choices.",
 			Status: 409,
 		}
 	}
@@ -1188,6 +1567,53 @@ type AssignStorageParams struct {
 	StorageID string `json:"storage_id"`
 	// Location is a managed storage location's id.
 	Location string `json:"location"`
+
+	// Folder is where under that location to look, and is the whole point of
+	// having a media server and file sharing on the same machine: the folder a
+	// laptop copies films into and the folder Jellyfin reads have to be the same
+	// folder, or somebody is copying everything twice.
+	//
+	// Empty means a directory named after the application, which is the right
+	// default for data the application owns and the wrong one for a library
+	// somebody else fills.
+	Folder string `json:"folder,omitempty"`
+}
+
+// storageFolder validates a folder inside a location.
+//
+// The result becomes a path handed to a container as a bind mount, so it is
+// checked rather than trusted: anything that could climb out of the location is
+// refused, and so is anything absolute. `filepath.Clean` is not enough on its
+// own — it resolves "a/../../etc" to "../etc", which is still an escape.
+func storageFolder(app, folder string) (string, error) {
+	folder = strings.Trim(strings.TrimSpace(folder), "/")
+	if folder == "" {
+		return app, nil
+	}
+	cleaned := filepath.Clean(folder)
+	if cleaned == "." || strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
+		return "", &Error{
+			Code:        "app.invalid_folder",
+			Message:     "That is not a folder on the disk.",
+			Detail:      folder,
+			Recoverable: true,
+			Recovery:    "Give a folder inside the disk, such as \"shares\" or \"shares/films\".",
+			Status:      400,
+		}
+	}
+	for _, part := range strings.Split(cleaned, "/") {
+		if part == ".." {
+			return "", &Error{
+				Code:        "app.invalid_folder",
+				Message:     "That is not a folder on the disk.",
+				Detail:      folder,
+				Recoverable: true,
+				Recovery:    "Give a folder inside the disk, such as \"shares\".",
+				Status:      400,
+			}
+		}
+	}
+	return cleaned, nil
 }
 
 // AppStorageSlot describes one of an application's declared storage locations
@@ -1212,7 +1638,7 @@ type AppStorageSlot struct {
 	Path string `json:"path,omitempty"`
 }
 
-func (s *AppServices) assignStorage(_ context.Context, params AssignStorageParams) (any, error) {
+func (s *AppServices) assignStorage(ctx context.Context, params AssignStorageParams) (any, error) {
 	manifest, err := s.manifest(params.ID)
 	if err != nil {
 		return nil, err
@@ -1251,17 +1677,111 @@ func (s *AppServices) assignStorage(_ context.Context, params AssignStorageParam
 		}
 	}
 
-	if err := s.storage.Assign(manifest.ID, slot.ID, params.Location, manifest.ID); err != nil {
+	folder, err := storageFolder(manifest.ID, params.Folder)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.storage.Assign(manifest.ID, slot.ID, params.Location, folder); err != nil {
 		return nil, err
 	}
 
+	// The container is rebuilt, not restarted.
+	//
+	// Docker fixes bind mounts when a container is created, so restarting one
+	// keeps the directories it was built with. This used to report that the
+	// change would "take effect the next time it starts", which was false: an
+	// application given a different disk went on reading the old one for ever,
+	// through any number of restarts, with nothing anywhere saying so.
+	//
+	// Only the container is replaced. No data is touched, on the old location or
+	// the new one — moving files is a different intention and is not this
+	// operation's to take.
+	rebuilt, err := s.rebuildContainer(ctx, manifest)
+	if err != nil {
+		return nil, err
+	}
+
+	message := manifest.Name + " will use that disk the next time it is installed."
+	if rebuilt {
+		message = manifest.Name + " is using that disk now. Anything it had " +
+			"already saved is still where it was."
+	}
 	return map[string]any{
 		"id":         manifest.ID,
 		"storage_id": slot.ID,
 		"location":   params.Location,
-		"message": manifest.Name + " will use that disk. " +
-			"It takes effect the next time it starts.",
+		"folder":     folder,
+		"rebuilt":    rebuilt,
+		"message":    message,
 	}, nil
+}
+
+// rebuildContainer replaces an application's container with one built from the
+// current manifest and the current storage assignments.
+//
+// Reports whether there was one to replace. An application that is not installed
+// is not an error here: the assignment is recorded and will be used when it is.
+func (s *AppServices) rebuildContainer(ctx context.Context, manifest Manifest) (bool, error) {
+	if err := s.docker.ping(ctx); err != nil {
+		return false, err
+	}
+	name := containerName(manifest.ID)
+	state, err := s.docker.inspectContainer(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	if state == nil {
+		return false, nil
+	}
+	wasRunning := state.State.Running
+
+	as, err := s.effectiveOwner(manifest)
+	if err != nil {
+		return false, internalError("preparing an account for " + manifest.Name + ": " + err.Error())
+	}
+	// The new directories are created before the old container goes, so a
+	// failure here leaves the application exactly as it was.
+	binds, err := s.prepareStorage(manifest, as)
+	if err != nil {
+		return false, err
+	}
+
+	// The network and the supporting containers, which a rebuild must not lose:
+	// removing the application does not remove them, but a machine that has
+	// been restarted since may not have them running.
+	if err := s.startServices(ctx, manifest, as); err != nil {
+		return false, err
+	}
+
+	_ = s.docker.stopContainer(ctx, name, stopGraceSeconds)
+	if err := s.docker.removeContainer(ctx, name, true); err != nil {
+		return false, wrapDockerError(err, "rebuild_failed",
+			"Homebase could not rebuild "+manifest.Name+" with the new disk.",
+			"Try again. Nothing was deleted.")
+	}
+
+	config := s.buildContainer(manifest, binds, as)
+	if _, err := s.docker.createContainer(ctx, name, config); err != nil {
+		return false, wrapDockerError(err, "rebuild_failed",
+			manifest.Name+" was removed but could not be set up again.",
+			"Install it again. Its data is still on the server.")
+	}
+	s.forgetStopped(manifest.ID)
+
+	// Left stopped if it was stopped. Changing where an application keeps its
+	// files is not a reason to start something somebody had turned off.
+	if !wasRunning {
+		return true, nil
+	}
+	if err := s.connectExtraNetworks(ctx, manifest); err != nil {
+		return false, err
+	}
+	if err := s.docker.startContainer(ctx, name); err != nil {
+		return false, wrapDockerError(err, "rebuild_failed",
+			manifest.Name+" was rebuilt with the new disk but would not start.",
+			"Check the application's logs for the reason.")
+	}
+	return true, nil
 }
 
 func (s *AppServices) storageStatus(_ context.Context, params AppRef) (any, error) {
@@ -1386,6 +1906,46 @@ func chownToService(path string) error {
 // It is worth its own function because getting it wrong is silent. A root:root
 // 0640 file is perfectly readable by everything that writes it and by every test
 // that runs as root, and invisible to the one account that actually needs it.
+// shareWithServiceGroup makes a directory usable by everything that runs as the
+// service group — applications, the file server, and the backup.
+//
+// Group ownership and the group-write bit, recursively; user ownership is left
+// exactly as it is. That matters: files here may have been written by a person
+// over SMB or by an application, and taking them from whoever wrote them is what
+// this replaced.
+func shareWithServiceGroup(path string) error {
+	gid, err := serviceGroupID()
+	if err != nil {
+		return err
+	}
+	return filepath.Walk(path, func(name string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		// Symlinks are changed, not followed: following one would let a link
+		// planted here redirect a root chown at something outside.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return os.Lchown(name, -1, gid)
+		}
+		if err := os.Chown(name, -1, gid); err != nil {
+			return err
+		}
+		// Group gets whatever the owner has, so a directory the owner can enter
+		// is one the group can enter. Never the set-group-id bit: hostd's unit
+		// sets RestrictSUIDSGID=yes and the kernel refuses it.
+		mode := info.Mode().Perm()
+		return os.Chmod(name, mode|((mode&0o700)>>3))
+	})
+}
+
+func serviceGroupID() (int, error) {
+	group, err := user.LookupGroup(serviceAccount)
+	if err != nil {
+		return 0, fmt.Errorf("looking up the %s group: %w", serviceAccount, err)
+	}
+	return strconv.Atoi(group.Gid)
+}
+
 func giveToServiceGroup(path string) error {
 	group, err := user.LookupGroup(serviceAccount)
 	if err != nil {

@@ -123,6 +123,29 @@ ReadWritePaths=-/etc/netplan
 # line below this block is worth more than the indirection costs.
 ReadWritePaths=-/etc/wireguard -/etc/sysctl.d
 
+# File sharing. hostd owns smb.conf outright rather than adding to it, because
+# partial ownership means two sources of truth for what is on the network, and
+# the failure that produces is a folder still being shared after Homebase was
+# told to stop sharing it.
+#
+# The dash matters here as everywhere in this file: the path does not exist
+# until somebody asks for a share, and a missing directory in ReadWritePaths
+# without it stops the service starting at all.
+ReadWritePaths=-/etc/samba
+
+# Samba's own password database, and only that.
+#
+# The narrow half of a deliberate split. Creating the Unix account behind a
+# file-sharing login needs /etc/passwd and /etc/shadow, which are not here and
+# will not be: a root service that can write the credential store can add a root
+# login. That happens in homebase-share-account.service instead.
+#
+# What is here is the SMB password database, which is the thing this feature
+# manages and nothing else. It means the password itself goes from the caller
+# straight to smbpasswd's standard input and never reaches a disk or a command
+# line — which is worth more than the symmetry of doing both through the unit.
+ReadWritePaths=-/var/lib/samba
+
 # AF_UNIX for the socket; AF_NETLINK for reading network state later. No
 # AF_INET: hostd never talks to the network, and should not be able to.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK

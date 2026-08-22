@@ -1,0 +1,54 @@
+{
+  "manifest_version": 1,
+  "revision": 1,
+  "id": "jellyseerr",
+  "name": "Jellyseerr",
+  "summary": "Browse films and television, ask for what you want, and it appears in Jellyfin.",
+  "icon": "🔍",
+  "after_install": "This is the one to use day to day. Open it, sign in with your Jellyfin account at http://jellyfin:8096, then add Sonarr at http://sonarr:8989 and Radarr at http://radarr:7878 under Settings — each needs its API key, found in its own Settings, General. Then you search for something, press request, and it turns up in Jellyfin.",
+  "homepage": "https://docs.jellyseerr.dev",
+  "license": "MIT",
+  "container": {
+    "image": "docker.io/fallenbagel/jellyseerr",
+    "version": "2.1.0",
+    "environment": {
+      "TZ": "Etc/UTC",
+      "PORT": "5055"
+    }
+  },
+  "network": {
+    "internal_port": 5055,
+    "protocol": "http",
+    "path": "/",
+    "reachable_from": "network",
+    "reaches": [
+      "sonarr",
+      "radarr",
+      "jellyfin"
+    ]
+  },
+  "storage": [
+    {
+      "id": "config",
+      "type": "private",
+      "mount_path": "/app/config",
+      "access": "read-write",
+      "description": "Jellyseerr's own settings, users and request history.",
+      "backup": true
+    }
+  ],
+  "health": {
+    "type": "http",
+    "path": "/",
+    "interval_seconds": 30,
+    "start_period_seconds": 90
+  },
+  "permissions": {
+    "read_only_root": false
+  },
+  "resources": {
+    "memory_limit_bytes": 1073741824,
+    "memory_minimum_bytes": 268435456,
+    "disk_minimum_bytes": 536870912
+  }
+}

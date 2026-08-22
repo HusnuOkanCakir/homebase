@@ -217,7 +217,7 @@ def install_homebase(vm: VM, packages: list[Path]) -> None:
 
     wait_for_api(vm)
     status, body = api(vm, "/setup", "POST",
-                       json.dumps({"username": "okan", "password": PASSWORD}))
+                       json.dumps({"username": "alex", "password": PASSWORD}))
     check(status == 201, f"administrator created ({status})", body)
 
 

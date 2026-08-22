@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -127,13 +128,26 @@ type NewDevice struct {
 	// terminal block characters.
 	QRCode string `json:"qr_code,omitempty"`
 
+	// QRImage is the same code as a PNG data URI, for a browser. Separate from
+	// the terminal drawing because neither can be shown where the other belongs,
+	// and a page that renders block characters as text is not a QR code.
+	QRImage string `json:"qr_image,omitempty"`
+
 	Message string `json:"message"`
 }
 
 // --- Reading -----------------------------------------------------------------------
 
 func readVPNStatus(ctx context.Context) VPNStatus {
-	status := VPNStatus{Port: vpnPort}
+	// An empty list, never nil.
+	//
+	// A nil slice encodes as JSON `null`, and a field that is an array
+	// sometimes and null other times is a trap laid for every client of it:
+	// `status.devices.length` works until the last device is removed and then
+	// takes the whole page down. That is exactly what happened — removing a
+	// device made the network screen unreachable, and the screen was not the
+	// bug.
+	status := VPNStatus{Port: vpnPort, Devices: []VPNDevice{}}
 
 	raw, err := os.ReadFile(wireguardConf)
 	if err != nil {
@@ -145,7 +159,9 @@ func readVPNStatus(ctx context.Context) VPNStatus {
 	status.Hostname = configuredHostname(string(raw))
 	status.Running = unitIsActive(ctx, wireguardUnit)
 
-	status.Devices = devicesFromConfig(string(raw))
+	if devices := devicesFromConfig(string(raw)); devices != nil {
+		status.Devices = devices
+	}
 	applyLiveState(ctx, status.Devices)
 	status.DNS = readDDNSStatus(ctx)
 
@@ -288,12 +304,41 @@ func setUpVPN(ctx context.Context, hostname string) error {
 	}
 	_ = runQuietly(ctx, "sysctl", "-p", "/etc/sysctl.d/99-homebase-vpn.conf")
 
+	// The one port in Homebase opened to the whole internet, and it is opened
+	// deliberately rather than as a side effect.
+	//
+	// Everything else that listens is offered to private address ranges only.
+	// This is remote access: a service reachable from outside the house is the
+	// entire point of it, and a Wireguard port that is closed is a VPN that is
+	// configured, running, and impossible to connect to — which looks from a
+	// phone exactly like a wrong password.
+	//
+	// What makes it defensible is what Wireguard does with an unrecognised
+	// packet, which is nothing at all: no reply, no banner, no way to tell the
+	// port from a closed one without a key.
+	openPort(ctx, vpnPort, "udp", "any", "Homebase remote access")
+
 	if err := runSystemctl(ctx, "enable", "--now", wireguardUnit); err != nil {
 		return err
 	}
 	// Restart rather than start: enable --now does nothing if it was already
 	// running, and the configuration has just changed.
 	return runSystemctl(ctx, "restart", wireguardUnit)
+}
+
+// disableVPN stops the tunnel and closes the port.
+//
+// The port is closed first and unconditionally. If stopping the service then
+// fails, what is left is a Wireguard nothing on the internet can reach, which is
+// the safe half of the pair — the reverse order would leave the door open after
+// somebody was told it had been shut.
+func disableVPN(ctx context.Context) error {
+	closePort(ctx, vpnPort, "udp", "any", "Homebase remote access")
+
+	if err := runSystemctl(ctx, "disable", "--now", wireguardUnit); err != nil {
+		return err
+	}
+	return nil
 }
 
 func serverKeyFrom(config string) string {
@@ -318,6 +363,23 @@ func renderServerConfig(private, hostname string, peers []VPNDevice) string {
 	out.WriteString("ListenPort = " + strconv.Itoa(vpnPort) + "\n")
 	out.WriteString("PrivateKey = " + private + "\n")
 
+	// Everything below is what makes the promise in the client's AllowedIPs
+	// true. Without it a connected device reaches this server and nothing else
+	// — every packet for the rest of the house arrives here and is dropped,
+	// because Ubuntu's firewall forwards nothing by default and because a
+	// printer replying to 10.71.0.2 has no idea where that is.
+	//
+	// It looked like it worked. The tunnel came up, the dashboard loaded, and
+	// only something *other* than the server failed to answer.
+	//
+	// Fixed strings with no caller-supplied content, written by hostd and run by
+	// wg-quick, which is already the thing bringing the interface up. Removed
+	// again on the way down, so a machine with remote access switched off has no
+	// forwarding rules left behind from when it was on.
+	for _, rule := range forwardingRules() {
+		out.WriteString(rule + "\n")
+	}
+
 	for _, peer := range peers {
 		out.WriteString("\n[Peer]\n")
 		out.WriteString("# Name: " + peer.Name + "\n")
@@ -325,6 +387,79 @@ func renderServerConfig(private, hostname string, peers []VPNDevice) string {
 		out.WriteString("AllowedIPs = " + peer.Address + "/32\n")
 	}
 	return out.String()
+}
+
+// RepairVPNForwarding rewrites a Wireguard configuration written before the
+// forwarding rules existed, and is called once at startup.
+//
+// Without it the fix reaches only servers where somebody happens to add or
+// remove a device afterwards, because those are the operations that rewrite the
+// file. A machine set up last month, with devices already paired, would keep the
+// configuration that quietly reaches nothing — and its owner has no reason to
+// suspect the VPN of a fault they would blame on the printer.
+//
+// Deliberately narrow. It adds the missing block and changes nothing else: not
+// the keys, not the peers, not the endpoint. A configuration that already has
+// the rules is left entirely alone, so this is a no-op on every start but the
+// first after an upgrade.
+func RepairVPNForwarding(ctx context.Context, log *slog.Logger) {
+	raw, err := os.ReadFile(wireguardConf)
+	if err != nil {
+		return // Remote access was never set up. Nothing to repair.
+	}
+	config := string(raw)
+	if strings.Contains(config, "PostUp") {
+		return
+	}
+
+	private := serverKeyFrom(config)
+	if private == "" {
+		log.Warn("wireguard is configured but has no server key; leaving it alone")
+		return
+	}
+
+	repaired := renderServerConfig(private, configuredHostname(config),
+		devicesFromConfig(config))
+	if err := writeWireguardFile(wireguardConf, repaired); err != nil {
+		log.Warn("could not add the missing wireguard forwarding rules", "error", err)
+		return
+	}
+
+	// Only restarted if it was already running. Bringing up a tunnel that
+	// somebody had switched off, because its file needed an edit, would be
+	// switching a feature back on without being asked.
+	if unitIsActive(ctx, wireguardUnit+".service") {
+		if err := runSystemctl(ctx, "restart", wireguardUnit); err != nil {
+			log.Warn("wireguard would not restart after adding forwarding", "error", err)
+			return
+		}
+	}
+	log.Info("added the missing wireguard forwarding rules",
+		"devices", len(devicesFromConfig(config)))
+}
+
+// forwardingRules are the PostUp and PostDown lines that let a connected device
+// reach the rest of the house.
+//
+// The NAT rule matches on "not the tunnel" rather than naming the network card.
+// Naming it would be correct exactly until the card is renamed, which on this
+// hardware has already happened once: a wireless card that failed to appear on
+// one boot renumbered the ethernet from enp5s0 to enp4s0 and took the machine
+// off the network entirely. A rule that survives that is worth the slightly
+// looser match.
+func forwardingRules() []string {
+	const nat = "-t nat -%c POSTROUTING -s " + vpnNetwork + ".0/24 ! -o %%i -j MASQUERADE"
+	return []string{
+		// Docker sets this too, which is not a reason to depend on Docker for
+		// it. A machine with no containers must still route the tunnel.
+		"PostUp = sysctl -q -w net.ipv4.ip_forward=1",
+		"PostUp = iptables -A FORWARD -i %i -j ACCEPT",
+		"PostUp = iptables -A FORWARD -o %i -j ACCEPT",
+		"PostUp = iptables " + fmt.Sprintf(nat, 'A'),
+		"PostDown = iptables -D FORWARD -i %i -j ACCEPT",
+		"PostDown = iptables -D FORWARD -o %i -j ACCEPT",
+		"PostDown = iptables " + fmt.Sprintf(nat, 'D'),
+	}
 }
 
 // --- Devices -----------------------------------------------------------------------
@@ -368,17 +503,78 @@ func addDevice(ctx context.Context, name string) (*NewDevice, error) {
 		return nil, err
 	}
 
+	resolver := resolverIsListening()
 	client := renderClientConfig(private, serverPublicKey(ctx),
-		configuredHostname(string(raw)), address)
+		configuredHostname(string(raw)), address, resolver)
+
+	// Said on the way out, because it is the difference between "the house is
+	// not reachable by name" and "this looks broken". Nothing else would tell
+	// them: a tunnel with no resolver comes up, handshakes, and carries traffic.
+	names := ""
+	if !resolver {
+		names = " Names inside the house — " + serverName() + ".local and the " +
+			"like — will not resolve over this tunnel, because nothing on this " +
+			"server answers DNS yet. Addresses work. Installing a name server " +
+			"fixes it for every device already added."
+	}
 
 	return &NewDevice{
 		VPNDevice: device,
 		Config:    client,
 		QRCode:    qrCode(client),
-		Message: "This is the only time this configuration can be shown. Save it, or " +
-			"scan the code, before closing this. If it is lost, remove the device " +
-			"and add it again.",
+		QRImage:   qrImage(client),
+		// "Scan the code" is not enough, and the first person to use this found
+		// out how: a phone's camera decodes a QR code to text, so pointing it at
+		// this one displays the private key on screen and does nothing else.
+		// The scanner that matters is inside the Wireguard app, and saying which
+		// app costs one sentence.
+		Message: "Scan this from inside the Wireguard app — Add tunnel, then " +
+			"Scan from QR code. A phone's own camera will only show you the text. " +
+			"This is the only time the configuration can be shown; if it is lost, " +
+			"remove the device and add it again." + names,
 	}, nil
+}
+
+// resolverIsListening reports whether anything on this server answers DNS on the
+// tunnel's own address.
+//
+// Asked of the address the config would name, not of "is a DNS application
+// installed". An application that is installed and stopped, or installed and
+// half-configured, answers the second question and not the one that matters —
+// and it is the one that matters that decides whether a phone has working name
+// resolution.
+//
+// UDP, because that is what a resolver is asked on. A dial to a UDP port
+// succeeds without proving anything, so this sends a real query and waits: the
+// question is whether an answer comes back, and nothing cheaper establishes it.
+func resolverIsListening() bool {
+	connection, err := net.DialTimeout("udp", net.JoinHostPort(vpnServer, "53"), 2*time.Second)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = connection.Close() }()
+
+	// A minimal query for the root, which every resolver answers and which
+	// carries no information about this machine anywhere.
+	query := []byte{
+		0x00, 0x00, // id, unused: the reply is the only thing on this socket
+		0x01, 0x00, // standard query, recursion desired
+		0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00,       // the root, as an empty name
+		0x00, 0x02, // NS
+		0x00, 0x01, // IN
+	}
+	if err := connection.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		return false
+	}
+	if _, err := connection.Write(query); err != nil {
+		return false
+	}
+	// An ICMP port-unreachable comes back as a read error here, which is the
+	// common case for "nothing is listening" and is exactly the answer wanted.
+	reply := make([]byte, 512)
+	n, err := connection.Read(reply)
+	return err == nil && n >= 12
 }
 
 func nextAddress(existing []VPNDevice) (string, error) {
@@ -428,13 +624,29 @@ func removeDevice(ctx context.Context, name string) error {
 }
 
 // renderClientConfig is what goes on the phone.
-func renderClientConfig(private, serverPublic, hostname, address string) string {
+//
+// resolver says whether anything on this server actually answers DNS. It is a
+// parameter rather than a lookup here so the decision is made once, by the
+// caller, and can be tested without a socket.
+func renderClientConfig(private, serverPublic, hostname, address string, resolver bool) string {
 	var out strings.Builder
 	out.WriteString("[Interface]\n")
 	out.WriteString("PrivateKey = " + private + "\n")
 	out.WriteString("Address = " + address + "/32\n")
-	// The server's own resolver, so names inside the house work from outside it.
-	out.WriteString("DNS = " + vpnServer + "\n\n")
+	// The server's own resolver, so names inside the house work from outside it
+	// — but only when there is one.
+	//
+	// This line used to be unconditional, and on a server with no name server
+	// installed it pointed at a port nothing was listening on. Wireguard clients
+	// do not treat that as advisory: setting DNS replaces the device's resolver
+	// for as long as the tunnel is up, so a phone that connected got no name
+	// resolution at all. Not "the house is unreachable" — *nothing* resolves,
+	// which reads as the connection being broken rather than as the VPN having
+	// been handed a resolver that does not exist.
+	if resolver {
+		out.WriteString("DNS = " + vpnServer + "\n")
+	}
+	out.WriteString("\n")
 	out.WriteString("[Peer]\n")
 	out.WriteString("PublicKey = " + serverPublic + "\n")
 	out.WriteString("Endpoint = " + hostname + ":" + strconv.Itoa(vpnPort) + "\n")
@@ -451,6 +663,16 @@ func renderClientConfig(private, serverPublic, hostname, address string) string 
 
 // localNetworks is the house's own address range, so a connected device can
 // reach the other things on it and not only the server.
+//
+// Every *real* card, and nothing else. That distinction is the whole of this
+// function and it was missing: it used to take any running interface with a
+// private address, which on a server running applications is nine or ten Docker
+// bridges. A phone was being told to route 172.17.0.0/16 through 172.26.0.0/16
+// into the tunnel — ranges nothing on the far end can reach, one of which is
+// very likely the network of whatever café or office it is actually sitting on.
+//
+// Nothing announced this. The tunnel came up, the server was reachable, and the
+// breakage was somewhere else entirely on a network nobody had tested from.
 func localNetworks() string {
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -459,6 +681,9 @@ func localNetworks() string {
 	var ranges []string
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagRunning == 0 {
+			continue
+		}
+		if !countableInterface(iface.Name, sysClassNet) {
 			continue
 		}
 		addrs, err := iface.Addrs()
@@ -603,24 +828,55 @@ func runWG(ctx context.Context, args ...string) (string, error) {
 // A machine without qrencode gets no code and the text configuration, which is
 // what a laptop wants anyway.
 func qrCode(config string) string {
+	// ANSIUTF8 draws with half-block characters, so the code is square in a
+	// terminal rather than twice as tall as it is wide — which matters, because
+	// a stretched code will not scan.
+	out, ok := runQrencode(config, "ANSIUTF8")
+	if !ok {
+		return ""
+	}
+	return string(out)
+}
+
+// qrImage renders the same code as a PNG, for a browser.
+//
+// A PNG rather than the SVG qrencode can also produce, and the difference is
+// not aesthetic: an SVG has to be put into the page as markup, and this one is
+// generated from a configuration containing a hostname somebody typed. A PNG
+// arrives as a data URI in an `img` tag, where there is nothing to inject into.
+// The code is a few kilobytes either way.
+func qrImage(config string) string {
+	// -s 6 gives a code large enough to scan from a laptop screen at arm's
+	// length, which is where this is read from; -m 2 is the quiet border a
+	// scanner needs to find the edges at all.
+	out, ok := runQrencode(config, "PNG", "-s", "6", "-m", "2")
+	if !ok {
+		return ""
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(out)
+}
+
+// runQrencode encodes a configuration, with it arriving on standard input and
+// never as an argument — the configuration contains the device's private key,
+// and an argument is readable in /proc by every process on the machine for as
+// long as the command runs.
+func runQrencode(config, format string, extra ...string) ([]byte, bool) {
 	binary, err := exec.LookPath("qrencode")
 	if err != nil {
-		return ""
+		return nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// ANSIUTF8 draws with half-block characters, so the code is square in a
-	// terminal rather than twice as tall as it is wide — which matters, because
-	// a stretched code will not scan.
-	cmd := exec.CommandContext(ctx, binary, "-t", "ANSIUTF8", "-o", "-")
+	args := append([]string{"-t", format, "-o", "-"}, extra...)
+	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Stdin = strings.NewReader(config)
 	cmd.Env = aptEnv()
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return nil, false
 	}
-	return string(out)
+	return out, true
 }
 
 // --- Dynamic DNS --------------------------------------------------------------------
