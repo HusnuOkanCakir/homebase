@@ -1138,3 +1138,209 @@ select:focus-visible {
   margin: 0;
   font-size: 0.85rem;
 }
+
+/* --- Assistant ------------------------------------------------------------
+
+   A conversation with a model that writes about six words a second. The layout
+   is built around that: the transcript is a fixed, scrolling region so the box
+   somebody types into never moves down the page as an answer grows, and the
+   answer is followed rather than chased.
+
+   No avatars, no bubbles with tails, no coloured gradient for the machine's
+   replies. Two voices distinguished by one indent and one small label is enough
+   to tell them apart, and everything else would be decoration on a screen whose
+   real problem is that it is slow. */
+
+.assistant-transcript {
+  /* Tall enough for a real exchange, bounded so the compose box stays put. */
+  height: min(52vh, 30rem);
+  overflow-y: auto;
+  padding: 0.25rem 0.5rem 0.25rem 0;
+  margin-bottom: 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.assistant-empty {
+  margin: 2rem 0 0;
+  max-width: 34rem;
+}
+
+.assistant-turn {
+  margin-bottom: 1.15rem;
+}
+
+.assistant-who {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+/* What the person asked, set apart by indent rather than by colour: a tinted
+   block for every question turns a long conversation into stripes. */
+.assistant-you {
+  padding-left: 0.85rem;
+  border-left: 2px solid var(--border);
+}
+
+.assistant-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+/* Something moving while the answer is written. On this hardware the gap
+   between tokens is long enough that a still screen reads as a stalled one. */
+.assistant-cursor {
+  display: inline-block;
+  width: 0.5rem;
+  height: 1rem;
+  margin-left: 0.15rem;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: assistant-blink 1s step-end infinite;
+}
+
+@keyframes assistant-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Someone who has asked not to see motion still needs to know it is working,
+   so the cursor stops blinking and stays visible rather than disappearing. */
+@media (prefers-reduced-motion: reduce) {
+  .assistant-cursor {
+    animation: none;
+  }
+}
+
+.assistant-ask {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+}
+
+.assistant-input {
+  flex: 1;
+  resize: vertical;
+  min-height: 2.9rem;
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.assistant-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.assistant-footer {
+  margin-top: 0.7rem;
+  align-items: center;
+}
+
+.assistant-think {
+  font-size: 0.88rem;
+}
+
+.assistant-model {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The base rules these have to escape, and why:
+
+   `.primary` is width:100% because most buttons in this dashboard end a form
+   and span it. Here one sits beside the box somebody types into, so it is sized
+   to its label — without this the textarea collapses to a sliver.
+
+   `input` is width:100% and `label` is display:block for the same reason: every
+   other input on the site is a full-width field with its label above it. A
+   checkbox is neither. */
+
+.assistant-head {
+  margin-top: 0;
+}
+
+.assistant-head h2 {
+  margin: 0;
+}
+
+.assistant-ask .primary,
+.assistant-ask .quiet {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+  margin-bottom: 0;
+}
+
+.assistant-think {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0;
+  font-size: 0.88rem;
+  font-weight: 400;
+}
+
+.assistant-think input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+/* The model writes headings into the middle of a paragraph of prose. They mark
+   a change of subject, not a document structure, so they are set as emphasis
+   rather than as a size that would out-shout the card's own title. */
+.assistant-heading {
+  font-weight: 600;
+  margin: 1rem 0 0.35rem;
+}
+
+.assistant-text > :first-child {
+  margin-top: 0;
+}
+
+.assistant-text p {
+  margin: 0 0 0.6rem;
+}
+
+.assistant-text ul,
+.assistant-text ol {
+  margin: 0 0 0.6rem;
+  padding-left: 1.35rem;
+}
+
+.assistant-text li {
+  margin-bottom: 0.25rem;
+}
+
+.assistant-text code {
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 0.9em;
+}
+
+.assistant-text pre {
+  margin: 0 0 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  /* Code does not wrap; it scrolls, so the card never widens the page. */
+  overflow-x: auto;
+  font-size: 0.88rem;
+}
+
+.assistant-text hr {
+  height: 0;
+  margin: 1rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}

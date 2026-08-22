@@ -133,6 +133,23 @@ const post = <T>(path: string, body?: unknown, timeoutMs?: number) =>
 
 // --- Types -------------------------------------------------------------------
 
+/** What the local assistant is, and whether it can be used at all. */
+export interface AssistantStatus {
+  available: boolean;
+  /** The model being served, named for reading rather than for loading. */
+  model?: string;
+  /** Why it is unavailable, in a sentence meant for a person. */
+  reason?: string;
+  max_turns: number;
+  max_chars: number;
+}
+
+export interface AssistantMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+
 export interface Health {
   status: "ok" | "degraded";
   version: string;
@@ -842,6 +859,14 @@ export const api = {
   system: () => get<SystemInfo>("/system"),
 
   /**
+   * Whether this machine has a local model, and what it is.
+   *
+   * Answered even when there is none — `available: false` with a reason — so
+   * the dashboard can say what is missing instead of hiding a tab silently.
+   */
+  assistant: () => get<AssistantStatus>("/assistant"),
+
+  /**
    * How hot the machine has been, and how hard its fan has worked.
    *
    * `points` is capped because a month at five-minute intervals is nine
@@ -1208,4 +1233,130 @@ export function watchJob(
   return () => {
     stopped = true;
   };
+}
+
+/**
+ * Ask the local model something, and receive the answer as it is written.
+ *
+ * Streaming rather than a single response, because this hardware writes about
+ * six or seven tokens a second: a paragraph is thirty seconds and a long answer
+ * is over a minute. Waiting that long at a blank screen is indistinguishable
+ * from a server that has hung, and people reload — which on a machine with one
+ * inference slot makes the wait longer, not shorter.
+ *
+ * It does not go through `request`, which buffers the whole body and imposes a
+ * fifteen-second timeout. Both are right for every other call and wrong for this
+ * one.
+ *
+ * Returns a function that stops the answer. Aborting the request is what frees
+ * the server's single slot, so "stop" has to actually cancel rather than just
+ * hide the output.
+ */
+export function askAssistant(
+  messages: AssistantMessage[],
+  handlers: {
+    onToken: (text: string) => void;
+    /** `reason` is "length" when the answer hit the token ceiling. */
+    onDone: (reason: string) => void;
+    onError: (error: unknown) => void;
+  },
+  options: { think?: boolean } = {},
+): () => void {
+  const controller = new AbortController();
+
+  const run = async () => {
+    let response: Response;
+    try {
+      response = await fetch(BASE + "/assistant/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, think: options.think ?? false }),
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+    } catch (cause) {
+      if (!controller.signal.aborted) handlers.onError(new NetworkError(cause));
+      return;
+    }
+
+    if (!response.ok) {
+      // The refusals — busy, too long, no model — are ordinary JSON, because
+      // they happen before any streaming starts.
+      let body: ApiErrorBody | undefined;
+      try {
+        body = ((await response.json()) as { error?: ApiErrorBody }).error;
+      } catch {
+        /* fall through to the generic message */
+      }
+      handlers.onError(
+        new ApiError(
+          response.status,
+          body ?? { code: "http." + response.status, message: "Something went wrong." },
+        ),
+      );
+      return;
+    }
+
+    if (!response.body) {
+      handlers.onError(new NetworkError("this browser cannot read a streamed answer"));
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE frames are separated by a blank line. A frame can arrive split
+        // across reads, so only whole ones are taken and the remainder is kept.
+        let boundary = buffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          boundary = buffer.indexOf("\n\n");
+
+          let event = "message";
+          let data = "";
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event: ")) event = line.slice(7);
+            else if (line.startsWith("data: ")) data += line.slice(6);
+            // Lines beginning ":" are comments — the heartbeat and the
+            // "connected" marker — and are meant to be ignored.
+          }
+          if (!data) continue;
+
+          if (event === "token") {
+            const parsed = JSON.parse(data) as { text?: string };
+            if (parsed.text) handlers.onToken(parsed.text);
+          } else if (event === "done") {
+            handlers.onDone((JSON.parse(data) as { reason?: string }).reason ?? "stop");
+            return;
+          } else if (event === "failed") {
+            handlers.onError(
+              new ApiError(500, {
+                code: "assistant.interrupted",
+                message: "The answer stopped part-way through.",
+                recoverable: true,
+                recovery: "Ask again.",
+              }),
+            );
+            return;
+          }
+        }
+      }
+      // The stream ended without saying so. Treat it as finished rather than as
+      // an error: the text already on screen is real and worth keeping.
+      handlers.onDone("stop");
+    } catch (cause) {
+      if (!controller.signal.aborted) handlers.onError(new NetworkError(cause));
+    }
+  };
+
+  void run();
+  return () => controller.abort();
 }

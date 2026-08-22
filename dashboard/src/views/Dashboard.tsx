@@ -13,6 +13,7 @@ import { Repair } from "./Repair";
 import { FirstSteps } from "./FirstSteps";
 import { Leaving } from "./Leaving";
 import { Shares } from "./Shares";
+import { Assistant } from "./Assistant";
 
 /**
  * The signed-in shell.
@@ -40,6 +41,7 @@ const REFRESH_MS = 5000;
 type Tab =
   | "home"
   | "apps"
+  | "assistant"
   | "files"
   | "storage"
   | "network"
@@ -49,6 +51,10 @@ type Tab =
 const TABS: { id: Tab; label: string }[] = [
   { id: "home", label: "Home" },
   { id: "apps", label: "Apps" },
+  // After the applications rather than before them: this is a thing the server
+  // can do, not the thing it is for. Shown only on a machine that actually has
+  // a model — see assistantReady below — so most installations still see seven.
+  { id: "assistant", label: "Assistant" },
   { id: "files", label: "Files" },
   { id: "storage", label: "Storage" },
   { id: "network", label: "Network" },
@@ -75,6 +81,32 @@ export function Dashboard({ user, onSignOut }: Props) {
   // than in Overview because a server that is going away takes every screen with
   // it, not only the one the button was on.
   const [leaving, setLeaving] = useState<{ choice: PowerChoice; job: Job } | null>(null);
+  // Whether this machine has a local model at all.
+  //
+  // Asked once, and the tab is hidden until the answer is yes. Most
+  // installations have no model, and a tab that opens onto "there is no
+  // assistant here" is worse than no tab: it advertises a feature by way of
+  // explaining its absence. Hidden also covers the failure cases — no
+  // permission, model down, key unreadable — which is right for a navigation
+  // decision, and the reasons stay available on the screen itself.
+  const [assistantReady, setAssistantReady] = useState(false);
+
+  useEffect(() => {
+    if (!user.permissions.includes("assistant.use")) return;
+    let cancelled = false;
+    api
+      .assistant()
+      .then((status) => {
+        if (!cancelled) setAssistantReady(status.available);
+      })
+      // A server with no assistant configured answers this happily; a failure
+      // here means something else is wrong, and it is not this tab's job to
+      // report it.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user.permissions]);
 
   const refresh = useCallback(async () => {
     try {
@@ -120,7 +152,7 @@ export function Dashboard({ user, onSignOut }: Props) {
       </header>
 
       <nav className="tabs" aria-label="Sections">
-        {TABS.map((entry) => (
+        {TABS.filter((entry) => entry.id !== "assistant" || assistantReady).map((entry) => (
           <button
             key={entry.id}
             className={tab === entry.id ? "tab tab-current" : "tab"}
@@ -173,6 +205,8 @@ export function Dashboard({ user, onSignOut }: Props) {
             canManage={user.permissions.includes("apps.manage")}
             initial={openApp}
           />
+        ) : tab === "assistant" ? (
+          <Assistant />
         ) : tab === "files" ? (
           <Shares
             canManage={user.permissions.includes("network.modify")}
