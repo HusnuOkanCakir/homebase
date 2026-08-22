@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "status": "measured",
+  "claim": "Bu makinede GPU offload her seviyede CPU'dan yavastir. CUDA yolu compute capability 3.0 nedeniyle tamamen kapalidir; Vulkan yolu calisir ama zarar verir.",
+  "model_id": "qwen35-0.8b-ggml-q4-0-sanity",
+  "model_sha256": "57d1997790d1744fba5b40a7317df71ea5e2acee28c47e78f0cce39c0703f8cf",
+  "runtime_revision": "b10549",
+  "runtime_build": "b2e5e9b28",
+  "hardware": {
+    "host": "ASUS N550JV, Intel Core i7-4700HQ (Haswell, 4c/8t, AVX2+FMA)",
+    "gpu_name": "NVIDIA GeForce GT 750M (GK107, Kepler)",
+    "compute_capability": "3.0",
+    "vram_bytes": 4234739712,
+    "ram_bytes": 16643186688,
+    "driver": "470.256.02",
+    "cuda_api": "11.4",
+    "vulkan_api": "1.2.175"
+  },
+  "settings": {
+    "context_tokens": 512,
+    "batch_size": null,
+    "threads": 4,
+    "kv_type": "default",
+    "repetitions": 2
+  },
+  "measurements": {
+    "cpu_backend": {
+      "gpu_layers": 0,
+      "prompt_tokens_per_second": 141.91,
+      "prompt_stddev": 17.17,
+      "decode_tokens_per_second": 29.35,
+      "decode_stddev": 0.21
+    },
+    "vulkan_offload_sweep_decode_tokens_per_second": {
+      "0": 27.31,
+      "4": 16.34,
+      "8": 15.30,
+      "16": 12.88,
+      "99": 10.21
+    },
+    "vulkan_full_offload": {
+      "gpu_layers": 99,
+      "prompt_tokens_per_second": 4.69,
+      "decode_tokens_per_second": 11.44
+    }
+  },
+  "findings": [
+    "CUDA backend'i bu GPU'da derlenemez ve calistirilamaz: llama.cpp CUDA en az compute capability 5.0 ister, GK107 3.0'dir. CUDA 11 sm_30 destegini kaldirdi ve 470 surucusu CUDA 11.4'te tavan yapiyor, yani sm_30 uretebilen bir toolkit ile calisan bir surucu kombinasyonu yok.",
+    "Vulkan backend'i calisir ve GPU'yu 4038 MiB serbest bellekle gorur. Ancak Kepler'de fp16, int dot product ve matrix core yoktur; llama.cpp bunlari fp32 yollarina dusurur.",
+    "Offload monotonik olarak zarar verir. GPU'ya tasinan her katman decode hizini dusurur; bir tatli nokta yoktur.",
+    "Prompt isleme GPU'da 30 kat yavastir (141.91 -> 4.69 t/s), bu da uzun baglamlarda GPU'yu kullanilamaz yapar.",
+    "Sonuc: bu donanimda dogru yol saf CPU'dur. Haswell'in AVX2 yolu (libggml-cpu-haswell.so otomatik secilir) GT 750M'den hizlidir."
+  ],
+  "implication_for_lab": "README'deki asama matrisinin 2, 3 ve R adimlari (CUDA auto/offload, Pascal offload siniri) bu makinede uygulanamaz. Deney matrisi CPU-only olarak yeniden okunmalidir. requirements.json compute_capabilities ['6.0','6.1'] ister; olcum 3.0'dir, yani doctor cikti 'fail' verir ve bu dogrudur."
+}
