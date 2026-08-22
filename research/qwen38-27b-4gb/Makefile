@@ -23,6 +23,7 @@ smoke:
 	@$(PYTHON) "$(LAB_ROOT)/tools/acceptance.py" --help >/dev/null
 	@$(PYTHON) "$(LAB_ROOT)/tools/compare_optimization.py" --help >/dev/null
 	@$(PYTHON) "$(LAB_ROOT)/tools/quant_sweep.py" --help >/dev/null
+	@$(PYTHON) "$(LAB_ROOT)/bin/qwen-chat" --help >/dev/null
 	@echo "Qwen lab: CLI smoke checks passed."
 
 # The active track. Needs a llama-bench and the models, so it is not part of
