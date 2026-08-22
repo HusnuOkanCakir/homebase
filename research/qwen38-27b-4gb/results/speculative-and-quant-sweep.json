@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "status": "measured",
+  "claim": "n-gram speculative decoding bu makinede yavaslatiyor. Quant formatinda bir optimum var ve Q4_K_M orada; hem daha az hem daha cok bit kaybettiriyor.",
+  "host": "ASUS N550JV, i7-4700HQ (4c/8t, AVX2), DDR3-1600 dual channel (~25.6 GB/s teorik)",
+  "runtime_revision": "b10549",
+  "backend": "CPU (libggml-cpu-haswell.so)",
+  "threads": 4,
+  "speculative_decoding": {
+    "target": "Qwen3.8-4B-Q4_K_M",
+    "free_prose_decode_tps": {
+      "none": 6.7,
+      "ngram-simple": 6.6,
+      "ngram-cache": 6.2
+    },
+    "copy_heavy_decode_tps": {
+      "none": 6.4,
+      "ngram-simple": 4.9,
+      "ngram-cache": 5.9
+    },
+    "draft_model_2b": "GGML_ASSERT: MTP input row width must match target h_nextn width — llama.cpp Qwen3.8'in native MTP head'ini gorup MTP yoluna giriyor, 2B ve 4B'nin embedding genislikleri farkli oldugu icin abort ediyor",
+    "verdict": "Kopyaya dayali gorevde bile kaybediyor; en cok orada kaybediyor. 4 cekirdekli bir CPU'da K token'i dogrulamak K kat aritmetik demek ve bu makinede saklanacak bos hesap yok."
+  },
+  "quantisation_sweep_4b": [
+    {
+      "format": "Q8_0",
+      "gib": 4.28,
+      "prompt_tps": 17.75,
+      "decode_tps": 4.35,
+      "effective_gib_s": 18.6,
+      "percent_of_peak": 78
+    },
+    {
+      "format": "Q4_K_M",
+      "gib": 2.58,
+      "prompt_tps": 17.27,
+      "decode_tps": 6.55,
+      "effective_gib_s": 16.9,
+      "percent_of_peak": 71
+    }
+  ],
+  "reference_iq2": {
+    "model": "Qwen3.8-27B",
+    "format": "IQ2_XXS",
+    "gib": 6.76,
+    "decode_tps": 0.61,
+    "effective_gib_s": 4.1,
+    "percent_of_peak": 17
+  },
+  "findings": [
+    "Q8_0'in olculen degeri saf bant genisligi tahmininin %10 uzerinde (4,35 vs 3,95 t/s) ve etkin GiB/s'si Q4_K_M'den yuksek. Yani 4-8 bit araliginda bu makine gercekten bant genisligine bagli ve daha az byte kazandiriyor.",
+    "IQ2_XXS ise tepe degerin yalnizca %17'sine ulasiyor. Egri duz degil: bit sayisi dustukce bir noktadan sonra acma maliyeti kazanci yiyor. Bu makinede optimum Q4_K_M civarinda.",
+    "Speculative decoding'in kaybetmesi bununla tutarli: dogrulama asamasi agirliklari bir kez okur ama aritmetigi K kat artirir. Bant genisligi zaten %71 kullaniliyorsa kazanilacak cok az sey var, kaybedilecek hesap ise gercek.",
+    "Pratik sonuc: bu donanimda quantization secimi 'mumkun oldugunca az bit' degil, 'acma maliyeti hala ucuzken en az bit' olmali."
+  ]
+}
