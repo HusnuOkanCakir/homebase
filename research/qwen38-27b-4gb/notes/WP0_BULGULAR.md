@@ -87,6 +87,25 @@ Plandan geriye kalan ve gercekten yapilabilir olan kisim kucuk degil:
   durumda; "9,9B student ne yapardi" sorusuna egitim yapmadan yaklasik cevap
   verirler.
 
+## 7. Bunlarin hepsi yapildi
+
+Yukaridaki dort maddenin tamami olculdu ve sonuclar `results/` altinda:
+
+| Ne | Nerede |
+|---|---|
+| 27B IQ2_XXS, CPU | [`results/qwen38-27b-iq2xxs-cpu.json`](../results/qwen38-27b-iq2xxs-cpu.json) |
+| Speculative decoding ve quant karsilastirmasi | [`results/speculative-and-quant-sweep.json`](../results/speculative-and-quant-sweep.json) |
+| Ayni model uzerinde quant egrisi | [`results/quant-curve-4b.json`](../results/quant-curve-4b.json) |
+| Thinking acik/kapali | [`results/thinking-mode.json`](../results/thinking-mode.json) |
+| Kepler ve acik surucu | [`results/gt750m-kepler-vulkan-vs-cpu.json`](../results/gt750m-kepler-vulkan-vs-cpu.json) |
+
+Student vekili olarak 4B ve 2B distill'leri kilitlendi ve olculdu. En iyi
+yapilandirma **Qwen3.8-4B Q4_K_M, 6,55 tok/s** — 27B'nin 10,7 kati. Thinking'i
+kapatmak basit bir soruda cevap suresini ayrica 4,4 kat kisaltiyor.
+
+Egriyi tamamlamak icin geriye ayni depodan Q6_K, Q5_K_M ve bir IQ sinifi quant
+kaldi; `make quant-sweep` bunun icin.
+
 Yapilamayacak olan: pruning, distillation, QAT. Bunlar kume ister.
 
 ## 5. 27B bu makinede olculdu: 0,61 tok/s

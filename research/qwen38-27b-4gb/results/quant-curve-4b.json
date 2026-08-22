@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-22T14:08:23.034259+00:00",
+  "settings": {
+    "threads": 4,
+    "prompt_tokens": 64,
+    "generation_tokens": 64,
+    "repetitions": 2,
+    "theoretical_peak_gb_s": 25.6
+  },
+  "rows": [
+    {
+      "path": "/srv/qwen-lab/models/candidates/Qwen3.8-4B-Q8_0.gguf",
+      "quantisation": "Q8_0",
+      "size_gib": 4.28,
+      "model": "qwen35 4B Q8_0",
+      "prompt_tps": 13.64,
+      "decode_tps": 4.22,
+      "status": "measured",
+      "file_bytes": 4610579744,
+      "effective_gib_s": 18.06,
+      "percent_of_peak": 75.8
+    },
+    {
+      "path": "/srv/qwen-lab/models/candidates/Qwen3.8-4B-Q4_K_M.gguf",
+      "quantisation": "Q4_K_M",
+      "size_gib": 2.58,
+      "model": "qwen35 4B Q4_K - Medium",
+      "prompt_tps": 14.79,
+      "decode_tps": 6.14,
+      "status": "measured",
+      "file_bytes": 2783446304,
+      "effective_gib_s": 15.84,
+      "percent_of_peak": 66.4
+    }
+  ],
+  "fastest": {
+    "quantisation": "Q4_K_M",
+    "decode_tps": 6.14,
+    "size_gib": 2.58
+  },
+  "smallest": "Q4_K_M",
+  "claim": "Ayni model, iki quantization. Q4_K_M daha kucuk VE daha hizli; ama etkin bant genisligi Q8_0'dan dusuk. Egrinin donum noktasi buranin altinda ve IQ2 orada ucuruma dusuyor.",
+  "host": "ASUS N550JV, i7-4700HQ (4c/8t, AVX2), DDR3-1600 dual channel",
+  "model_family": "empero-ai/Qwen3.8-4B-Distill-GGUF @ 391fc7d103e3942a408def3e4f51c2f85d464417",
+  "note": "Bu kosu sirasinda makine mesguldu; mutlak degerler elle olculen 6,55/4,35'ten biraz dusuk. Oranlar ve tepe yuzdeleri tutuyor. Egriyi tamamlamak icin ayni depodan Q6_K ve Q5_K_M ile bir IQ sinifi quant eklenmeli — o zaman ucurumun yeri tek model uzerinde gosterilmis olur."
+}

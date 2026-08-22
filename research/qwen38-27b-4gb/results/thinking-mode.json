@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "status": "measured",
+  "claim": "Thinking modu tokens/saniyeyi degistirmiyor; cevaba ulasmak icin harcanan token sayisini degistiriyor. Basit bir soruda kapatmak cevap suresini 4,4 kat kisaltiyor.",
+  "model_id": "qwen38-4b-distill-q4-k-m",
+  "model_sha256": "dec96e8cf2e11b613bb46513dec485377f9ca5a351e71712ee0e244f287c6790",
+  "runtime_revision": "b10549",
+  "settings": {
+    "threads": 4,
+    "context_tokens": 2048,
+    "temp": 0,
+    "prompt": "Name the capital of France, then stop.",
+    "n_predict": 400
+  },
+  "measurements": {
+    "thinking_on": {
+      "decode_tps": 6.7,
+      "words_emitted": 89,
+      "wall_seconds": 22
+    },
+    "thinking_off": {
+      "decode_tps": 6.6,
+      "words_emitted": 19,
+      "wall_seconds": 5
+    },
+    "time_to_answer_speedup": 4.4,
+    "tokens_ratio": 4.7
+  },
+  "how": {
+    "switch": "-cnv --chat-template-kwargs '{\"enable_thinking\":false}'",
+    "note": "-no-cnv ile ham istem kullanildiginda chat template uygulanmaz, bu yuzden template anahtari modele ulasmaz. Istem icine /no_think yazmak da bu build'de reasoning'i tam susturmadi (1 marker kaldi, template ile 0). Calisan yol konusma modu + template anahtaridir.",
+    "not_available": "--reasoning-budget bu build'de yok."
+  },
+  "findings": [
+    "Decode hizi ayni (6,7 vs 6,6 t/s). Kazanc tamamen daha az token uretmekten geliyor: 89 kelime yerine 19.",
+    "Bu, bu makinede olculen tum tekniklerin en buyuk pratik kazanci — ve bedava. Karsilastirma: quant formati secimi 27B->4B ile birlikte 10,7 kat, speculative decoding negatif, GPU negatif.",
+    "UYARI: bu her sorgu icin dogru degil. Basit olgusal soruda saf kazanc; muhakeme gerektiren gorevde reasoning'i kapatmak kaliteyi dusurur. Global bir ayar degil, sorgu basina bir karar olmali."
+  ]
+}

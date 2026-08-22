@@ -1,4 +1,29 @@
-# Claude handoff: Qwen3.8-27B on a 4 GB Pascal host
+# Claude handoff: Qwen3.8-27B on a 4 GB host
+
+> **This file was written before the target machine was measured, and several of
+> its assumptions turned out to be wrong.** Read the corrections below first;
+> the rest of the document is still accurate about design and process.
+>
+> - **The GPU is not Pascal.** It is a GK107 Kepler at compute capability 3.0,
+>   asked of the driver through `libcuda`. llama.cpp's CUDA backend needs 5.0,
+>   and no toolkit both emits `sm_30` and satisfies llama.cpp, so the CUDA path
+>   cannot be opened at all. The open stack (nouveau + NVK) works and is four
+>   times slower than the proprietary driver, which was itself slower than the
+>   CPU. See `notes/KEPLER_GERCEGI.md`.
+> - **The GPU loses to the CPU at every offload level**, monotonically. Stages 2
+>   and R of the experiment matrix cannot run here.
+> - **The compression track is blocked on compute**, not on design. Its
+>   arithmetic was verified correct against the real GGUF; executing it costs
+>   ~3.1e22 FLOPs. See `notes/WP0_BULGULAR.md`.
+> - **Quantisation has an optimum and it is not the smallest file.** IQ2_XXS
+>   reaches 17% of memory-bandwidth peak against Q4_K_M's 71%. See
+>   `notes/TEKNIKLER.md`.
+> - **27B was measured**: 0.61 tok/s, below the lab's own 1 tok/s gate. The
+>   practical configuration is a 4B distill at Q4_K_M, 6.55 tok/s.
+> - **The `perf/qwen38-27b-4gb-lab` branch no longer exists.** Its Qwen content
+>   was byte-identical to `-lab-only`, and its one unrelated commit (`1c50fd4`,
+>   graphics reporting) is on `main`. Nothing was lost; the surviving branch is
+>   `research/qwen-27b-on-4gb`.
 
 This file is the continuation brief for an agent working on this research lab.
 Read it before changing anything under this directory. Then read
@@ -10,10 +35,12 @@ The goal is to determine honestly whether the official Qwen3.8-27B text model
 can provide a useful single-user assistant on this assumed host:
 
 - x86-64 Linux/Homebase
-- NVIDIA Pascal GPU with approximately 4 GB VRAM
-- 16 GB system RAM
-- approximately 900 GB HDD
-- target hot decode speed of at least 1 token/second
+- ~~NVIDIA Pascal GPU with approximately 4 GB VRAM~~ — measured: GK107 Kepler,
+  compute capability 3.0, 4039 MiB. Unusable for this workload
+- 16 GB system RAM — measured 15.5 GiB, ~14 GiB free with nine applications up
+- approximately 900 GB HDD — measured: ST1000LM024, **5400 rpm**
+- target hot decode speed of at least 1 token/second — 27B measured at 0.61,
+  which fails the gate; the 4B distill measures 6.55
 
 This is an isolated research project, not a Homebase feature. Keep all source
 changes under `research/qwen38-27b-4gb/`. Do not change `cmd/`, `internal/`,

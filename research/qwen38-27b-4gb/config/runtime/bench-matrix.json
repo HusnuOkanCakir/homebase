@@ -21,6 +21,17 @@
     "q8_0",
     "q4_0"
   ],
+  "weight_quantisations": [
+    "Q8_0",
+    "Q6_K",
+    "Q5_K_M",
+    "Q4_K_M",
+    "Q4_0",
+    "IQ4_XS",
+    "IQ3_M",
+    "IQ2_M"
+  ],
+  "weight_quantisation_note": "Matrisin en onemli boyutu ve baslangicta yoktu. Olcum: bu makinede egri monotonik degil — Q8_0 tepe bant genisliginin %78'ine, Q4_K_M %71'ine, IQ2_XXS yalnizca %17'sine ulasiyor. 4-8 bit arasinda daha az byte kazandiriyor; altinda acma maliyeti kazanci yiyor. Optimum aradadir ve tools/quant_sweep.py onu bulmak icindir.",
   "kv_locations": [
     "cpu",
     "gpu"

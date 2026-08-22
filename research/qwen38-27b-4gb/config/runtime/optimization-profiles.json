@@ -32,7 +32,7 @@
       "experimental": true
     },
     "ngram": {
-      "description": "Draft-model-free n-gram speculation using b10549 --spec-default; it uses a transient 16 MiB lookup table.",
+      "description": "Taslak modelsiz n-gram spekulasyonu. OLCULDU VE REDDEDILDI: bu makinede yavaslatiyor. b10549'da --spec-default diye bir bayrak yok; dogrusu --spec-type <ngram-simple|ngram-cache|ngram-mod|...>.",
       "cache_type_k": "q8_0",
       "cache_type_v": "q8_0",
       "server_args": [
@@ -42,9 +42,25 @@
         "--no-cache-idle-slots",
         "--cache-reuse",
         "0",
-        "--spec-default"
+        "--spec-type",
+        "ngram-simple"
       ],
-      "experimental": true
+      "experimental": false,
+      "measured": {
+        "host": "i7-4700HQ, 4 thread, Qwen3.8-4B-Q4_K_M",
+        "free_prose_decode_tps": {
+          "none": 6.7,
+          "ngram-simple": 6.6,
+          "ngram-cache": 6.2
+        },
+        "copy_heavy_decode_tps": {
+          "none": 6.4,
+          "ngram-simple": 4.9,
+          "ngram-cache": 5.9
+        },
+        "verdict": "rejected",
+        "why": "minimum_speedup_percent 10 kapisini gecmek soyle dursun, negatif. Dogrulama asamasi agirliklari bir kez okur ama aritmetigi K kat artirir; bant genisligi zaten %71 kullanildigindan kazanilacak az, kaybedilecek hesap gercek. En cok kopya agirlikli istemde kaybediyor — yani taslaklarin en cok tutmasi gereken yerde."
+      }
     },
     "prompt-cache": {
       "description": "Short repeated-prompt cache experiment with no speculative draft weights.",
@@ -59,6 +75,17 @@
         "64"
       ],
       "experimental": true
+    },
+    "draft-model": {
+      "description": "Klasik taslak modeli ile spekulasyon. BLOKE: llama.cpp Qwen3.8'in native MTP head'ini gorup draft-mtp yoluna giriyor ve 2B ile 4B'nin embedding genislikleri farkli oldugu icin GGML_ASSERT ile abort ediyor. --spec-type draft-simple ile MTP yolunu atlamak denenmedi.",
+      "cache_type_k": "q8_0",
+      "cache_type_v": "q8_0",
+      "server_args": [
+        "--spec-type",
+        "draft-simple"
+      ],
+      "experimental": true,
+      "blocked_reason": "MTP input row width must match the target h_nextn width"
     }
   }
 }

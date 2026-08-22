@@ -2,7 +2,59 @@
 
 Bu dizin, Qwen3.8-27B'yi eski 4 GB NVIDIA GPU'lu sunucuda dürüstçe sınamak
 için Homebase uygulamasından ayrılmış, sıfır bütçeli bir araştırma alanıdır.
-Henüz ölçülmüş bir başarı veya üretime hazır entegrasyon yoktur.
+
+Ölçüm yapıldıktan sonra laboratuvar **iki ize** ayrıldı.
+
+## İz A — sıkıştırma (compute'a bloke)
+
+27B'yi 4 GiB VRAM'e sığdırmak için önerilen yol (structured pruning →
+distillation → 2-bit QAT) aritmetik olarak doğrudur: parametre dökümü gerçek
+GGUF tensor geometrisine karşı doğrulandı ve üç ondalığa kadar tutuyor. Ama
+çalıştırmak **~3,1e22 FLOP** ister — 64 A100 ile 46 gün, tek A100 ile sekiz
+yıl, bu sunucunun CPU'su ile ondört bin yıl. Laboratuvarın kuralı sıfır bütçe
+olduğuna göre WP1–WP3 **bloke** kabul edilir; plan olarak değil.
+
+Ayrıntı: [`notes/WP0_BULGULAR.md`](notes/WP0_BULGULAR.md).
+
+## İz B — CPU'da quantization optimumu (aktif)
+
+Ölçüm sırasında beklenmeyen bir şey çıktı ve asıl ilginç bulgu bu:
+**bit sayısı düştükçe hız artmıyor.** Bu makinede etkin bant genişliği
+
+| Format | Etkin | Tepe değerin yüzdesi |
+|---|---:|---:|
+| Q8_0 | 18,6 GiB/s | %78 |
+| Q4_K_M | 16,9 GiB/s | %71 |
+| IQ2_XXS | 4,1 GiB/s | **%17** |
+
+4–8 bit arasında daha az byte kazandırıyor; altında açma maliyeti kazancı
+yiyor. Yani **bir optimum var ve en küçük dosya değil.** Bu, 4 GiB VRAM'e
+sığdırma hedefinin işaret ettiği yönün tam tersi: VRAM 2-bit'e iterken CPU
+4-bit'e itiyor. İkisi aynı amaç değil.
+
+Bunu ölçmek için: [`tools/quant_sweep.py`](tools/quant_sweep.py),
+`make quant-sweep`.
+
+Bu iz sıfır bütçeyle tamamen yapılabilir ve gerçek bir sonuç üretir.
+
+## Bu makinede ölçülenler
+
+| Model | Quant | GiB | decode t/s | 100 token |
+|---|---|---:|---:|---:|
+| Qwen3.8-27B | IQ2_XXS | 6,76 | 0,61 | 164 s |
+| Qwen3.8-4B distill | Q8_0 | 4,28 | 4,35 | 23 s |
+| Qwen3.8-4B distill | Q4_K_M | 2,58 | **6,55** | 15 s |
+| Qwen3.8-2B distill | Q4_K_M | 1,21 | 14,19 | 7 s |
+
+En iyi yapılandırma Qwen3.8-4B Q4_K_M. Ayrıca thinking modunu kapatmak basit
+bir soruda cevap süresini **4,4 kat** kısaltıyor (22 s → 5 s); hız aynı, üretilen
+token sayısı değişiyor. Denenip **reddedilenler**: speculative decoding (her
+varyantta yavaş), GPU offload (her seviyede yavaş), attention tarafı
+optimizasyonları (2K bağlamda toplam trafiğin %1,8'i).
+
+Sonuçlar: [`results/`](results/). Donanım gerçeği:
+[`notes/KEPLER_GERCEGI.md`](notes/KEPLER_GERCEGI.md). Teknik değerlendirme:
+[`notes/TEKNIKLER.md`](notes/TEKNIKLER.md).
 
 ## Kısa karar
 
@@ -139,6 +191,20 @@ ret edilir.
 | 6 | seçilen aday | 4K | KV/state baskısı | tekrarlanabilir 3 koşu |
 | R | ggml Q4_K_M | 2K | yüksek bellekte referans | yalnız VRAM >=15 GB ve yeterli host RAM |
 
+**Bu hosttа ulaşılamayan aşamalar:** 2 ve R. Kart compute capability 3.0;
+llama.cpp CUDA en az 5.0 ister ve GPU her offload seviyesinde CPU'dan yavaş
+ölçüldü. Aşamalar silinmedi — 4 GB'lık bir Turing/Ampere kartında geçerliler
+ve laboratuvarın kendi `doctor` komutu bu host için zaten `fail` veriyor.
+
+### İz B aşamaları (aktif)
+
+| Aşama | Ne | Geçiş kapısı |
+|---|---|---|
+| B1 | Tek model üzerinde quant süpürmesi: Q8_0, Q6_K, Q5_K_M, Q4_K_M, Q4_0, IQ4_XS, IQ3_M, IQ2_M | her formatta ölçülmüş decode t/s ve etkin GiB/s |
+| B2 | Optimumun yeri | en hızlı format en küçük format değilse, dönüm noktası tek model üzerinde gösterilmiş olur |
+| B3 | Thinking açık/kapalı | cevaba kadar geçen süre, decode hızı değil |
+| B4 | Uzun bağlamda KV quantization | 8K üstünde; 2K'da toplam trafiğin %1,8'i olduğu için orada anlamsız |
+
 Her turda model SHA, `llama.cpp` commit'i, komut, GPU/RAM, bağlam, GPU katman
 sayısı, prompt/decode tok/s, tepe VRAM/RSS ve kalite notu kaydedilir. Aynı anda
 yalnız bir değişken değiştirilir. Örnek sonuç dosyası ölçüm değildir:
@@ -166,11 +232,16 @@ dizinine symlink etmeyin: 10–20 GB modeller yedekleme kapsamına girerse alan 
 süre büyür. Yedekleme politikasında `cache`, `models` ve `checkpoints` açıkça
 hariç tutulmalı; yalnız küçük manifest ve sonuç özeti yedeklenmelidir.
 
-Hedef Pascal GPU, R580 sürücüsü ve CUDA 12.9 kombinasyonudur. Sürücü/toolkit
-görünmesi modern FP8/FP4 veya FlashAttention çekirdeklerinin Pascal'da çalıştığı
-anlamına gelmez. `llama.cpp` gerçek compute capability ile sınanmalı; CUDA yolu
-başarısız olursa CPU tabanı korunmalıdır. Kararı gerçek derleme ve
-`--list-devices` çıktısı verir.
+**Bu bölümün varsaydığı GPU bu makinede yok.** Sınandı: kart Pascal değil,
+GK107 Kepler. Compute capability sürücüye `libcuda` üzerinden soruldu ve **3.0**
+çıktı; R580 ve CUDA 12.9 yerine 470.256.02 ve CUDA 11.4 var. llama.cpp CUDA
+backend'i en az 5.0 istediği için bu yol bir derleme bayrağıyla açılamaz.
+
+Tam ölçüm, açık sürücü (nouveau + NVK) denemesi dahil:
+[`notes/KEPLER_GERCEGI.md`](notes/KEPLER_GERCEGI.md).
+
+Bölümün prensibi doğruydu ve duruyor: **kararı gerçek derleme ve
+`--list-devices` çıktısı verir**, iddia değil. Bu makinede o çıktı GPU'yu eliyor.
 
 ## Yol haritası
 

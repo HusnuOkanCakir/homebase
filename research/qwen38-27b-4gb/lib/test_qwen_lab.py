@@ -295,7 +295,16 @@ class RuntimePlanTests(unittest.TestCase):
         self.assertGreaterEqual(profiles["minimum_speedup_percent"], 10)
         self.assertEqual(profiles["default_profile"], "baseline")
         self.assertEqual(profiles["profiles"]["baseline"]["server_args"][:3], ["--no-cache-prompt", "--cache-ram", "0"])
-        self.assertIn("--spec-default", profiles["profiles"]["ngram"]["server_args"])
+        # b10549 has no --spec-default. The flag is --spec-type, taking
+        # ngram-simple, ngram-cache, draft-simple, draft-mtp and others; the
+        # profile pinned a flag the pinned runtime does not accept.
+        ngram_args = profiles["profiles"]["ngram"]["server_args"]
+        self.assertIn("--spec-type", ngram_args)
+        self.assertEqual(ngram_args[ngram_args.index("--spec-type") + 1], "ngram-simple")
+        self.assertNotIn("--spec-default", ngram_args)
+        # Measured and rejected on this host, so the file must say so rather
+        # than leaving it looking untried.
+        self.assertEqual(profiles["profiles"]["ngram"]["measured"]["verdict"], "rejected")
         self.assertEqual(profiles["profiles"]["q4-kv"]["cache_type_k"], "q4_0")
         self.assertEqual(
             profiles["profiles"]["prompt-cache"]["server_args"],
