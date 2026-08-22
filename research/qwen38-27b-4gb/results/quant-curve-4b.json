@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-08-22T14:08:23.034259+00:00",
+  "captured_at": "2026-08-22T14:57:43.622421+00:00",
   "settings": {
     "threads": 4,
     "prompt_tokens": 64,
@@ -14,34 +14,74 @@
       "quantisation": "Q8_0",
       "size_gib": 4.28,
       "model": "qwen35 4B Q8_0",
-      "prompt_tps": 13.64,
-      "decode_tps": 4.22,
+      "prompt_tps": 18.43,
+      "decode_tps": 4.39,
       "status": "measured",
       "file_bytes": 4610579744,
-      "effective_gib_s": 18.06,
-      "percent_of_peak": 75.8
+      "effective_gib_s": 18.79,
+      "percent_of_peak": 78.8
+    },
+    {
+      "path": "/srv/qwen-lab/models/candidates/Qwen3.8-4B-Q6_K.gguf",
+      "quantisation": "Q6_K",
+      "size_gib": 3.31,
+      "model": "qwen35 4B Q6_K",
+      "prompt_tps": 12.61,
+      "decode_tps": 5.42,
+      "status": "measured",
+      "file_bytes": 3563027744,
+      "effective_gib_s": 17.94,
+      "percent_of_peak": 75.2
+    },
+    {
+      "path": "/srv/qwen-lab/models/candidates/Qwen3.8-4B-Q5_K_M.gguf",
+      "quantisation": "Q5_K_M",
+      "size_gib": 2.93,
+      "model": "qwen35 4B Q5_K - Medium",
+      "prompt_tps": 10.17,
+      "decode_tps": 5.69,
+      "status": "measured",
+      "file_bytes": 3161425184,
+      "effective_gib_s": 16.67,
+      "percent_of_peak": 69.9
     },
     {
       "path": "/srv/qwen-lab/models/candidates/Qwen3.8-4B-Q4_K_M.gguf",
       "quantisation": "Q4_K_M",
       "size_gib": 2.58,
       "model": "qwen35 4B Q4_K - Medium",
-      "prompt_tps": 14.79,
-      "decode_tps": 6.14,
+      "prompt_tps": 21.72,
+      "decode_tps": 6.46,
       "status": "measured",
       "file_bytes": 2783446304,
-      "effective_gib_s": 15.84,
-      "percent_of_peak": 66.4
+      "effective_gib_s": 16.67,
+      "percent_of_peak": 69.9
+    },
+    {
+      "path": "/srv/qwen-lab/models/candidates/Qwen3.8-4B-IQ4_XS.local.gguf",
+      "quantisation": "IQ4_XS",
+      "size_gib": 2.41,
+      "model": "qwen35 4B IQ4_XS - 4.25 bpw",
+      "prompt_tps": 9.16,
+      "decode_tps": 5.75,
+      "status": "measured",
+      "file_bytes": 2593555744,
+      "effective_gib_s": 13.86,
+      "percent_of_peak": 58.1,
+      "provenance": "locally requantized from qwen38-4b-distill-q8-0",
+      "quality_claimed": false
     }
   ],
   "fastest": {
     "quantisation": "Q4_K_M",
-    "decode_tps": 6.14,
+    "decode_tps": 6.46,
     "size_gib": 2.58
   },
-  "smallest": "Q4_K_M",
-  "claim": "Ayni model, iki quantization. Q4_K_M daha kucuk VE daha hizli; ama etkin bant genisligi Q8_0'dan dusuk. Egrinin donum noktasi buranin altinda ve IQ2 orada ucuruma dusuyor.",
-  "host": "ASUS N550JV, i7-4700HQ (4c/8t, AVX2), DDR3-1600 dual channel",
-  "model_family": "empero-ai/Qwen3.8-4B-Distill-GGUF @ 391fc7d103e3942a408def3e4f51c2f85d464417",
-  "note": "Bu kosu sirasinda makine mesguldu; mutlak degerler elle olculen 6,55/4,35'ten biraz dusuk. Oranlar ve tepe yuzdeleri tutuyor. Egriyi tamamlamak icin ayni depodan Q6_K ve Q5_K_M ile bir IQ sinifi quant eklenmeli — o zaman ucurumun yeri tek model uzerinde gosterilmis olur."
+  "smallest": "IQ4_XS",
+  "notes": {
+    "single_model": "Every row is the same 4B weights, so the turning point is measured on one model rather than inferred across two.",
+    "turning_point": "IQ4_XS is 6.6% smaller than Q4_K_M and 11.0% slower. Below Q4_K_M the cost of unpacking the format exceeds the bandwidth it saves.",
+    "iq2_absent": "IQ2_XXS could not be produced: llama.cpp requires an importance matrix for it and refuses without one. The 27B IQ2_XXS point measured earlier at 17% of peak is a different model and is not merged into this curve.",
+    "quality": "This is a throughput curve. No quality was measured for any row here; the 4B Q4_K_M service was evaluated separately in results/eval-4b.json."
+  }
 }

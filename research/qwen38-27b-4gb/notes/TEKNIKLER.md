@@ -20,6 +20,40 @@ IQ2_XXS'in acilmasi Q4_K_M'den ~4 kat pahali. Yani **daha az bit her zaman
 daha hizli demek degil.** 2-bit'e inmek dosyayi kucultur ama bu makinede
 dequant maliyeti kazanci yer.
 
+## Donum noktasi — tek model uzerinde olculdu
+
+Yukaridaki iki satir iki ayri modelden geliyordu (IQ2_XXS 27B'de, Q4_K_M
+4B'de). Bu, iddiayi zayiflatiyordu: fark quant formatindan mi, model
+boyutundan mi geldigi ayirt edilemiyordu. Egri simdi **tek model, tek agirlik
+kaynagi, tek makine** uzerinde tamamlandi
+([`results/quant-curve-4b.json`](../results/quant-curve-4b.json)):
+
+| Quant | GiB | decode t/s | etkin GiB/s | tepe % |
+|---|---:|---:|---:|---:|
+| Q8_0 | 4,28 | 4,39 | 18,79 | 78,8 |
+| Q6_K | 3,31 | 5,42 | 17,94 | 75,2 |
+| Q5_K_M | 2,93 | 5,69 | 16,67 | 69,9 |
+| **Q4_K_M** | 2,58 | **6,46** | 16,67 | 69,9 |
+| IQ4_XS | **2,41** | 5,75 | 13,86 | 58,1 |
+
+Sonuc: **IQ4_XS, Q4_K_M'den %6,6 daha kucuk ve %11,0 daha yavas.** En kucuk
+dosya en hizlisi degil. Donum noktasi Q4_K_M'de ve IQ ailesine gecerken
+gerceklesiyor — 2-bit'e kadar inmeye gerek yok, ucurum ilk IQ formatinda
+basliyor.
+
+Etkin bant genisligi bastan sona duserken (78,8 → 58,1) decode hizi Q4_K_M'ye
+kadar yukseliyor: kucultmenin kazanci, acmanin maliyetinden buyuk kaldigi
+surece. IQ4_XS'te bu iliski tersine donuyor.
+
+IQ2_XXS bu egride yok: llama.cpp onu importance matrix olmadan uretmeyi
+reddediyor. 27B'deki IQ2_XXS olcumu (tepe %17) baska bir model oldugu icin
+egriye katilmadi.
+
+> IQ4_XS bu depoda kilitli bir ucuncu-taraf artefakt degil; egrinin tamami tek
+> agirlik kaynagindan gelsin diye kilitli Q8_0'dan `llama-quantize
+> --allow-requantize` ile burada uretildi. **Olculen sey hizi**; kalitesi
+> olculmedi ve importance matrix olmadan kotu olmasi beklenir.
+
 ## Olculen modeller
 
 | Model | Quant | GiB | prompt t/s | decode t/s | 100 token |
