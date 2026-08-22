@@ -63,11 +63,23 @@ func main() {
 		// Empty switches TLS off, which is how `make run` and the unit tests
 		// work — a developer running this on their own machine reaches it over
 		// loopback, which browsers already treat as a secure origin.
-		tlsAddr     = flag.String("listen-tls", envOr("HOMEBASE_LISTEN_TLS", ""), "address to serve HTTPS on")
-		stateDir    = flag.String("state-dir", envOr("HOMEBASE_STATE_DIR", "/var/lib/homebase"), "where the certificate is kept")
-		dbPath      = flag.String("db", "/var/lib/homebase/homebase.db", "SQLite database")
-		socket      = flag.String("hostd-socket", hostclient.DefaultSocket, "hostd socket")
-		staticDir   = flag.String("dashboard", "/usr/share/homebase/dashboard", "built dashboard assets")
+		tlsAddr   = flag.String("listen-tls", envOr("HOMEBASE_LISTEN_TLS", ""), "address to serve HTTPS on")
+		stateDir  = flag.String("state-dir", envOr("HOMEBASE_STATE_DIR", "/var/lib/homebase"), "where the certificate is kept")
+		dbPath    = flag.String("db", "/var/lib/homebase/homebase.db", "SQLite database")
+		socket    = flag.String("hostd-socket", hostclient.DefaultSocket, "hostd socket")
+		staticDir = flag.String("dashboard", "/usr/share/homebase/dashboard", "built dashboard assets")
+		// The local assistant, off unless pointed at something.
+		//
+		// Empty by default and deliberately so: a language model is not part of
+		// a home server the way storage and backups are, and an installation
+		// that never asked for one should show no sign of it. Setting this is
+		// what turns the tab on.
+		assistantURL = flag.String("assistant-url",
+			envOr("HOMEBASE_ASSISTANT_URL", ""),
+			"OpenAI-compatible URL of a local model, e.g. http://127.0.0.1:8088/v1")
+		assistantKey = flag.String("assistant-key-file",
+			envOr("HOMEBASE_ASSISTANT_KEY_FILE", "/etc/qwen-lab/api-key"),
+			"file holding the local model's API key")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
@@ -86,6 +98,9 @@ func main() {
 		dbPath:    *dbPath,
 		socket:    *socket,
 		staticDir: *staticDir,
+
+		assistantURL:     *assistantURL,
+		assistantKeyFile: *assistantKey,
 	}); err != nil {
 		log.Error("core failed", "error", err)
 		os.Exit(1)
@@ -102,6 +117,10 @@ type runOptions struct {
 	dbPath    string
 	socket    string
 	staticDir string
+
+	// Empty unless this machine has a local model. See the flag.
+	assistantURL     string
+	assistantKeyFile string
 }
 
 func run(log *slog.Logger, opts runOptions) error {
@@ -173,6 +192,14 @@ func run(log *slog.Logger, opts runOptions) error {
 	eventRecorder := events.NewRecorder(db.DB(), log)
 
 	server := api.NewServer(authService, jobManager, host, eventRecorder, log, version)
+
+	// A local model, if this machine has one. Nothing is verified here: whether
+	// it answers is a question for the moment somebody asks it something, not
+	// for startup, and core must not refuse to boot because a model is down.
+	if opts.assistantURL != "" {
+		server = server.WithAssistant(opts.assistantURL, opts.assistantKeyFile)
+		log.Info("local assistant configured", "url", opts.assistantURL)
+	}
 
 	// Notice a disk filling up before applications start failing to write.
 	// A server that runs out of space does not announce it: applications fail in

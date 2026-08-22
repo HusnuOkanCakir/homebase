@@ -48,6 +48,11 @@ type Server struct {
 	// thermalPath overrides where the temperature record is read from, so tests
 	// do not need a directory only root can create.
 	thermalPath string
+
+	// assistant is nil unless a local model was configured. Nil is the normal
+	// state: most installations have no model, and the endpoints say so rather
+	// than failing.
+	assistant *assistantConfig
 }
 
 // WithThermalLog points the history endpoint at a particular file.
@@ -97,6 +102,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/system/reboot", s.require(auth.PermSystemManage, s.handleReboot))
 	mux.Handle("POST /api/v1/system/shutdown", s.require(auth.PermSystemManage, s.handleShutdown))
 	mux.Handle("POST /api/v1/system/name", s.require(auth.PermSystemManage, s.handleRename))
+
+	mux.Handle("GET /api/v1/assistant", s.require(auth.PermAssistantUse, s.handleAssistantStatus))
+	mux.Handle("POST /api/v1/assistant/chat", s.require(auth.PermAssistantUse, s.handleAssistantChat))
 
 	mux.Handle("GET /api/v1/jobs", s.require(auth.PermSystemRead, s.handleListJobs))
 	mux.Handle("GET /api/v1/jobs/{id}", s.require(auth.PermSystemRead, s.handleGetJob))

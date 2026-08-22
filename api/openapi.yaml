@@ -56,6 +56,8 @@ tags:
     description: What version this server runs, and where it updates from
   - name: events
     description: Structured events and the audit trail
+  - name: assistant
+    description: A language model running on this machine, if it has one
 
 security:
   - sessionCookie: []
@@ -319,6 +321,159 @@ paths:
                 $ref: "#/components/schemas/Error"
         "503":
           $ref: "#/components/responses/Unavailable"
+
+  /assistant:
+    get:
+      tags: [assistant]
+      summary: Whether this server has a local model, and what it is
+      description: |
+        Requires `assistant.use`.
+
+        Answers on every machine, including the great majority that have no model at all:
+        `available: false` with a `reason` written for a person. A caller can then say what
+        is missing rather than hiding a feature silently — the dashboard uses this to decide
+        whether to show the tab.
+
+        **Nothing here reaches the internet.** The model is a file on this machine, served by
+        a process on loopback, with no account and no upstream. That is the entire reason a
+        small model on modest hardware is worth having over a better one elsewhere.
+
+        Off unless core was started with `--assistant-url`.
+      operationId: getAssistant
+      responses:
+        "200":
+          description: What the assistant is, or why there is not one
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available, max_turns, max_chars]
+                properties:
+                  available:
+                    type: boolean
+                    description: Whether a question asked right now would be answered.
+                  model:
+                    type: string
+                    description: The model being served, named for reading.
+                    example: Qwen3.8-4B-Q4_K_M
+                  reason:
+                    type: string
+                    description: |
+                      Why it is unavailable, in a sentence meant for a person. Distinguishes
+                      "no key yet" from "cannot read the key" — those have different fixes.
+                  max_turns:
+                    type: integer
+                    description: |
+                      Most messages a conversation may carry. The model's context is small,
+                      and a limit stated up front is better than one that silently drops the
+                      earliest turns — which reads as the assistant developing amnesia.
+                  max_chars:
+                    type: integer
+                    description: Longest single message accepted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /assistant/chat:
+    post:
+      tags: [assistant]
+      summary: Ask the local model something
+      description: |
+        Requires `assistant.use`.
+
+        Returns **Server-Sent Events**, not JSON. This hardware writes six or seven tokens a
+        second, so a full answer takes minutes; a client that waited for a complete body
+        would be indistinguishable from one talking to a hung server.
+
+        Events:
+
+        - `token` — `{"text": "..."}`, a piece of the answer. Concatenate in order.
+        - `done` — `{"reason": "stop" | "length"}`. `length` means the answer hit the token
+          ceiling and stops mid-thought, which a client should say rather than leave a
+          sentence that simply ends.
+        - `failed` — the stream broke part-way. Text already received is still valid.
+
+        Lines beginning `:` are comments and must be ignored.
+
+        **One question at a time.** The model server has a single slot. A second request is
+        refused with `409` rather than queued, because a caller waiting behind somebody
+        else's two-minute answer cannot tell that from a server that has stopped responding.
+
+        **Nothing is stored.** The transcript is sent by the client on each turn and kept by
+        nobody once the response is written.
+
+        Refusals arrive as ordinary JSON, since they happen before streaming starts.
+      operationId: postAssistantChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                messages:
+                  type: array
+                  description: |
+                    The conversation so far, oldest first, ending with the new question.
+                    Bounded by `max_turns` from `GET /assistant`.
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role:
+                        type: string
+                        enum: [user, assistant]
+                      content:
+                        type: string
+                think:
+                  type: boolean
+                  default: false
+                  description: |
+                    Let the model reason before answering. Measured at roughly four times the
+                    time-to-answer on this class of hardware, so it stays something asked for
+                    rather than a default.
+      responses:
+        "200":
+          description: The answer, streamed as it is written
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |
+                : connected
+
+                event: token
+                data: {"text":"A home "}
+
+                event: token
+                data: {"text":"server is "}
+
+                event: done
+                data: {"reason":"stop"}
+        "400":
+          description: Nothing to ask, a message too long, or a conversation past the limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The assistant is already answering a question
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: No model is configured, or it is not responding
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /jobs:
     get:
