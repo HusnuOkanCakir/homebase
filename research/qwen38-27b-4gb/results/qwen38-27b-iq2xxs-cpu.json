@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "status": "measured",
+  "claim": "Qwen3.8-27B IQ2_XXS bu sunucunun CPU'sunda 0,61 tok/s uretiyor. Laboratuvarin kendi >=1 tok/s kapisini gecemiyor.",
+  "model_id": "qwen38-27b-unsloth-ud-iq2-xxs",
+  "model_sha256": "e792d8fb3142fe6d9171876d6da0f71f05a71028718debc72dbec93ff645e67d",
+  "runtime_revision": "b10549",
+  "hardware": {
+    "host": "ASUS N550JV",
+    "cpu": "Intel i7-4700HQ (Haswell, 4c/8t, AVX2+FMA)",
+    "ram_bytes": 16643186688,
+    "disk": "ST1000LM024, 5400 rpm",
+    "gpu": "GeForce GT 750M (Kepler, kullanilmadi)"
+  },
+  "settings": {
+    "backend": "CPU (libggml-cpu-haswell.so)",
+    "threads": 4,
+    "prompt_tokens": 32,
+    "generated_tokens": 16,
+    "repetitions": 1
+  },
+  "measurements": {
+    "model_size_gib": 6.76,
+    "bits_per_parameter": 2.161,
+    "prompt_tokens_per_second": 0.71,
+    "decode_tokens_per_second": 0.61,
+    "effective_memory_bandwidth_gib_s": 4.12,
+    "theoretical_peak_gb_s": 25.6,
+    "percent_of_peak": 17,
+    "seconds_per_100_token_answer": 164,
+    "wall_seconds_total": 110
+  },
+  "gate_result": {
+    "lab_gate_decode_tokens_per_second": 1.0,
+    "measured": 0.61,
+    "passes": false
+  },
+  "projection": {
+    "note": "Planin MC-9.9B student'i, ayni makinede, ayni etkin bant genisligiyle.",
+    "student_size_gib": 2.81,
+    "projected_decode_tokens_per_second": 1.47,
+    "speedup_over_27b": 2.4
+  },
+  "findings": [
+    "Onceki uc denemede 'takildi' sanilan sey donanim degil benim hatalarimdi: baglam sinirlanmadigi icin llama.cpp modelin native 262.144 token'ina KV ayirmaya calisti (64 KiB/token => ~16 GiB, makinenin RAM'inden buyuk), ve llama-cli interaktif moda dusup stdin bekledi. Dogru calistirildiginda tum kosu 110 saniye surdu.",
+    "Darbogaz disk degil. Model RAM'e alindiktan sonra disk okumasi 50 KB/s'ye duser; islem CPU'da memory-bandwidth bound calisir.",
+    "Etkin bant genisligi teorik tepe degerin yalnizca %17'si. IQ2_XXS acma maliyeti yuksek; bu, dusuk-bit kernel tasariminin neden onemli oldugunu dogrudan gosteren sayidir.",
+    "Planin student'i bile bu makinede ~1,5 tok/s civarinda kalir."
+  ]
+}
