@@ -39,6 +39,16 @@ const (
 	PermBackupRun     = "backup.run"
 	PermUpdateRead    = "update.read"
 	PermUpdateManage  = "update.manage"
+
+	// PermAssistantUse is the right to ask the local model a question.
+	//
+	// Its own permission rather than a fold into system.read, because it is a
+	// different kind of thing: everything else here reads or changes the
+	// machine, and this spends it. A question occupies all four cores for the
+	// length of an answer, so somebody who should be able to see the dashboard
+	// is not automatically somebody who should be able to make the server
+	// unresponsive for a minute.
+	PermAssistantUse = "assistant.use"
 )
 
 // AdministratorPermissions is what the first-run administrator receives.
@@ -49,6 +59,7 @@ var AdministratorPermissions = []string{
 	PermNetworkDiag, PermNetworkModify,
 	PermBackupRead, PermBackupRun,
 	PermUpdateRead, PermUpdateManage,
+	PermAssistantUse,
 }
 
 const (
