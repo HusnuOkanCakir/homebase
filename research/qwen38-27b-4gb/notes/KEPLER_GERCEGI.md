@@ -49,6 +49,40 @@ Qwen3.5-0.8B Q4_0, 4 thread, decode t/s:
 Monotonik. Tatli nokta yoktur. Prompt isleme farki daha da buyuktur: CPU'da
 141,91 t/s, tam offload'da 4,69 t/s — otuz kat.
 
+## Acik surucu yolu: olculdu
+
+Soru soruldu: CUDA ve NVIDIA'nin kapali surucusu olmadan, nouveau + NVK ile
+devam edebilir miyiz? Cevap iki parcali.
+
+**Calisiyor.** `nvidia` modulu kaldirilip nouveau yuklendiginde Vulkan aygiti
+`GeForce GT 750M (NVK GK107)` olarak gorunur, `driverID = DRIVER_ID_MESA_NVK`,
+Mesa 25.2.8, cekirdek 6.8. llama.cpp onu bulur ve 3686 MiB serbest bellek
+bildirir. Tek satir NVIDIA kapali kodu calismaz.
+
+**Ama dort kat yavastir.** Ayni sweep, ayni model:
+
+| GPU'ya tasinan katman | proprietary | NVK |
+|---:|---:|---:|
+| 0 (saf CPU) | 27,31 | 15,79 |
+| 4 | 16,34 | 4,64 |
+| 8 | 15,30 | 3,93 |
+| 16 | 12,88 | 3,26 |
+| 99 (tumu) | 10,21 | **2,62** |
+
+NVK turu sirasinda makine mesguldu (load ~1,9), bu yuzden mutlak degerler degil
+oranlar okunmalidir: o kosullarda saf CPU tabani 14,34 t/s olculdu, NVK'nin
+ngl=0 degeri 15,79 ile bununla tutarli. Tam offload'da NVK proprietary'nin
+%26'sidir.
+
+Bir gecis kriteri "NVK proprietary'nin en az %60-70'ine ulasmali" derse bu
+makinede gecmez. Daha onemlisi: proprietary Vulkan zaten CPU'dan yavas oldugu
+icin, NVK %100'e ulassaydi bile sonuc degismezdi.
+
+**Yan etki, ve olumlu olani:** nouveau karti dusuk saatlerde tutar. Kapali
+surucu karti P0'da tutuyordu ve makine ~65 C'de bosta duruyordu; nouveau ile
+onceki taban ~52 C idi. Bu, GPU'yu inference icin degil, makineyi serin tutmak
+icin nouveau'da birakmanin gecerli bir sebebidir.
+
 ## Laboratuvar icin sonuc
 
 Asama matrisindeki 2, 3 ve R adimlari ("CUDA auto/offload", "Pascal offload

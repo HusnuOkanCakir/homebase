@@ -34,7 +34,7 @@
     "vulkan_offload_sweep_decode_tokens_per_second": {
       "0": 27.31,
       "4": 16.34,
-      "8": 15.30,
+      "8": 15.3,
       "16": 12.88,
       "99": 10.21
     },
@@ -42,6 +42,15 @@
       "gpu_layers": 99,
       "prompt_tokens_per_second": 4.69,
       "decode_tokens_per_second": 11.44
+    },
+    "nvk_open_driver_sweep_decode_tokens_per_second": {
+      "_note": "Ayni makine, nouveau + NVK (Mesa 25.2.8). Bu tur sirasinda makine mesguldu (load ~1.9), bu yuzden mutlak degerler degil oranlar karsilastirilmalidir: ayni kosullardaki saf CPU taban degeri 14.34 t/s olculdu.",
+      "0": 15.79,
+      "4": 4.64,
+      "8": 3.93,
+      "16": 3.26,
+      "99": 2.62,
+      "cpu_baseline_same_conditions": 14.34
     }
   },
   "findings": [
@@ -49,7 +58,9 @@
     "Vulkan backend'i calisir ve GPU'yu 4038 MiB serbest bellekle gorur. Ancak Kepler'de fp16, int dot product ve matrix core yoktur; llama.cpp bunlari fp32 yollarina dusurur.",
     "Offload monotonik olarak zarar verir. GPU'ya tasinan her katman decode hizini dusurur; bir tatli nokta yoktur.",
     "Prompt isleme GPU'da 30 kat yavastir (141.91 -> 4.69 t/s), bu da uzun baglamlarda GPU'yu kullanilamaz yapar.",
-    "Sonuc: bu donanimda dogru yol saf CPU'dur. Haswell'in AVX2 yolu (libggml-cpu-haswell.so otomatik secilir) GT 750M'den hizlidir."
+    "Sonuc: bu donanimda dogru yol saf CPU'dur. Haswell'in AVX2 yolu (libggml-cpu-haswell.so otomatik secilir) GT 750M'den hizlidir.",
+    "Tamamen acik yigin calisiyor: nouveau cekirdek surucusu + NVK Vulkan (Mesa 25.2.8, cekirdek 6.8). llama.cpp GPU'yu 'GeForce GT 750M (NVK GK107)' olarak gorur ve 3686 MiB serbest bellek bildirir. Yani acik yol bir hayal degil, bugun bu makinede mevcut.",
+    "Ama NVK proprietary surucuden yaklasik dort kat yavastir. Tam offload'da NVK 2.62 t/s, proprietary 10.21 t/s: oran %26. Ayni kosullardaki CPU tabanina gore NVK offload 5,5 kat yavas; proprietary 2,7 kat yavasti. Acik surucu yolu donanimi hizlandirmaz, yavaslatir."
   ],
-  "implication_for_lab": "README'deki asama matrisinin 2, 3 ve R adimlari (CUDA auto/offload, Pascal offload siniri) bu makinede uygulanamaz. Deney matrisi CPU-only olarak yeniden okunmalidir. requirements.json compute_capabilities ['6.0','6.1'] ister; olcum 3.0'dir, yani doctor cikti 'fail' verir ve bu dogrudur."
+  "implication_for_lab": "README'deki asama matrisinin 2, 3 ve R adimlari (CUDA auto/offload, Pascal offload siniri) bu makinede uygulanamaz. Deney matrisi CPU-only olarak yeniden okunmalidir. requirements.json compute_capabilities ['6.0','6.1'] ister; olcum 3.0'dir, yani doctor cikti 'fail' verir ve bu dogrudur. Acik surucu (nouveau + NVK) olculdu ve proprietary Vulkan'in yalnizca %26'sina ulasti. Bir feasibility gate 'NVK proprietary'nin en az %60-70'ine ulasmali' derse, bu makinede gecmez. Ustelik proprietary Vulkan zaten CPU'dan yavas oldugu icin, NVK'nin %100'e ulasmasi bile sonucu degistirmezdi."
 }
