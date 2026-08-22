@@ -58,6 +58,21 @@ fi
 chmod 0640 /etc/qwen-lab/api-key
 chgrp qwenlab /etc/qwen-lab/api-key
 
+# The person who installed this is going to want to run bin/qwen-chat, which
+# reads that key. Without this they need sudo for every question, and the usual
+# way round that is to copy the key somewhere weaker — so put them in the group
+# instead. It takes effect on their next login.
+#   undo with:  sudo gpasswd -d <user> qwenlab
+OPERATOR="${SUDO_USER:-}"
+if [ -n "$OPERATOR" ] && [ "$OPERATOR" != "root" ]; then
+    if id -nG "$OPERATOR" | tr ' ' '\n' | grep -qx qwenlab; then
+        :
+    else
+        usermod -aG qwenlab "$OPERATOR"
+        echo "  added $OPERATOR to the qwenlab group (log out and back in)"
+    fi
+fi
+
 cat > /etc/qwen-lab/server.env <<ENV
 # Written by systemd/install. Edit and restart to change where it listens.
 #
@@ -78,6 +93,9 @@ systemctl enable --now qwen-lab-server
 echo
 echo "  listening on $HOST:$PORT, model $(basename "$MODEL")"
 echo "  the API key is in /etc/qwen-lab/api-key, readable by root and qwenlab"
+echo
+echo "  ask it something:"
+echo "    ./bin/qwen-chat 'what is a home server for?'"
 echo
 echo "  from another machine:"
 echo "    ssh -N -L $PORT:127.0.0.1:$PORT $(logname 2>/dev/null || echo user)@$(hostname)"
