@@ -1,0 +1,40 @@
+# Turning on the local assistant.
+#
+# Not installed by any package, and deliberately not part of
+# homebase-core.service: a language model is an optional thing a particular
+# machine happens to have, and the unit that ships with Homebase should not
+# imply otherwise. This is the file that turns it on, on a machine that has one.
+#
+#   sudo mkdir -p /etc/systemd/system/homebase-core.service.d
+#   sudo cp homebase-core-assistant.conf.example \
+#           /etc/systemd/system/homebase-core.service.d/assistant.conf
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart homebase-core
+#
+# To turn it off again, delete that file and reload. Nothing else changes:
+# with no URL the API reports the assistant unavailable and the dashboard
+# hides the tab.
+#
+# **What this exposes.** Until now the model listened on loopback and reaching
+# it meant an SSH tunnel. This puts it behind the dashboard instead, which means
+# anybody who can sign in to Homebase from your network can use it — and one
+# question occupies every core for as long as the answer takes. That is what the
+# `assistant.use` permission is for: an account that should not be able to do
+# that should not be given it.
+#
+# The model itself is unchanged by this. It still listens only on 127.0.0.1;
+# core reaches it over loopback and the browser never talks to it directly, so
+# the model's own API key stays on the machine.
+
+[Service]
+Environment=HOMEBASE_ASSISTANT_URL=http://127.0.0.1:8088/v1
+Environment=HOMEBASE_ASSISTANT_KEY_FILE=/etc/qwen-lab/api-key
+
+# core runs as `homebase` and the model's key is 0640 root:qwenlab. This is the
+# whole of the extra access it needs — a supplementary group rather than a
+# looser mode on the key, so the file stays unreadable to everyone else.
+#
+# Without this line core starts normally and reports the assistant unavailable
+# with "Homebase cannot read the local model's API key", which is the intended
+# failure: it says what is wrong rather than appearing to work.
+SupplementaryGroups=qwenlab
