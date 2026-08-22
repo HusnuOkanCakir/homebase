@@ -1,0 +1,83 @@
+#!/bin/sh
+#
+# Install the lab's model server as a systemd unit.
+#
+# Deliberately a script somebody runs by hand rather than anything Homebase
+# does: this lab is a research spike and must not acquire a foothold in the
+# product. Nothing here touches Homebase's packaging, manifests or services.
+#
+# Reversible in full:
+#
+#   sudo systemctl disable --now qwen-lab-server
+#   sudo rm /etc/systemd/system/qwen-lab-server.service
+#   sudo rm -rf /etc/qwen-lab
+#   sudo userdel qwenlab
+#
+# Usage:  sudo ./systemd/install [--host 127.0.0.1] [--port 8088] [--model PATH]
+
+set -eu
+
+HOST=127.0.0.1
+PORT=8088
+MODEL=/srv/qwen-lab/models/candidates/Qwen3.8-4B-Q4_K_M.gguf
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --host)  HOST="$2"; shift 2 ;;
+        --port)  PORT="$2"; shift 2 ;;
+        --model) MODEL="$2"; shift 2 ;;
+        *) echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+[ "$(id -u)" -eq 0 ] || { echo "run this with sudo" >&2; exit 1; }
+[ -r "$MODEL" ] || { echo "no model at $MODEL" >&2; exit 1; }
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+
+# An account of its own, with no login and no home. The server reads weights
+# and answers a socket; it has no business being able to do anything else.
+if ! id qwenlab >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin qwenlab
+    echo "  created the qwenlab account"
+fi
+# It must be able to read the model tree, which belongs to somebody else.
+chgrp -R qwenlab /srv/qwen-lab 2>/dev/null || true
+chmod -R g+rX /srv/qwen-lab 2>/dev/null || true
+
+mkdir -p /etc/qwen-lab
+chmod 0750 /etc/qwen-lab
+chgrp qwenlab /etc/qwen-lab
+
+# Generated here rather than chosen, and never printed to a log. Without it the
+# server answers anybody who can reach the port.
+if [ ! -s /etc/qwen-lab/api-key ]; then
+    head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 40 > /etc/qwen-lab/api-key
+    echo "  generated an API key"
+fi
+chmod 0640 /etc/qwen-lab/api-key
+chgrp qwenlab /etc/qwen-lab/api-key
+
+cat > /etc/qwen-lab/server.env <<ENV
+# Written by systemd/install. Edit and restart to change where it listens.
+#
+# QWEN_HOST=127.0.0.1 keeps it on loopback, reachable only through an SSH
+# tunnel. Setting it to 0.0.0.0 puts an LLM on the house network — the API key
+# is then the only thing between it and every device on that network.
+QWEN_MODEL=$MODEL
+QWEN_HOST=$HOST
+QWEN_PORT=$PORT
+ENV
+chmod 0640 /etc/qwen-lab/server.env
+chgrp qwenlab /etc/qwen-lab/server.env
+
+install -m 0644 "$HERE/qwen-lab-server.service" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now qwen-lab-server
+
+echo
+echo "  listening on $HOST:$PORT, model $(basename "$MODEL")"
+echo "  the API key is in /etc/qwen-lab/api-key, readable by root and qwenlab"
+echo
+echo "  from another machine:"
+echo "    ssh -N -L $PORT:127.0.0.1:$PORT $(logname 2>/dev/null || echo user)@$(hostname)"

@@ -1,0 +1,75 @@
+[Unit]
+Description=Qwen lab — local OpenAI-compatible model server
+Documentation=file:///srv/qwen-lab/README
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+
+# The measured-best configuration on this host, and every number in it was
+# arrived at by elimination rather than by preference:
+#
+#   -c 2048        The model's native context is 262,144 tokens. At 64 KiB per
+#                  token that KV cache alone is ~16 GiB, larger than this
+#                  machine's RAM — leaving it at the default is what made three
+#                  early runs look like hangs.
+#   -t 4           Four physical cores. The other four are hyperthreads and add
+#                  nothing to a memory-bound workload.
+#   Q4_K_M         Not the smallest quantisation, the fastest. IQ2 reaches 17%
+#                  of this machine's memory-bandwidth peak against Q4_K_M's 71%,
+#                  because unpacking two-bit weights costs more than fetching
+#                  them. See notes/TEKNIKLER.md.
+#   thinking off   The model reasons before answering by default, which does not
+#                  change tokens per second but quadruples how many tokens are
+#                  spent. 22 seconds to 5 on a simple question. Callers that
+#                  want reasoning can pass their own chat_template_kwargs.
+#   127.0.0.1      llama-server has no authentication of its own beyond the API
+#                  key below. Loopback is the default so that reaching it is a
+#                  decision somebody makes, not one they inherit.
+EnvironmentFile=/etc/qwen-lab/server.env
+ExecStart=/srv/qwen-lab/runtime/cpu/llama-b10549/llama-server \
+    --model ${QWEN_MODEL} \
+    --host ${QWEN_HOST} --port ${QWEN_PORT} \
+    --ctx-size 2048 --parallel 1 --batch-size 512 --ubatch-size 64 \
+    --threads 4 \
+    --cache-type-k q8_0 --cache-type-v q8_0 \
+    --chat-template-kwargs '{"enable_thinking":false}' \
+    --api-key-file /etc/qwen-lab/api-key \
+    --metrics
+
+Restart=on-failure
+RestartSec=10s
+
+# Somebody else's weights, executed on a machine that also holds this
+# household's files. It gets no more than it needs.
+User=qwenlab
+Group=qwenlab
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+# Read-only: the model and the runtime. Nothing here writes to either.
+ReadOnlyPaths=/srv/qwen-lab
+# AF_UNIX for the log, AF_INET to listen. No raw sockets, no netlink.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# This machine runs nine other applications and their media. A model server
+# that grew without bound would take them with it.
+MemoryMax=7G
+MemoryHigh=6G
+# Never in front of the things people actually use.
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
