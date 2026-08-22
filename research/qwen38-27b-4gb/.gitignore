@@ -11,3 +11,13 @@ __pycache__/
 *.safetensors
 *.bin
 *.log
+
+# Depo kokundeki `bin/` kurali Go derleme ciktilarini disliyor, ama bu labin
+# giris noktalari da ayni ada sahip bir dizinde: `bin/qwen-lab` ve
+# `bin/qwen-chat` bu yuzden hic izlenmemisti — README onlari calistirmayi
+# soyluyor olsa bile. Dizini geri aliyoruz, icindeki derleme ciktilarini degil.
+!/bin/
+/bin/*
+!/bin/qwen-lab
+!/bin/qwen-chat
+!/bin/self-test

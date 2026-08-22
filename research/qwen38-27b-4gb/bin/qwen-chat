@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Repository-relative entry point for the lab's model client."""
+
+from pathlib import Path
+import sys
+
+
+LIB_DIR = Path(__file__).resolve().parent.parent / "lib"
+sys.path.insert(0, str(LIB_DIR))
+
+from qwen_chat import main  # noqa: E402
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
