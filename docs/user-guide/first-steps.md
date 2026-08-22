@@ -13,7 +13,7 @@ until you are trying to remember which machine in the house you are looking at.
 
 Under **This server**, either in the getting-started list or with **Rename this server**
 lower down, type a name and choose **Use this name**. The list stops offering it once the
-server has a name of its own; the button under **This server** stays for ever, so you can
+server has a name of its own; the button under **Settings** stays for ever, so you can
 change your mind years later.
 
 Letters, digits and hyphens only — no spaces, no dots, no accents. Something like

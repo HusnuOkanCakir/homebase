@@ -21,7 +21,7 @@ than knowing you are not.
 
 ## Making a backup
 
-Open **Backup**, choose the disk, and pick one of two:
+Open **Storage**, choose the disk, and pick one of two:
 
 **Settings only** takes a few seconds. It saves your accounts, your applications' settings,
 and Homebase's record of which disk is which. Not your films or photographs.
@@ -70,7 +70,7 @@ looking at the disk when you are not there.
 ## Restoring a whole server
 
 Install Homebase on the new machine, plug the backup disk in, set it up under **Storage**,
-and open **Backup**. Your backups will be listed, including which machine each came from.
+and open **Storage**. Your backups will be listed, including which machine each came from.
 
 Choose one and press **See what this would do** first. Homebase will tell you:
 
@@ -109,7 +109,7 @@ wrote down does, and it still works on the rebuilt machine. See
 
 ## Backups that happen on their own
 
-Under **Backup**, **Automatic backups**: every night, every week, or off.
+Under **Storage**, **Automatic backups**: every night, every week, or off.
 
 Homebase backs up at about three in the morning, onto the disk you chose. If the server is
 switched off at the time — and a laptop in a cupboard usually is — it does the backup the

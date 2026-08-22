@@ -19,6 +19,28 @@
 | [Backup and restore](backup.md) | Making a backup, checking it, and getting your files back |
 | [Finding your server](network.md) | The address to open, the warning your browser shows once, and what to check when nothing loads |
 | [If you forget your password](passwords.md) | Your recovery code, and how to get back into your own server |
+| [Sharing files](sharing.md) | A folder on the server as a drive on your laptop, and the address to type |
+| [Reaching it from anywhere](remote-access.md) | Wireguard, the one setting on your router, and adding a device |
+| [Using Wi-Fi](wifi.md) | Joining a network, and why a cable is better for a server |
+
+## Finding your way around
+
+The dashboard has seven sections, and they are meant to be read as a sentence
+about what you want:
+
+| | |
+|---|---|
+| **Home** | What is wrong, your applications as things to press, and how the machine is |
+| **Apps** | Installing and removing them |
+| **Files** | Sharing folders onto your network |
+| **Storage** | Disks, and backups onto them |
+| **Network** | How the server is connected, Wi-Fi, and reaching it from outside |
+| **Settings** | The server's name, updates, your recovery code, and switching it off |
+| **Help** | When something is not working |
+
+Pressing an application on **Home** opens the application itself. The small
+**Details** link under it opens Homebase's page about it, which is where you stop
+it, change its storage, or read its log.
 
 ## Planned
 

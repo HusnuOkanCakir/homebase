@@ -14,7 +14,8 @@ Stage 1 must be genuinely good on its own. If the AI never ships, what remains s
 be worth running — and the AI, when it arrives, is a client of the same APIs the dashboard
 uses, never a privileged part of the system.
 
-**Current position: Milestones 0–8 and 10–12 complete. Milestone 9 in progress; 13–15 planned.** A USB stick turns a Windows
+**Current position: Milestones 0–8, 10, 12 and 15–17 complete. Milestones 9, 11 and 13 in
+progress; 14 open.** A USB stick turns a Windows
 laptop into a working server, a new server says what to do next, and it is then reachable by
 name over HTTPS from any device in the house. It backs itself up every night, looks for
 updates on its own, applies one and puts the previous version back if it does not work, and
@@ -40,11 +41,26 @@ Driver quirks, other Wi-Fi adapters, USB disks that misbehave.
 Files are on the network now, over SMB: a folder on the server is a drive on a laptop,
 which is the half a browser cannot be.
 
-**The gap that is left is the catalogue.** Three applications, one of which exists
-to prove installation works. Everything needed to add more is built and proven —
-Milestones 13 to 15 are the content, and the two places real applications do not
-fit the model: several of them need more than one container, and Home Assistant
-needs privileges no other manifest is allowed.
+**The catalogue is no longer the gap.** It was three applications, one of which
+existed to prove installation works; it is eleven now, and the two places real
+applications did not fit the model have both been settled. Several need more than
+one container — a manifest describes them, each supporting container joins a
+private network and there is deliberately no field with which to ask for a port.
+And a great many popular images cannot run as an arbitrary user, which is
+answered by two narrowly-scoped root permissions rather than by one broad one.
+
+Asking for a film in one place and having it arrive in a library works, on real
+hardware, end to end.
+
+**The server also stopped believing its provider.** Name lookups leave it over
+TLS now, which is a privacy property and, more immediately, the reason
+applications stopped being handed wrong addresses for sites that are working.
+
+**What is left is proof rather than construction.** Two things in Stage 1 are
+finished in code and unproven in the world: nothing has ever connected to the VPN
+from outside the house — one setting on a domestic router that Homebase cannot
+reach — and there is still exactly one machine. One laptop is a data point, not a
+milestone.
 
 Nothing has been released. The release machinery exists and has never been run for real, and
 there is no host for the update archive yet.
@@ -817,7 +833,12 @@ The half a home server is actually for. Everything so far assumes the same house
       table of providers, never a URL from the caller, and the token declared secret so it is
       redacted from the audit log
 - [x] Wake-on-LAN: `homebasectl wake`, and the server reporting whether it can be woken
-- [ ] A screen for it on the dashboard
+- [x] A screen for it on the dashboard, under Network
+- [x] **Three faults that a passing VM test did not catch**, found by pointing it at a
+      server that runs applications. See below
+- [ ] A device outside the house has actually connected. Still nothing has:
+      `ever_connected` is false on the one real machine, because the router has
+      not been told to forward the port
 
 **Done when:** a device outside the house reaches the server by name, over Wireguard, with
 no third-party account involved. **The tunnel half is done** — `make vm-test-vpn` (138s), two
@@ -825,8 +846,37 @@ machines, one of which has no Homebase on it and knows nothing about the server 
 configuration it was handed. It completes a handshake, reaches the dashboard over the tunnel,
 and stops reaching it the moment its key is taken away.
 
-What is left is a screen on the dashboard. The tunnel, the name that follows a changing home
-address, and waking a sleeping machine all work from a terminal.
+What is left is not code. It is one setting on a domestic router, which Homebase cannot
+reach and deliberately does not try to — and until a real device connects over a real
+internet connection, the honest status of this milestone is *unproven outside a lab*.
+
+#### What the VM test could not see
+
+The tunnel test passes on two clean VMs. Pointed at a server with nine applications on it,
+three faults appeared at once, and none of them announces itself — the tunnel comes up, the
+handshake completes, traffic flows, and then something *else* fails somewhere nobody is
+standing.
+
+**Nothing was forwarded.** The server wrote no `PostUp` rules at all, so every packet for the
+rest of the house arrived and was dropped: Ubuntu's `DEFAULT_FORWARD_POLICY` is `DROP`, and a
+printer replying to `10.71.0.2` has no idea where that is. The client configuration had been
+promising `192.168.1.0/24` the whole time. The VM test never noticed because there was
+nothing else on its network to reach.
+
+**Ten Docker networks were being routed into the tunnel.** `localNetworks` took any running
+interface with a private address, which on a server that runs applications is `docker0` and
+nine bridges. A phone was to be told to route `172.17.0.0/16` through `172.26.0.0/16` — ranges
+nothing at the far end can reach, one of which is very likely the network of whatever café it
+is sitting in. A VM with no containers has no such interfaces.
+
+**Every device was handed a resolver that does not exist.** `DNS = 10.71.0.1` was
+unconditional, and nothing listens there unless a name server is installed. Wireguard clients
+do not treat that line as advisory: setting it replaces the device's resolver while the
+tunnel is up, so a phone that connected would resolve *nothing* — which reads as the VPN
+having broken the internet.
+
+The lesson is the same one Milestone 9 keeps teaching: a test environment that is clean is a
+test environment that cannot find the faults that only exist where things are installed.
 
 #### A name that stopped updating says so
 
@@ -1057,11 +1107,21 @@ fit the model.
 - [x] **Two applications cannot claim the same port**, which nothing checked —
       each manifest is valid alone and the collision only exists across the
       catalogue
+- [x] **The media loop, end to end** — Prowlarr, Sonarr, Radarr and Jellyseerr
+      alongside qBittorrent and Jellyfin. Ask for a film in one place and it
+      arrives in the library. Proven on the real machine: request, grab, download,
+      hard-link, play
+- [x] **Stremio** — the other half of the same want. It plays while it fetches and
+      keeps nothing, which is a different thing from a library and is the right
+      answer to "I want to see this one thing now"
+- [x] **AdGuard Home** — the first application that is infrastructure rather than a
+      thing to open. See Milestone 16
 - [ ] **Immich** — photographs off a phone and onto hardware its owner controls.
       The most-wanted self-hosted application there is, and the one that makes a
-      server worth the electricity. Needs a database container, which the manifest
-      schema does not yet describe
-- [ ] **Paperless-ngx** — documents, searchable. Also multi-container
+      server worth the electricity. The multi-container work it was blocked on is
+      done; what remains is the manifest and a real test
+- [ ] **Paperless-ngx** — documents, searchable. Blocked on nothing any more: the
+      root-elevation decision below is what it was waiting for
 - [ ] **Nextcloud** — deliberately last of these four. It overlaps with what SMB
       already does, needs a database and a cache, and is the heaviest thing in the
       catalogue by a distance
@@ -1076,7 +1136,18 @@ fit the model.
 - [ ] **A per-application initial password**, generated and reported once. File
       Browser ships `admin`/`admin`; qBittorrent ships `admin`/`adminadmin`. An
       application published onto the network with a documented default password is
-      an open door, and the manifest must be able to say so
+      an open door, and the manifest must be able to say so. It got worse before
+      it got better: File Browser's manifest confidently told people to find a
+      generated password in its log, there is no such line, and the real
+      credentials were `admin`/`admin` sitting in the open while the instruction
+      sent somebody to an empty log. Checked against a throwaway container rather
+      than against the documentation, and the manifest says the true thing now —
+      but saying it is not fixing it
+- [x] **A privilege an application holds is shown before it is installed.** Both
+      root permissions justify themselves on being "declared per application and
+      shown to whoever installs it", and for a while the second half was true of
+      neither: the field carrying the reason was dropped between hostd and the
+      browser, so the dashboard rendered nothing and nothing failed
 
 #### The wall the multi-container work hit
 
@@ -1110,6 +1181,36 @@ make for Home Assistant — so it is the same milestone's problem, arriving earl
 and from a different direction. **Paperless is not in the catalogue** and will
 not be until this is settled: shipping an application that installs and
 crash-loops is worse than not shipping it.
+
+#### How it was settled
+
+The first option, narrowed until it was defensible. Two permissions, not one,
+because two genuinely different things were being asked for:
+
+**`starts_as_root`** — the image begins as root, corrects ownership of what it was
+given, and drops to the account Homebase chose through `PUID` and `PGID`. Every
+linuxserver.io image works this way. The elevation lasts as long as the entrypoint
+does. Sonarr, Radarr and Prowlarr run under it.
+
+**`runs_as_root`** — the image never drops, and ignores `PUID` and `PGID`
+entirely. This exists because granting it `starts_as_root` would be a promise the
+image does not keep, and the schema said so in words: *an image that honours
+neither must not be granted this*. So the other case is named rather than smuggled
+through the first.
+
+Neither is safer than the other in every direction — root lasts longer in the
+second — so the second carries a constraint that hostd enforces and a test proves:
+**every storage slot must be private**. The frightening form of permanent root is
+the one holding `DAC_OVERRIDE` over somebody's photographs, and an application
+that can only reach a directory Homebase created for it cannot get there.
+
+Both are declared per application, require a written reason a reviewer can check
+against the image's own entrypoint, and are shown to whoever is about to install
+it — before the button, not after, because the point of declaring a relaxation is
+that somebody can decline it.
+
+Stremio and AdGuard Home are in the catalogue under `runs_as_root`. Paperless is
+not, but nothing structural is stopping it any more.
 
 **Done when:** installing any application in the catalogue produces something
 reachable, with no default credentials left in it, and a folder somebody can put
@@ -1209,6 +1310,79 @@ through somebody else's VPN is the usual arrangement and Homebase has a Wireguar
 the server's own remote access and a third-party tunnel in one configuration
 file.
 
+### Milestone 16 — Privacy, and the name lookups nobody sees
+
+The provider was lying to this server, and every application on it believed the
+lie. Names are looked up in plain text, and where a provider filters at the DNS
+level the answer is one of their own machines rather than the address asked for —
+so an application is handed a wrong address by something it has no reason to
+distrust, and reports the site as being down.
+
+Measured on the machine this is developed against, not argued from principle.
+
+- [x] **The server's own resolver talks to the internet over TLS.** Cloudflare and
+      Quad9, strict rather than opportunistic — opportunistic falls back to
+      cleartext when the encrypted connection fails, which the party being
+      defended against can arrange
+- [x] **Containers inherit it**, which is where the practical win is: applications
+      stop being lied to whether or not anybody installs a blocker
+- [x] **The change verifies itself and rolls back.** Every other failure in
+      Homebase leaves a feature not working; this one can leave a machine that
+      cannot resolve the name of its own update server, for the person logging in
+      to fix it
+- [x] **AdGuard Home**, with three guard rails opened as narrowly as they could be:
+      `provides: "dns"` unlocks port 53 and no other, for one application in the
+      catalogue; `extra_ports` because a name server has two and they are not
+      alike; and a capability allowlist in hostd, which should have been there
+      already
+- [ ] **A device actually pointed at it.** Nothing is blocked until one is, and
+      the decision to point a whole house at it is not Homebase's to make — when
+      the server is off, the house has no DNS, and that trade belongs to whoever
+      owns the router
+
+**Done when:** a lookup from this server, and from inside its containers, cannot
+be read or rewritten by the network it is on.
+
+#### Why the blocker is the smaller half
+
+Ad blocking is what people install AdGuard for. The encrypted upstream is what
+fixes an application reporting a site as down. Both arrive together and only one
+of them requires anybody to change a setting on a router, which is why the
+milestone is written around the second.
+
+### Milestone 17 — A dashboard organised around the person using it
+
+Nine tabs, three of them spent on things somebody does twice a year, while the
+applications the server exists to run shared one tab with the catalogue of ones it
+does not. Landing on it showed a wall of prose about memory.
+
+- [x] **A home screen**: anything wrong, then the applications as things to press,
+      then how the machine is. Nothing at all when nothing is wrong — a panel
+      that is always present is one people stop reading
+- [x] **Seven tabs, each a word.** Backups joined disks, because a backup *is* a
+      disk decision. Updates, the recovery code, the machine's name and its power
+      buttons became Settings
+- [x] **Switching the server off**, which needed the operation as well as the
+      button — and needed it to say how the machine would be switched on again
+      *before* the confirmation, because afterwards there is no screen left
+- [x] **File sharing has a screen.** It had worked for weeks and existed only in
+      `homebasectl share`, which from a browser is indistinguishable from not
+      existing
+- [x] **An icon per application**, one character in the manifest. Not a URL and
+      not a file: both are either a licensing question about somebody else's
+      trademark or a request the dashboard is forbidden from making
+
+#### The bug underneath it
+
+Three fields were being dropped between hostd and the browser — `icon`,
+`elevation` and `path` — because two structs mirror each other by hand and a
+third layer assembles the HTTP response as a map. None had a symptom. A field
+that vanishes does not error; it arrives empty, and empty is indistinguishable
+from "this application did not set it".
+
+A test now compares the JSON field sets of both structs and fails when they
+drift. It found the third field within a minute of being written.
+
 ### Stage 1 definition of done
 
 Someone comfortable with Linux can: write the installer USB with one command, plug it into
@@ -1272,6 +1446,59 @@ ingested.
 
 **Not planned:** giving the model a shell, unbounded autonomy, or any path to a privileged
 operation that does not pass through the policy engine.
+
+### What the hardware actually allows
+
+Hardware profiling used to be a line item written on the assumption that it would
+report a range. On the one real machine it reports a wall, and the numbers are
+worth having in the roadmap rather than in a research directory, because they
+decide what Stage 2 can be.
+
+The experiment lives on `perf/qwen38-27b-4gb-lab-only` and is **deliberately not
+merged** — it is a spike, not a product. Its findings are:
+
+**A GPU is not automatically useful.** The test machine has a GeForce GT 750M with
+4 GB. llama.cpp's CUDA backend needs compute capability 5.0; this chip is 3.0, and
+that is closed rather than hard — CUDA 11 dropped `sm_30` and the last driver
+supporting the card tops out at CUDA 11.4, so no toolkit both emits code for it
+and satisfies llama.cpp.
+
+**Vulkan opens the door and it leads somewhere worse.** With the Vulkan driver
+installed the card works and llama.cpp drives it. Kepler reports `fp16: 0`,
+`int dot: 0`, `matrix cores: none`, so quantised maths falls back to fp32. Decode
+tokens per second on a 0.8B model, sweeping how many layers go to the GPU:
+
+| Layers on the GPU | Decode tokens/second |
+|---:|---:|
+| 0 (pure CPU) | **27.31** |
+| 4 | 16.34 |
+| 8 | 15.30 |
+| 16 | 12.88 |
+| 99 (all) | 10.21 |
+
+Monotonic. There is no sweet spot. Prompt processing is thirty times slower
+offloaded.
+
+**The CPU is the machine's best inference device**, which was not the expected
+answer. Haswell has AVX2 and FMA, llama.cpp selects `libggml-cpu-haswell.so` by
+itself, and a 2013 mobile GPU without half-precision loses to it.
+
+#### What this changes
+
+- **Hardware profiling must measure, not detect.** "Has an NVIDIA GPU" is not a
+  useful fact. Compute capability, half-precision support and an actual offload
+  sweep are.
+- **The floor is a CPU with AVX2**, not a GPU. Any machine Stage 2 targets has to
+  be useful without one, because the machines this project is for are old laptops
+  and most of their GPUs will be in this category.
+- **Model size is the whole design.** A 27B model at 2-bit fits in 15 GB of RAM
+  and is not therefore usable; the useful question is how many tokens a second a
+  four-core 2013 CPU produces, and whether an operator that answers in ninety
+  seconds is an operator anybody asks twice.
+
+That last number is being measured. It is not in this document yet because it is
+not finished running, and a roadmap is a bad place for an estimate wearing a
+measurement's clothes.
 
 ---
 

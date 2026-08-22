@@ -11,7 +11,7 @@ after a power cut, without you needing to know how any of that works.
 
 ## Installing one
 
-Open the dashboard, choose **Applications**, and pick one from the list. Each one has a
+Open the dashboard, choose **Apps**, and pick one from the list. Each one has a
 sentence saying what it is for.
 
 Press **Install**. Downloading takes a few minutes on a home connection — a media server is
