@@ -41,7 +41,7 @@ ExecStart=/srv/qwen-lab/runtime/cpu/llama-b10549/llama-server \
     --threads 4 \
     --cache-type-k q8_0 \
     --cache-type-v q8_0 \
-    --chat-template-kwargs {"enable_thinking":false} \
+    --chat-template-kwargs '{"enable_thinking":false}' \
     --no-webui
 
 EnvironmentFile=/etc/qwen-sandbox/sandbox.env
