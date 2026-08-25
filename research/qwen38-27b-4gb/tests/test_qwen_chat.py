@@ -168,3 +168,40 @@ class EmptyAnswerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnixSocketTests(unittest.TestCase):
+    """The contained model has no network; the socket is the only way in."""
+
+    def test_a_missing_socket_says_how_to_start_it(self) -> None:
+        with self.assertRaises(SystemExit) as raised:
+            qwen_chat.request_over_socket(
+                "/nonexistent/api.sock", "/v1/models", None, "", 5)
+        message = str(raised.exception)
+        self.assertIn("no socket", message)
+        self.assertIn("systemctl start qwen-sandbox", message)
+
+    def test_permission_denied_explains_the_write_bit(self) -> None:
+        # Connecting to a Unix socket needs *write* permission on it, not read.
+        # That is the unintuitive part, so the message says it rather than
+        # leaving somebody to check that the file is readable and be baffled.
+        with mock.patch.object(qwen_chat.UnixSocketConnection, "connect",
+                               side_effect=PermissionError):
+            with self.assertRaises(SystemExit) as raised:
+                qwen_chat.request_over_socket(
+                    "/run/qwen-sandbox/api.sock", "/v1/models", None, "", 5)
+        message = str(raised.exception)
+        self.assertIn("write permission", message)
+        self.assertIn("qwensandbox", message)
+
+    def test_the_socket_path_bypasses_the_key_file(self) -> None:
+        # A machine running only the sandboxed model has no /etc/qwen-lab, so
+        # insisting on a key there would make the client unusable.
+        with mock.patch.object(qwen_chat, "ask", return_value=("ok", {})) as ask:
+            with mock.patch.object(qwen_chat, "read_key") as read_key:
+                with mock.patch("sys.stdout", new_callable=io.StringIO):
+                    qwen_chat.main(["--socket", "/run/qwen-sandbox/api.sock",
+                                    "--quiet", "hello"])
+        read_key.assert_not_called()
+        self.assertEqual("/run/qwen-sandbox/api.sock",
+                         ask.call_args.kwargs["unix_socket"])

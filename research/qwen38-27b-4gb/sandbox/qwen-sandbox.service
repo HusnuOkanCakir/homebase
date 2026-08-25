@@ -51,6 +51,13 @@ EnvironmentFile=/etc/qwen-sandbox/sandbox.env
 RuntimeDirectory=qwen-sandbox
 RuntimeDirectoryMode=0750
 
+# The socket has to be group-writable, because connecting to a Unix socket
+# needs write permission on it — not read, which is the intuition that costs an
+# afternoon. llama-server creates it under the process umask, so without this it
+# arrives as 0755 and the only account that can talk to the model is the one
+# running it. 0007 makes it 0770: the sandbox group, and nobody else.
+UMask=0007
+
 # --- Filesystem: blind to everything that matters ----------------------------
 ProtectSystem=strict
 ProtectHome=yes

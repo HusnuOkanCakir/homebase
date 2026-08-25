@@ -21,7 +21,9 @@ request that deserves it.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
+import socket
 import sys
 import time
 import urllib.error
@@ -41,8 +43,65 @@ def read_key(path: Path) -> str:
         sys.exit(f"no API key at {path} — is the service installed?")
 
 
+
+class UnixSocketConnection(http.client.HTTPConnection):
+    """An HTTP connection over a Unix socket.
+
+    The contained model has no network at all — see sandbox/THREAT-MODEL.md —
+    so it listens on a socket in the filesystem rather than a port. urllib has
+    no idea how to reach that, and this is the smallest thing that teaches it:
+    the HTTP is ordinary, only the transport underneath changes.
+    """
+
+    def __init__(self, path: str, timeout: float | None = None):
+        super().__init__("localhost", timeout=timeout)
+        self.path = path
+
+    def connect(self) -> None:
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        if self.timeout is not None:
+            connection.settimeout(self.timeout)
+        connection.connect(self.path)
+        self.sock = connection
+
+
+def request_over_socket(path: str, route: str, payload: dict | None,
+                        key: str, timeout: int) -> dict:
+    """Speak to a model listening on a Unix socket."""
+    connection = UnixSocketConnection(path, timeout=timeout)
+    headers = {"Content-Type": "application/json"}
+    # Sent even here: the sandboxed server may or may not want one, and an
+    # unnecessary header costs nothing while a missing one costs a 401.
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        connection.request("POST" if payload is not None else "GET", route,
+                           body=body, headers=headers)
+        response = connection.getresponse()
+        raw = response.read()
+        if response.status == 401:
+            sys.exit("the server rejected the API key")
+        if response.status != 200:
+            sys.exit(f"the server answered {response.status}: "
+                     f"{raw[:200].decode(errors='replace')}")
+        return json.loads(raw)
+    except FileNotFoundError:
+        sys.exit(f"no socket at {path} — is the sandboxed model running?\n"
+                 f"    sudo systemctl start qwen-sandbox")
+    except PermissionError:
+        sys.exit(f"not allowed to connect to {path}.\n"
+                 f"    Connecting to a socket needs write permission on it; you\n"
+                 f"    probably need to be in the qwensandbox group, and to have\n"
+                 f"    logged out and back in since being added.")
+    except OSError as error:
+        sys.exit(f"could not reach {path}: {error}")
+    finally:
+        connection.close()
+
 def ask(endpoint: str, key: str, prompt: str, *, think: bool,
-        max_tokens: int, temperature: float, timeout: int) -> tuple[str, dict]:
+        max_tokens: int, temperature: float, timeout: int,
+        unix_socket: str | None = None) -> tuple[str, dict]:
     body = {
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
@@ -52,6 +111,11 @@ def ask(endpoint: str, key: str, prompt: str, *, think: bool,
     # single place that decides what "normal" is.
     if think:
         body["chat_template_kwargs"] = {"enable_thinking": True}
+
+    if unix_socket:
+        payload = request_over_socket(unix_socket, "/v1/chat/completions",
+                                      body, key, timeout)
+        return read_answer(payload)
 
     request = urllib.request.Request(
         f"{endpoint}/chat/completions",
@@ -69,6 +133,11 @@ def ask(endpoint: str, key: str, prompt: str, *, think: bool,
     except urllib.error.URLError as error:
         sys.exit(f"cannot reach {endpoint} — is qwen-lab-server running? ({error.reason})")
 
+    return read_answer(payload)
+
+
+def read_answer(payload: dict) -> tuple[str, dict]:
+    """Pull the answer out of a completion, saying so when there isn't one."""
     choice = payload["choices"][0]
     message = choice.get("message", {})
     content = (message.get("content") or "").strip()
@@ -92,6 +161,7 @@ def ask(endpoint: str, key: str, prompt: str, *, think: bool,
     return content, payload.get("usage", {})
 
 
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -99,6 +169,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stdin", action="store_true", help="read the prompt from stdin")
     parser.add_argument("--think", action="store_true",
                         help="let the model reason first; slower, better on hard questions")
+    parser.add_argument("--socket", dest="unix_socket",
+                        help="talk to a model listening on a Unix socket, e.g. "
+                             "/run/qwen-sandbox/api.sock — the sandboxed model "
+                             "has no network and is only reachable this way")
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     parser.add_argument("--api-key")
     parser.add_argument("--api-key-file", type=Path, default=DEFAULT_KEY_FILE)
@@ -112,12 +186,18 @@ def main(argv: list[str] | None = None) -> int:
     if not prompt:
         parser.error("nothing to ask — give a prompt or --stdin")
 
-    key = args.api_key or read_key(args.api_key_file)
+    # The sandboxed model has no key: it is not on a network, so the socket's
+    # permissions are the access control. Reaching for one here would fail on a
+    # machine where /etc/qwen-lab does not exist.
+    if args.unix_socket:
+        key = args.api_key or ""
+    else:
+        key = args.api_key or read_key(args.api_key_file)
 
     started = time.monotonic()
     answer, usage = ask(args.endpoint, key, prompt, think=args.think,
                         max_tokens=args.max_tokens, temperature=args.temperature,
-                        timeout=args.timeout)
+                        timeout=args.timeout, unix_socket=args.unix_socket)
     elapsed = time.monotonic() - started
 
     print(answer)
