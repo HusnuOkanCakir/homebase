@@ -1,0 +1,16 @@
+[Unit]
+Description=Fetch the certificate Tailscale holds for this machine
+Documentation=https://tailscale.com/kb/1153/enabling-https
+After=tailscaled.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/homebase/tailscale-cert-run
+
+# Writes two files into Homebase's state directory and nothing else.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/homebase
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes

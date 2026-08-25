@@ -1,0 +1,59 @@
+#!/bin/sh
+# Fetch and install the certificate Tailscale holds for this machine.
+#
+# Homebase signs its own certificate because a home server has no public name
+# and no way to get one anybody already trusts. A machine on a tailnet does
+# have one: a real name in a real zone, with a Let's Encrypt certificate
+# obtained over DNS-01, without the machine ever being reachable from the
+# internet. When that is available it is strictly better, and this fetches it.
+#
+# Run by a timer rather than once, because these last ninety days. `tailscale
+# cert` renews when the remaining life is short and is a no-op otherwise, so
+# running it often is cheap and running it rarely is how a certificate expires.
+#
+# Failure is not an error worth alarming anybody about. A machine that has left
+# the tailnet, or whose account has HTTPS switched off, simply keeps serving the
+# self-signed certificate — core falls back on its own, and the dashboard stays
+# open. This exits 0 in that case so a timer does not mail somebody every hour.
+set -eu
+
+STATE=/var/lib/homebase
+CERT="$STATE/trusted.crt"
+KEY="$STATE/trusted.key"
+
+command -v tailscale >/dev/null 2>&1 || {
+    echo "tailscale is not installed; nothing to do"
+    exit 0
+}
+
+# The name this machine answers to on the tailnet. Asked of the daemon rather
+# than configured, because it is the daemon's to know and it changes if the
+# machine is renamed or moved to another tailnet.
+NAME=$(tailscale status --json 2>/dev/null \
+    | sed -n 's/.*"DNSName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1 | sed 's/\.$//')
+
+[ -n "$NAME" ] || {
+    echo "tailscale is not logged in; keeping the self-signed certificate"
+    exit 0
+}
+
+# Written to a temporary pair first. `tailscale cert` writing directly to the
+# live files would leave a half-written certificate being served if it failed
+# part-way, and core reads these on every handshake.
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+if ! tailscale cert --cert-file "$TMP/tls.crt" --key-file "$TMP/tls.key" "$NAME" 2>"$TMP/err"; then
+    echo "could not get a certificate for $NAME; keeping the self-signed one"
+    sed 's/^/  /' "$TMP/err" >&2
+    exit 0
+fi
+
+# Readable by core, which runs unprivileged as `homebase`. The key is 0640 and
+# group-owned rather than world-readable: a private key everyone on the machine
+# can read is not much of a private key.
+install -o root -g homebase -m 0644 "$TMP/tls.crt" "$CERT"
+install -o root -g homebase -m 0640 "$TMP/tls.key" "$KEY"
+
+echo "installed a trusted certificate for $NAME"

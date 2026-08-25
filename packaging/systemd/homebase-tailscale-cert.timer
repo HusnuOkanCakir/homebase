@@ -1,0 +1,16 @@
+[Unit]
+Description=Keep the trusted certificate current
+
+[Timer]
+# Daily, with a spread so every Homebase in the world does not ask at once.
+#
+# Daily for a ninety-day certificate looks excessive and is not: `tailscale
+# cert` renews only when the remaining life is short, so this is a cheap check
+# that the answer is still "nothing to do". The alternative is a monthly timer
+# that has three chances to fail before anybody notices.
+OnCalendar=daily
+RandomizedDelaySec=4h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

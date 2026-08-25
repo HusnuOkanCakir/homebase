@@ -449,10 +449,14 @@ def build_core(version: str, binaries: Path) -> Path:
     # what creates.
     install_file(REPO_ROOT / "packaging/backup-run",
                  root / "usr/libexec/homebase/backup-run", 0o755)
+    install_file(REPO_ROOT / "packaging/tailscale-cert-run",
+                 root / "usr/libexec/homebase/tailscale-cert-run", 0o755)
 
     for unit in ("homebase-core.service",
                  "homebase-backup.service",
-                 "homebase-backup.timer"):
+                 "homebase-backup.timer",
+                 "homebase-tailscale-cert.service",
+                 "homebase-tailscale-cert.timer"):
         install_file(
             REPO_ROOT / "packaging/systemd" / unit,
             root / "lib/systemd/system" / unit,
