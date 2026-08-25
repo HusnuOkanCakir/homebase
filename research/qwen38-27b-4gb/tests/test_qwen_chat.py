@@ -205,3 +205,23 @@ class UnixSocketTests(unittest.TestCase):
         read_key.assert_not_called()
         self.assertEqual("/run/qwen-sandbox/api.sock",
                          ask.call_args.kwargs["unix_socket"])
+
+
+class StillLoadingTests(unittest.TestCase):
+    """`systemctl start` returns long before the model is answerable."""
+
+    def test_a_503_says_to_wait_rather_than_quoting_an_error(self) -> None:
+        message = qwen_chat.loading_message(
+            b'{"error":{"message":"Loading model","code":503}}')
+        self.assertIn("still loading", message)
+        self.assertIn("Try again shortly", message)
+        # The raw phrasing is not echoed back — it reads as a fault.
+        self.assertNotIn("unavailable_error", message)
+
+    def test_an_unusual_503_keeps_its_detail(self) -> None:
+        message = qwen_chat.loading_message(
+            b'{"error":{"message":"no slot available"}}')
+        self.assertIn("no slot available", message)
+
+    def test_a_body_that_is_not_json_still_produces_advice(self) -> None:
+        self.assertIn("still loading", qwen_chat.loading_message(b"<html>502</html>"))

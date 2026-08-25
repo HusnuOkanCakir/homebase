@@ -44,6 +44,26 @@ def read_key(path: Path) -> str:
 
 
 
+
+def loading_message(raw: bytes) -> str:
+    """Say that the model is still loading, rather than quoting a 503 at somebody.
+
+    A 9B off a 5400 rpm disk takes about a minute and a half, and the server
+    answers every request in that window with an error that looks like a
+    failure. It is not one; it is the normal state after starting.
+    """
+    detail = ""
+    try:
+        message = json.loads(raw).get("error", {}).get("message", "")
+        if message and message.lower() != "loading model":
+            detail = f" ({message})"
+    except (ValueError, AttributeError):
+        pass
+    return ("the model is still loading" + detail + ".\n"
+            "    It reads several gigabytes from disk on startup, which takes about\n"
+            "    a minute and a half on this machine. Try again shortly.\n"
+            "    Watch it with:  systemctl status qwen-sandbox")
+
 class UnixSocketConnection(http.client.HTTPConnection):
     """An HTTP connection over a Unix socket.
 
@@ -82,6 +102,12 @@ def request_over_socket(path: str, route: str, payload: dict | None,
         raw = response.read()
         if response.status == 401:
             sys.exit("the server rejected the API key")
+        if response.status == 503:
+            # The state everybody hits: `systemctl start` returns immediately
+            # and the model then reads several gigabytes off a slow disk. The
+            # raw body says "Loading model", which reads like a fault rather
+            # than like "wait a minute".
+            sys.exit(loading_message(raw))
         if response.status != 200:
             sys.exit(f"the server answered {response.status}: "
                      f"{raw[:200].decode(errors='replace')}")
@@ -129,6 +155,8 @@ def ask(endpoint: str, key: str, prompt: str, *, think: bool,
     except urllib.error.HTTPError as error:
         if error.code == 401:
             sys.exit("the server rejected the API key")
+        if error.code == 503:
+            sys.exit(loading_message(error.read()))
         sys.exit(f"the server answered {error.code}: {error.read()[:200].decode(errors='replace')}")
     except urllib.error.URLError as error:
         sys.exit(f"cannot reach {endpoint} — is qwen-lab-server running? ({error.reason})")
