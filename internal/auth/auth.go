@@ -49,6 +49,23 @@ const (
 	// is not automatically somebody who should be able to make the server
 	// unresponsive for a minute.
 	PermAssistantUse = "assistant.use"
+
+	// PermAssistantUnrestricted is the right to talk to a model whose refusal
+	// behaviour a third party removed.
+	//
+	// Deliberately absent from AdministratorPermissions, which every other
+	// permission here belongs to. It is not granted by setting the machine up,
+	// it is not granted by being an administrator, and there is no way to grant
+	// it through the API — because an endpoint that grants it is an endpoint a
+	// stolen session can call. It is added by hand, at the machine, with
+	// `homebasectl assistant unrestricted`.
+	//
+	// The distinction it draws is not "trusted user" but "user who has decided
+	// to". A household member given an account to see whether the backup ran
+	// should not silently acquire this by inheriting the administrator's
+	// defaults, which is exactly what would happen if it lived in the list
+	// below.
+	PermAssistantUnrestricted = "assistant.unrestricted"
 )
 
 // AdministratorPermissions is what the first-run administrator receives.

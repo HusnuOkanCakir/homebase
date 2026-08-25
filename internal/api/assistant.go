@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -70,21 +71,41 @@ const (
 	assistantProbeTimeout = 3 * time.Second
 )
 
-// assistantConfig is where the model is and how to authenticate to it.
-type assistantConfig struct {
+// assistantBackend is one model server core can talk to.
+type assistantBackend struct {
+	// id is what a client selects. Stable; the label is not.
+	id      string
+	label   string
 	url     string
 	keyFile string
 
+	// socket is set instead of a network address for a model that has none.
+	//
+	// The contained model is deliberately unreachable over IP — see the lab's
+	// sandbox/THREAT-MODEL.md — so it listens on a Unix socket. Homebase can
+	// therefore *use* it, and has no way whatsoever to *start* it, which is the
+	// property being preserved: opening the encrypted volume it lives in stays
+	// a deliberate act at the machine.
+	socket string
+
+	// unrestricted marks a model whose refusal behaviour a third party removed.
+	// Selecting it requires its own permission, and it is never the default.
+	unrestricted bool
+
 	// busy serialises requests.
 	//
-	// The server is started with --parallel 1: it has one slot, and a second
+	// Each server is started with --parallel 1: it has one slot, and a second
 	// question does not run alongside the first, it waits behind it. Left to
 	// itself that produces two people watching a stalled cursor with no
 	// indication that anything is wrong. One at a time, and the second caller
-	// is told.
-	busy sync.Mutex
+	// is told. Held per backend, because they are separate processes.
 	held bool
 	mu   sync.Mutex
+}
+
+// assistantConfig is the set of models this machine offers.
+type assistantConfig struct {
+	backends []*assistantBackend
 }
 
 // WithAssistant points core at a local model server.
@@ -95,38 +116,114 @@ func (s *Server) WithAssistant(url, keyFile string) *Server {
 	if url == "" {
 		return s
 	}
-	s.assistant = &assistantConfig{url: url, keyFile: keyFile}
+	if s.assistant == nil {
+		s.assistant = &assistantConfig{}
+	}
+	s.assistant.backends = append(s.assistant.backends, &assistantBackend{
+		id: "local", label: "Local model", url: url, keyFile: keyFile,
+	})
 	return s
 }
 
-// tryHold takes the single slot, reporting whether it got it.
-func (a *assistantConfig) tryHold() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.held {
-		return false
-	}
-	a.held = true
-	return true
-}
-
-func (a *assistantConfig) release() {
-	a.mu.Lock()
-	a.held = false
-	a.mu.Unlock()
-}
-
-// key reads the model's API key.
+// WithUnrestrictedAssistant offers a contained model that is already running.
 //
-// Read per request rather than cached at startup, so rotating the key does not
-// need core restarted, and so a key that becomes unreadable is reported when it
-// happens rather than remembered from when it worked.
-func (a *assistantConfig) key() (string, error) {
-	raw, err := os.ReadFile(a.keyFile)
+// Homebase can use it and cannot start it. There is no operation anywhere that
+// unlocks its volume or launches its unit, and adding one would mean a
+// privileged operation whose purpose is to make a model with its refusals
+// removed easier to reach — which is the thing ADR-0006 exists to prevent. If
+// it is not running, it is not offered, and the way to change that is a command
+// typed at the machine.
+func (s *Server) WithUnrestrictedAssistant(socket string) *Server {
+	socket = strings.TrimSpace(socket)
+	if socket == "" {
+		return s
+	}
+	if s.assistant == nil {
+		s.assistant = &assistantConfig{}
+	}
+	s.assistant.backends = append(s.assistant.backends, &assistantBackend{
+		id: "unrestricted", label: "Unrestricted model",
+		socket: socket, unrestricted: true,
+	})
+	return s
+}
+
+// client dials this backend, over a socket or over loopback.
+func (b *assistantBackend) client(timeout time.Duration) *http.Client {
+	if b.socket == "" {
+		return &http.Client{Timeout: timeout}
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var dialer net.Dialer
+				return dialer.DialContext(ctx, "unix", b.socket)
+			},
+		},
+	}
+}
+
+// endpoint is the base URL to use with client().
+func (b *assistantBackend) endpoint() string {
+	if b.socket == "" {
+		return b.url
+	}
+	// The host is ignored by the Unix transport, but net/http insists on one.
+	return "http://localhost/v1"
+}
+
+// key reads this backend's API key, if it has one.
+//
+// The contained model has none: it is not on a network, so the socket's
+// permissions are its access control, and there is no file to read.
+func (b *assistantBackend) key() (string, error) {
+	if b.keyFile == "" {
+		return "", nil
+	}
+	raw, err := os.ReadFile(b.keyFile)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(raw)), nil
+}
+
+// find returns the backend with this id.
+func (a *assistantConfig) find(id string) *assistantBackend {
+	for _, backend := range a.backends {
+		if backend.id == id {
+			return backend
+		}
+	}
+	return nil
+}
+
+// primary is the model used when a client names none: the first that is not
+// unrestricted. Selecting the contained one is always deliberate.
+func (a *assistantConfig) primary() *assistantBackend {
+	for _, backend := range a.backends {
+		if !backend.unrestricted {
+			return backend
+		}
+	}
+	return nil
+}
+
+// tryHold takes the single slot, reporting whether it got it.
+func (b *assistantBackend) tryHold() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.held {
+		return false
+	}
+	b.held = true
+	return true
+}
+
+func (b *assistantBackend) release() {
+	b.mu.Lock()
+	b.held = false
+	b.mu.Unlock()
 }
 
 // AssistantStatus is what the dashboard asks before showing anything.
@@ -137,10 +234,33 @@ type AssistantStatus struct {
 	Reason   string `json:"reason,omitempty"`
 	MaxTurns int    `json:"max_turns"`
 	MaxChars int    `json:"max_chars"`
+
+	// Models is every model this person may select, in offer order.
+	//
+	// Filtered by permission before it is written, not after: a model somebody
+	// may not use is not one they should learn exists from a greyed-out entry.
+	Models []AssistantModel `json:"models"`
 }
 
-func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, _ *auth.User) {
-	status := AssistantStatus{MaxTurns: assistantMaxTurns, MaxChars: assistantMaxPromptBytes}
+// AssistantModel is one selectable model.
+type AssistantModel struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Name is what the server underneath reports, e.g. Qwen3.8-4B-Q4_K_M.
+	Name      string `json:"name,omitempty"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+	// Unrestricted marks a model whose refusal behaviour a third party removed.
+	// The dashboard says so on screen for as long as it is selected.
+	Unrestricted bool `json:"unrestricted"`
+}
+
+func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	status := AssistantStatus{
+		MaxTurns: assistantMaxTurns,
+		MaxChars: assistantMaxPromptBytes,
+		Models:   []AssistantModel{},
+	}
 
 	if s.assistant == nil {
 		status.Reason = "No local model is configured on this server."
@@ -148,46 +268,91 @@ func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request, _
 		return
 	}
 
-	key, err := s.assistant.key()
-	if err != nil {
-		// Worth distinguishing: a missing key file means it was never set up, a
-		// permission error means core cannot read one that exists — and those
-		// have completely different fixes.
-		if os.IsNotExist(err) {
-			status.Reason = "The local model's API key has not been created yet."
-		} else {
-			status.Reason = "Homebase cannot read the local model's API key."
-		}
-		s.log.Warn("assistant key unreadable", "path", s.assistant.keyFile, "error", err)
-		writeJSON(w, http.StatusOK, status)
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), assistantProbeTimeout)
 	defer cancel()
 
-	model, err := s.assistantModel(ctx, key)
-	if err != nil {
-		status.Reason = "The local model is not responding."
-		s.log.Debug("assistant probe failed", "error", err)
-		writeJSON(w, http.StatusOK, status)
-		return
+	for _, backend := range s.assistant.backends {
+		// Never offered to somebody without the permission, and never merely
+		// disabled for them either.
+		if backend.unrestricted && !user.Can(auth.PermAssistantUnrestricted) {
+			continue
+		}
+
+		entry := AssistantModel{
+			ID: backend.id, Label: backend.label, Unrestricted: backend.unrestricted,
+		}
+
+		// Checked before probing, and reported separately. "Never created",
+		// "created but core cannot read it" and "the model is not answering"
+		// look identical from the outside and have completely different fixes;
+		// collapsing them into one sentence sends somebody to restart a service
+		// when the problem is a file mode.
+		if _, err := backend.key(); err != nil {
+			if os.IsNotExist(err) {
+				entry.Reason = "The local model's API key has not been created yet."
+			} else {
+				entry.Reason = "Homebase cannot read the local model's API key."
+			}
+			s.log.Warn("assistant key unreadable",
+				"model", backend.id, "path", backend.keyFile, "error", err)
+			status.Models = append(status.Models, entry)
+			continue
+		}
+
+		name, err := s.assistantModel(ctx, backend)
+		switch {
+		case err == nil:
+			entry.Available = true
+			entry.Name = name
+		case backend.unrestricted:
+			// Expected, and not a fault: this one is started by hand and is
+			// stopped most of the time.
+			entry.Reason = "It is not running. Start it on the server."
+		default:
+			entry.Reason = "The local model is not responding."
+			s.log.Debug("assistant probe failed", "model", backend.id, "error", err)
+		}
+		status.Models = append(status.Models, entry)
 	}
 
-	status.Available = true
-	status.Model = model
+	// The top-level fields describe the model a client gets if it names none,
+	// so that a caller written before models existed keeps working unchanged.
+	for _, entry := range status.Models {
+		if !entry.Unrestricted {
+			status.Available = entry.Available
+			status.Model = entry.Name
+			status.Reason = entry.Reason
+			break
+		}
+	}
+	if len(status.Models) == 0 {
+		status.Reason = "No local model is configured on this server."
+	}
 	writeJSON(w, http.StatusOK, status)
 }
 
 // assistantModel asks the model server what it is serving.
-func (s *Server) assistantModel(ctx context.Context, key string) (string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, s.assistant.url+"/models", nil)
+func (s *Server) assistantModel(ctx context.Context, backend *assistantBackend) (string, error) {
+	key, err := backend.key()
+	if err != nil {
+		// Distinguished because the fixes differ: never created, versus created
+		// and unreadable by core.
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("its API key has not been created yet")
+		}
+		return "", fmt.Errorf("its API key cannot be read: %w", err)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		backend.endpoint()+"/models", nil)
 	if err != nil {
 		return "", err
 	}
-	request.Header.Set("Authorization", "Bearer "+key)
+	if key != "" {
+		request.Header.Set("Authorization", "Bearer "+key)
+	}
 
-	response, err := http.DefaultClient.Do(request)
+	response, err := backend.client(assistantProbeTimeout).Do(request)
 	if err != nil {
 		return "", err
 	}
@@ -223,6 +388,10 @@ type assistantMessage struct {
 type assistantRequest struct {
 	Messages []assistantMessage `json:"messages"`
 	Think    bool               `json:"think"`
+
+	// Model selects which of the offered models answers. Empty means the
+	// primary one — selecting the contained model is always deliberate.
+	Model string `json:"model,omitempty"`
 }
 
 func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request, user *auth.User) {
@@ -253,9 +422,37 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 
-	key, err := s.assistant.key()
+	backend := s.assistant.primary()
+	if body.Model != "" {
+		backend = s.assistant.find(body.Model)
+	}
+	if backend == nil {
+		s.writeError(w, r, http.StatusBadRequest, apiError{
+			Code:        "assistant.unknown_model",
+			Message:     "This server does not have that model.",
+			Recoverable: true,
+			Recovery:    "Choose one of the models the assistant offers.",
+		})
+		return
+	}
+
+	// The permission is checked here as well as when the list is built. The
+	// list is a convenience; this is the control. A client that names the
+	// contained model directly, having never been offered it, is refused.
+	if backend.unrestricted && !user.Can(auth.PermAssistantUnrestricted) {
+		s.log.Warn("refused an unrestricted assistant request",
+			"user", user.Username, "model", backend.id)
+		s.writeError(w, r, http.StatusForbidden, apiError{
+			Code:        "assistant.not_permitted",
+			Message:     "You are not permitted to use that model.",
+			Recoverable: false,
+		})
+		return
+	}
+
+	key, err := backend.key()
 	if err != nil {
-		s.log.Warn("assistant key unreadable", "path", s.assistant.keyFile, "error", err)
+		s.log.Warn("assistant key unreadable", "path", backend.keyFile, "error", err)
 		s.writeError(w, r, http.StatusServiceUnavailable, apiError{
 			Code:        "assistant.unavailable",
 			Message:     "Homebase cannot reach the local model.",
@@ -269,7 +466,7 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request, use
 	// One question at a time. Refused rather than queued: a caller who waits
 	// behind somebody else's two-minute answer cannot tell that from a server
 	// that has hung.
-	if !s.assistant.tryHold() {
+	if !backend.tryHold() {
 		s.writeError(w, r, http.StatusConflict, apiError{
 			Code:        "assistant.busy",
 			Message:     "The assistant is already answering a question.",
@@ -279,12 +476,12 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request, use
 		})
 		return
 	}
-	defer s.assistant.release()
+	defer backend.release()
 
 	ctx, cancel := context.WithTimeout(r.Context(), assistantTimeout)
 	defer cancel()
 
-	upstream, err := s.assistantStream(ctx, key, body)
+	upstream, err := s.assistantStream(ctx, backend, key, body)
 	if err != nil {
 		s.writeError(w, r, http.StatusServiceUnavailable, apiError{
 			Code:        "assistant.unavailable",
@@ -315,7 +512,7 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request, use
 	tokens := s.relayAssistantStream(ctx, w, flusher, upstream)
 
 	s.log.Info("assistant answered",
-		"user", user.Username, "tokens", tokens,
+		"user", user.Username, "model", backend.id, "tokens", tokens,
 		"seconds", time.Since(started).Round(time.Second).Seconds())
 }
 
@@ -367,7 +564,8 @@ func (s *Server) validAssistantMessages(w http.ResponseWriter, r *http.Request, 
 }
 
 // assistantStream opens the streaming completion on the model server.
-func (s *Server) assistantStream(ctx context.Context, key string, body assistantRequest) (interface {
+func (s *Server) assistantStream(ctx context.Context, backend *assistantBackend,
+	key string, body assistantRequest) (interface {
 	Read([]byte) (int, error)
 	Close() error
 }, error) {
@@ -389,14 +587,16 @@ func (s *Server) assistantStream(ctx context.Context, key string, body assistant
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		s.assistant.url+"/chat/completions", bytes.NewReader(encoded))
+		backend.endpoint()+"/chat/completions", bytes.NewReader(encoded))
 	if err != nil {
 		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+key)
+	if key != "" {
+		request.Header.Set("Authorization", "Bearer "+key)
+	}
 
-	response, err := http.DefaultClient.Do(request)
+	response, err := backend.client(assistantTimeout).Do(request)
 	if err != nil {
 		return nil, err
 	}

@@ -78,6 +78,16 @@ func main() {
 		assistantURL = flag.String("assistant-url",
 			envOr("HOMEBASE_ASSISTANT_URL", ""),
 			"OpenAI-compatible URL of a local model, e.g. http://127.0.0.1:8088/v1")
+		// A contained model that is already running, if this machine has one.
+		//
+		// A socket rather than a URL, because the model it points at has no
+		// network at all. Homebase can use it and has no way to start it: there
+		// is no operation anywhere that unlocks its volume or launches its
+		// unit, and adding one would mean a privileged operation whose purpose
+		// is to make a model with its refusals removed easier to reach.
+		assistantUnrestricted = flag.String("assistant-unrestricted-socket",
+			envOr("HOMEBASE_ASSISTANT_UNRESTRICTED_SOCKET", ""),
+			"Unix socket of a contained model, offered only to accounts holding assistant.unrestricted")
 		assistantKey = flag.String("assistant-key-file",
 			envOr("HOMEBASE_ASSISTANT_KEY_FILE", "/etc/qwen-lab/api-key"),
 			"file holding the local model's API key")
@@ -109,10 +119,11 @@ func main() {
 		socket:    *socket,
 		staticDir: *staticDir,
 
-		assistantURL:     *assistantURL,
-		assistantKeyFile: *assistantKey,
-		tlsCert:          *tlsCert,
-		tlsKey:           *tlsKey,
+		assistantURL:          *assistantURL,
+		assistantKeyFile:      *assistantKey,
+		assistantUnrestricted: *assistantUnrestricted,
+		tlsCert:               *tlsCert,
+		tlsKey:                *tlsKey,
 	}); err != nil {
 		log.Error("core failed", "error", err)
 		os.Exit(1)
@@ -133,6 +144,9 @@ type runOptions struct {
 	// Empty unless this machine has a local model. See the flag.
 	assistantURL     string
 	assistantKeyFile string
+
+	// Empty unless this machine has a contained model running. See the flag.
+	assistantUnrestricted string
 
 	// Empty unless something can produce a certificate browsers trust.
 	tlsCert string
@@ -215,6 +229,11 @@ func run(log *slog.Logger, opts runOptions) error {
 	if opts.assistantURL != "" {
 		server = server.WithAssistant(opts.assistantURL, opts.assistantKeyFile)
 		log.Info("local assistant configured", "url", opts.assistantURL)
+	}
+	if opts.assistantUnrestricted != "" {
+		server = server.WithUnrestrictedAssistant(opts.assistantUnrestricted)
+		log.Info("a contained model may be used if it is running",
+			"socket", opts.assistantUnrestricted)
 	}
 
 	// Notice a disk filling up before applications start failing to write.

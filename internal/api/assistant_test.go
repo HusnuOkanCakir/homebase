@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/HusnuOkanCakir/homebase/internal/auth"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,6 +37,11 @@ type fakeModel struct {
 	status int
 	// hold blocks the completion until closed, so concurrency can be tested.
 	hold chan struct{}
+
+	// openToAnyone mirrors the contained model, which has no API key at all:
+	// it is not on a network, so the socket's permissions are its access
+	// control and there is no file to read.
+	openToAnyone bool
 }
 
 func newFakeModel(t *testing.T, tokens ...string) *fakeModel {
@@ -43,7 +50,7 @@ func newFakeModel(t *testing.T, tokens ...string) *fakeModel {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-key" {
+		if !f.openToAnyone && r.Header.Get("Authorization") != "Bearer test-key" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -372,5 +379,171 @@ func TestAssistantReportsAModelThatIsDown(t *testing.T) {
 	e := decodeError(t, rec)
 	if !e.Recoverable || e.Recovery == "" {
 		t.Fatal("a model that is down is recoverable and should say how")
+	}
+}
+
+// --- The contained model -----------------------------------------------------
+
+// withUnrestricted adds a fake sandboxed model on a Unix socket.
+func withUnrestricted(t *testing.T, h *harness, f *fakeModel) string {
+	t.Helper()
+	socket := filepath.Join(t.TempDir(), "api.sock")
+	if f != nil {
+		f.openToAnyone = true
+		// Re-serve the same handler over a Unix socket, which is how the real
+		// contained model is reached: it has no network at all.
+		listener, err := net.Listen("unix", socket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := &http.Server{Handler: f.server.Config.Handler}
+		go func() { _ = server.Serve(listener) }()
+		t.Cleanup(func() { _ = server.Close() })
+	}
+	h.server.WithUnrestrictedAssistant(socket)
+	h.handler = h.server.Handler()
+	return socket
+}
+
+func permitted(t *testing.T, h *harness, permissions []string) string {
+	t.Helper()
+	user, err := h.auth.CreateUser(t.Context(), "researcher", goodPassword, permissions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := h.auth.CreateSession(t.Context(), user.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func modelsFor(t *testing.T, h *harness, token string) []AssistantModel {
+	t.Helper()
+	rec := h.do(http.MethodGet, "/api/v1/assistant", "", auth1(token))
+	var status AssistantStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	return status.Models
+}
+
+// Not merely disabled for them — absent. A model somebody may not use is not
+// one they should learn exists from a greyed-out entry.
+func TestTheUnrestrictedModelIsNotOfferedWithoutThePermission(t *testing.T) {
+	h := newHarness(t)
+	withAssistant(t, h, newFakeModel(t, "hi"))
+	withUnrestricted(t, h, newFakeModel(t, "hi"))
+	token := permitted(t, h, []string{auth.PermAssistantUse})
+
+	for _, model := range modelsFor(t, h, token) {
+		if model.Unrestricted {
+			t.Fatalf("offered %q to an account without assistant.unrestricted", model.ID)
+		}
+	}
+}
+
+func TestTheUnrestrictedModelIsOfferedWithThePermission(t *testing.T) {
+	h := newHarness(t)
+	withAssistant(t, h, newFakeModel(t, "hi"))
+	withUnrestricted(t, h, newFakeModel(t, "hi"))
+	token := permitted(t, h,
+		[]string{auth.PermAssistantUse, auth.PermAssistantUnrestricted})
+
+	var found *AssistantModel
+	for _, model := range modelsFor(t, h, token) {
+		if model.Unrestricted {
+			found = &model
+		}
+	}
+	if found == nil {
+		t.Fatal("not offered to an account that holds the permission")
+	}
+	if !found.Available {
+		t.Fatalf("offered but unavailable: %q", found.Reason)
+	}
+}
+
+// The list is a convenience; the check on the request is the control.
+func TestNamingTheUnrestrictedModelDirectlyIsStillRefused(t *testing.T) {
+	h := newHarness(t)
+	withAssistant(t, h, newFakeModel(t, "hi"))
+	withUnrestricted(t, h, newFakeModel(t, "hi"))
+	token := permitted(t, h, []string{auth.PermAssistantUse})
+
+	rec := h.do(http.MethodPost, "/api/v1/assistant/chat",
+		`{"model":"unrestricted","messages":[{"role":"user","content":"hi"}]}`,
+		auth1(token))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 — a client that was never offered the "+
+			"model can still name it", rec.Code)
+	}
+	if code := decodeError(t, rec).Code; code != "assistant.not_permitted" {
+		t.Fatalf("code = %q", code)
+	}
+}
+
+// Selecting it is always deliberate: naming nothing must never reach it.
+func TestTheDefaultModelIsNeverTheUnrestrictedOne(t *testing.T) {
+	h := newHarness(t)
+	safe := newFakeModel(t, "safe answer")
+	withAssistant(t, h, safe)
+	unsafe := newFakeModel(t, "unrestricted answer")
+	withUnrestricted(t, h, unsafe)
+	token := permitted(t, h,
+		[]string{auth.PermAssistantUse, auth.PermAssistantUnrestricted})
+
+	rec := h.do(http.MethodPost, "/api/v1/assistant/chat",
+		`{"messages":[{"role":"user","content":"hi"}]}`, auth1(token))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "safe answer") {
+		t.Fatalf("a request naming no model did not reach the primary one:\n%s", rec.Body)
+	}
+}
+
+// It is stopped most of the time, and that is not a fault.
+func TestAStoppedContainedModelSaysSoRatherThanErroring(t *testing.T) {
+	h := newHarness(t)
+	withAssistant(t, h, newFakeModel(t, "hi"))
+	withUnrestricted(t, h, nil) // a socket path with nothing listening
+	token := permitted(t, h,
+		[]string{auth.PermAssistantUse, auth.PermAssistantUnrestricted})
+
+	for _, model := range modelsFor(t, h, token) {
+		if !model.Unrestricted {
+			continue
+		}
+		if model.Available {
+			t.Fatal("reported available with nothing listening")
+		}
+		if !strings.Contains(model.Reason, "not running") {
+			t.Fatalf("reason = %q, want it to say it is not running", model.Reason)
+		}
+	}
+}
+
+// Homebase must have no way to start it. The volume it lives in stays locked
+// unless somebody opened it at the machine, and nothing here may change that.
+func TestNothingInTheAPICanStartTheContainedModel(t *testing.T) {
+	h := newHarness(t)
+	withAssistant(t, h, newFakeModel(t, "hi"))
+	withUnrestricted(t, h, nil)
+	token := permitted(t, h,
+		[]string{auth.PermAssistantUse, auth.PermAssistantUnrestricted})
+
+	// Every shape of request that might plausibly be wired to a start.
+	for _, attempt := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/assistant/start", ""},
+		{http.MethodPost, "/api/v1/assistant/unrestricted/start", ""},
+		{http.MethodPost, "/api/v1/assistant", `{"model":"unrestricted","start":true}`},
+	} {
+		rec := h.do(attempt.method, attempt.path, attempt.body, auth1(token))
+		if rec.Code == http.StatusOK || rec.Code == http.StatusAccepted ||
+			rec.Code == http.StatusCreated {
+			t.Fatalf("%s %s answered %d; there must be no route that starts it",
+				attempt.method, attempt.path, rec.Code)
+		}
 	}
 }

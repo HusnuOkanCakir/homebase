@@ -304,3 +304,36 @@ func TestReadAndWritePermissionsAreDistinct(t *testing.T) {
 		}
 	}
 }
+
+// The unrestricted assistant permission must never be granted by default.
+//
+// Every other permission in this file belongs to AdministratorPermissions,
+// which makes adding one there the obvious, habitual move. This one is
+// deliberately outside it: setting up the machine does not grant it, being an
+// administrator does not grant it, and a household member given an account to
+// check the backups must not inherit it.
+//
+// Asserted rather than commented, because the failure is silent — a permission
+// added to that list grants itself to every new account with nothing on screen
+// to say so.
+func TestUnrestrictedAssistantIsNotAnAdministratorDefault(t *testing.T) {
+	for _, granted := range AdministratorPermissions {
+		if granted == PermAssistantUnrestricted {
+			t.Fatal("assistant.unrestricted is in AdministratorPermissions; " +
+				"every new administrator would silently gain the right to talk " +
+				"to a model with its refusals removed")
+		}
+	}
+
+	// And the ordinary one still is, so this test cannot pass by the constant
+	// having been renamed out of existence.
+	found := false
+	for _, granted := range AdministratorPermissions {
+		if granted == PermAssistantUse {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("assistant.use is missing from AdministratorPermissions")
+	}
+}

@@ -142,6 +142,27 @@ export interface AssistantStatus {
   reason?: string;
   max_turns: number;
   max_chars: number;
+  /**
+   * Every model this account may select.
+   *
+   * Filtered by permission on the server, not here: a model somebody may not
+   * use is not one they should learn exists from a greyed-out entry.
+   */
+  models: AssistantModel[];
+}
+
+export interface AssistantModel {
+  id: string;
+  label: string;
+  /** What the server underneath reports, e.g. Qwen3.8-4B-Q4_K_M. */
+  name?: string;
+  available: boolean;
+  reason?: string;
+  /**
+   * A model whose refusal behaviour a third party removed. Never the default,
+   * and said on screen for as long as it is selected.
+   */
+  unrestricted: boolean;
 }
 
 export interface AssistantMessage {
@@ -1277,7 +1298,7 @@ export function askAssistant(
     onDone: (reason: string) => void;
     onError: (error: unknown) => void;
   },
-  options: { think?: boolean } = {},
+  options: { think?: boolean; model?: string } = {},
 ): () => void {
   const controller = new AbortController();
 
@@ -1287,7 +1308,13 @@ export function askAssistant(
       response = await fetch(BASE + "/assistant/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages, think: options.think ?? false }),
+        body: JSON.stringify({
+          messages,
+          think: options.think ?? false,
+          // Omitted rather than sent empty, so a server that predates model
+          // selection sees exactly the request it used to.
+          ...(options.model ? { model: options.model } : {}),
+        }),
         credentials: "same-origin",
         signal: controller.signal,
       });

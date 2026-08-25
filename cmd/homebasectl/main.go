@@ -109,6 +109,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return factoryResetCommand(args[1:], stdout)
 	case "wake":
 		return wakeCommand(args[1:], stdout)
+	case "assistant":
+		return assistantCommand(args[1:], stdout)
 	case "shutdown":
 		return shutdownCommand(args[1:], stdout)
 	case "restart":
