@@ -1,0 +1,135 @@
+#!/bin/sh
+# Build the contained environment, then put the model inside it.
+#
+# Run once, as root, from this directory:
+#
+#     sudo sh ./sandbox/install /path/to/model.gguf <expected-sha256>
+#
+# The hash is not optional. These weights come from a third party and the whole
+# point of the exercise is that they are not trusted; installing them without
+# checking what arrived would be trusting the network instead of the publisher,
+# which is worse.
+#
+# To undo everything this does:
+#
+#     sudo systemctl stop qwen-sandbox qwen-sandbox-volume
+#     sudo systemctl disable qwen-sandbox
+#     sudo rm /etc/systemd/system/qwen-sandbox*.service
+#     sudo rm -rf /etc/qwen-sandbox /srv/qwen-sandbox
+#     sudo shred -u /srv/qwen-lab/sandbox.img      # the weights, unrecoverably
+#     sudo userdel qwensandbox
+#
+set -eu
+
+[ "$(id -u)" -eq 0 ] || { echo "run this as root" >&2; exit 1; }
+
+MODEL="${1:?usage: install /path/to/model.gguf <sha256>}"
+WANT="${2:?the expected sha256 is required}"
+HERE=$(cd "$(dirname "$0")" && pwd)
+
+IMG=/srv/qwen-lab/sandbox.img
+MOUNT=/srv/qwen-sandbox
+KEYDIR=/etc/qwen-sandbox
+SIZE_MB=8192
+
+echo "==> verifying what actually arrived"
+GOT=$(sha256sum "$MODEL" | cut -d' ' -f1)
+if [ "$GOT" != "$WANT" ]; then
+    echo "  the file does not match the hash you gave" >&2
+    echo "    expected $WANT" >&2
+    echo "    got      $GOT" >&2
+    echo "  refusing to install it" >&2
+    exit 1
+fi
+echo "  sha256 matches"
+
+echo "==> an account that owns nothing"
+if ! id qwensandbox >/dev/null 2>&1; then
+    # No home, no shell, no supplementary groups. It exists to own one process.
+    useradd --system --no-create-home --shell /usr/sbin/nologin qwensandbox
+    echo "  created qwensandbox"
+fi
+
+echo "==> the key"
+install -d -m 0700 "$KEYDIR"
+if [ ! -s "$KEYDIR/volume.key" ]; then
+    # 512 bits from the kernel. Never displayed, never copied, and the only
+    # thing standing between the disk and the weights when the volume is shut.
+    dd if=/dev/urandom of="$KEYDIR/volume.key" bs=64 count=1 status=none
+    chmod 0400 "$KEYDIR/volume.key"
+    echo "  generated a volume key (root-only, 0400)"
+fi
+
+echo "==> the encrypted volume"
+if [ ! -f "$IMG" ]; then
+    # Allocated rather than sparse, so a full disk cannot corrupt the volume
+    # halfway through a write.
+    fallocate -l "${SIZE_MB}M" "$IMG" 2>/dev/null || \
+        dd if=/dev/zero of="$IMG" bs=1M count="$SIZE_MB" status=none
+    chmod 0600 "$IMG"
+    cryptsetup luksFormat --type luks2 --batch-mode \
+        --key-file "$KEYDIR/volume.key" "$IMG"
+    cryptsetup luksOpen --key-file "$KEYDIR/volume.key" "$IMG" qwen-sandbox
+    mkfs.ext4 -q -m 0 /dev/mapper/qwen-sandbox
+    echo "  created a LUKS2 volume of ${SIZE_MB}M"
+else
+    cryptsetup luksOpen --key-file "$KEYDIR/volume.key" "$IMG" qwen-sandbox 2>/dev/null || true
+fi
+
+install -d -m 0755 "$MOUNT"
+mountpoint -q "$MOUNT" || mount /dev/mapper/qwen-sandbox "$MOUNT"
+
+echo "==> moving the weights inside"
+NAME=$(basename "$MODEL")
+if [ ! -f "$MOUNT/$NAME" ]; then
+    cp "$MODEL" "$MOUNT/$NAME"
+    # Verified again on the inside. A copy is a second chance to go wrong, and
+    # this one is the copy that will actually be loaded.
+    GOT=$(sha256sum "$MOUNT/$NAME" | cut -d' ' -f1)
+    [ "$GOT" = "$WANT" ] || { echo "  the copy does not match; aborting" >&2; exit 1; }
+    echo "  copied and re-verified"
+fi
+chown -R root:qwensandbox "$MOUNT"
+chmod -R o-rwx "$MOUNT"
+
+cat > "$KEYDIR/sandbox.env" <<ENV
+# Written by sandbox/install. The model the contained service loads.
+QWEN_SANDBOX_MODEL=$MOUNT/$NAME
+ENV
+chmod 0640 "$KEYDIR/sandbox.env"
+chgrp qwensandbox "$KEYDIR/sandbox.env"
+
+echo "==> the units"
+install -m 0644 "$HERE/qwen-sandbox-volume.service" /etc/systemd/system/
+install -m 0644 "$HERE/qwen-sandbox.service" /etc/systemd/system/
+systemctl daemon-reload
+
+# Whoever is doing the research needs to reach the socket. This group is the
+# entire access control for the model, so it is one person, not a wide group.
+OPERATOR="${SUDO_USER:-}"
+if [ -n "$OPERATOR" ] && [ "$OPERATOR" != "root" ]; then
+    id -nG "$OPERATOR" | tr ' ' '\n' | grep -qx qwensandbox || {
+        usermod -aG qwensandbox "$OPERATOR"
+        echo "  added $OPERATOR to the qwensandbox group (log out and back in)"
+    }
+fi
+
+# Unmounted and locked again. It is opened when the service starts and not a
+# moment before — an encrypted volume that is always mounted is a directory.
+umount "$MOUNT" 2>/dev/null || true
+cryptsetup luksClose qwen-sandbox 2>/dev/null || true
+
+cat <<'DONE'
+
+  Installed, and not running. Deliberately: this starts by hand and stops when
+  the research does.
+
+    sudo systemctl start qwen-sandbox      # unlocks the volume and loads it
+    sudo systemctl stop  qwen-sandbox      # and locks it again
+
+  It is NOT enabled at boot, is NOT reachable over the network, and is NOT
+  wired into the dashboard. Talk to it over the socket:
+
+    curl --unix-socket /run/qwen-sandbox/api.sock http://localhost/v1/models
+
+DONE

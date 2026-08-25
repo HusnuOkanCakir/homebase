@@ -1,0 +1,116 @@
+[Unit]
+Description=Qwen lab — an untrusted model, contained
+Documentation=file:///srv/qwen-lab/sandbox/THREAT-MODEL.md
+
+# The encrypted volume holding the weights. Requires, not Wants: with no
+# volume there is no model, and starting anyway would silently run nothing.
+Requires=qwen-sandbox-volume.service
+After=qwen-sandbox-volume.service
+
+# Deliberately not WantedBy=multi-user.target anywhere. This is started by hand
+# when somebody is doing research and stopped when they are finished. A model
+# with its refusals removed should not be a thing that quietly comes back every
+# time the machine reboots.
+
+[Service]
+Type=simple
+User=qwensandbox
+Group=qwensandbox
+
+# --- No network. At all. -----------------------------------------------------
+#
+# The single highest-value control here, and the reason the API is a Unix
+# socket rather than a port. PrivateNetwork gives this process its own network
+# namespace containing nothing but loopback: no route to the house, no route to
+# the internet, no DNS. A completely compromised process — a malicious GGUF
+# exploiting the parser, say — has nowhere to send anything.
+#
+# Unix sockets are filesystem objects and cross namespaces freely, so the API
+# stays reachable from the host while the process itself cannot open an IP
+# socket at all.
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+
+# --- The model, and nothing else ---------------------------------------------
+ExecStart=/srv/qwen-lab/runtime/cpu/llama-b10549/llama-server \
+    --model ${QWEN_SANDBOX_MODEL} \
+    --host /run/qwen-sandbox/api.sock \
+    --ctx-size 2048 \
+    --parallel 1 \
+    --threads 4 \
+    --cache-type-k q8_0 \
+    --cache-type-v q8_0 \
+    --chat-template-kwargs {"enable_thinking":false} \
+    --no-webui
+
+EnvironmentFile=/etc/qwen-sandbox/sandbox.env
+
+# The socket lives here. 0750 so only root and the sandbox group can reach it —
+# that group is the whole access control for this model.
+RuntimeDirectory=qwen-sandbox
+RuntimeDirectoryMode=0750
+
+# --- Filesystem: blind to everything that matters ----------------------------
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+
+# Named explicitly rather than relying on ProtectSystem, because these are the
+# things whose disclosure would actually matter: the household's files, the
+# dashboard's database and sessions, and the API key of the *other* model — the
+# one that is wired into Homebase and reachable from the house.
+InaccessiblePaths=/srv/homebase
+InaccessiblePaths=/var/lib/homebase
+InaccessiblePaths=/etc/qwen-lab
+InaccessiblePaths=/root
+InaccessiblePaths=/home
+
+# The weights are read. They are never written, and neither is anything else.
+ReadOnlyPaths=/srv/qwen-sandbox
+ReadOnlyPaths=/srv/qwen-lab/runtime
+
+# --- Privilege: none, and no way to acquire any ------------------------------
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateUsers=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+
+# Cannot see, signal or inspect any other process on the machine.
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @obsolete @cpu-emulation @module @mount @reboot @swap
+
+# --- Resources: cannot take the machine down --------------------------------
+#
+# A 5.6 GB model on a 15.5 GB machine that is also running nine applications
+# and the dashboard. These bounds are what stop a research experiment from
+# being the reason the house loses its file server.
+MemoryMax=8G
+MemoryHigh=7G
+TasksMax=64
+CPUQuota=350%
+Nice=15
+IOSchedulingClass=idle
+
+# --- Privacy -----------------------------------------------------------------
+#
+# Prompts do not go to the journal. Whatever somebody types into a model with
+# its refusals removed is exactly the material that should not end up in a log
+# that is read over somebody's shoulder, shipped in a backup, or quoted in a
+# bug report. Errors still surface; request bodies do not.
+StandardOutput=null
+StandardError=journal

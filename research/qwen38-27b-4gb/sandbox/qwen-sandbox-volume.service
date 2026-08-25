@@ -1,0 +1,24 @@
+[Unit]
+Description=Qwen lab — unlock the encrypted volume holding the untrusted model
+Documentation=file:///srv/qwen-lab/sandbox/THREAT-MODEL.md
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# LUKS2, unlocked from a key file only root can read, mounted noexec/nosuid/nodev.
+#
+# What this buys, stated plainly: the weights and anything written beside them
+# are ciphertext whenever the service is stopped. A backup of this machine, a
+# stolen disk, or another account on the box yields nothing.
+#
+# What it does not buy: protection from root while the volume is open, since
+# the key is on the same disk. That is not a flaw in the design so much as the
+# limit of encrypting at rest on a machine that must mount it unattended. It is
+# written down here rather than left for somebody to assume otherwise.
+ExecStart=/sbin/cryptsetup luksOpen --key-file /etc/qwen-sandbox/volume.key /srv/qwen-lab/sandbox.img qwen-sandbox
+ExecStart=/bin/mount -o ro,noexec,nosuid,nodev /dev/mapper/qwen-sandbox /srv/qwen-sandbox
+
+ExecStop=/bin/umount /srv/qwen-sandbox
+ExecStop=/sbin/cryptsetup luksClose qwen-sandbox

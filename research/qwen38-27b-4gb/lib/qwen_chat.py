@@ -128,4 +128,3 @@ def main(argv: list[str] | None = None) -> int:
         rate = f", {generated / elapsed:.1f} tok/s" if generated and elapsed > 0 else ""
         print(f"\n[{elapsed:.1f}s, {generated} tokens{rate}]", file=sys.stderr)
     return 0
-
