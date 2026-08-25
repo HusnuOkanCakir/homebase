@@ -86,3 +86,34 @@ func TestSystemInfoMirrorsWhatHostdReports(t *testing.T) {
 		}
 	}
 }
+
+// VPNStatus is mirrored by hand too, and the Tailscale block inside it is a new
+// place for the same failure: a field that goes missing here arrives empty, and
+// empty renders as "Tailscale is not installed" on a machine where it is the
+// only thing carrying remote access.
+func TestVPNStatusMirrorsWhatHostdReports(t *testing.T) {
+	for _, pair := range []struct {
+		name         string
+		theirs, ours reflect.Type
+	}{
+		{"VPNStatus", reflect.TypeOf(hostd.VPNStatus{}), reflect.TypeOf(VPNStatus{})},
+		{"TailscaleStatus", reflect.TypeOf(hostd.TailscaleStatus{}), reflect.TypeOf(TailscaleStatus{})},
+	} {
+		t.Run(pair.name, func(t *testing.T) {
+			theirs := jsonFields(pair.theirs)
+			ours := jsonFields(pair.ours)
+			for name := range theirs {
+				if !ours[name] {
+					t.Errorf("hostd reports %q and hostclient drops it; it will "+
+						"arrive empty and nothing will report a fault", name)
+				}
+			}
+			for name := range ours {
+				if !theirs[name] {
+					t.Errorf("hostclient carries %q and hostd does not report it; "+
+						"it will always be empty", name)
+				}
+			}
+		})
+	}
+}

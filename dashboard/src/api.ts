@@ -661,6 +661,23 @@ export interface VPNStatus {
     last_checked?: string;
     message?: string;
   };
+  /**
+   * Tailscale, which Homebase does not manage and does report.
+   *
+   * On a connection behind carrier-grade NAT the Wireguard half of remote
+   * access can never work, and this is what is actually carrying the traffic.
+   * A screen that named only the part Homebase controls would be honest about
+   * itself and useless to the person reading it.
+   */
+  tailscale: {
+    installed: boolean;
+    running: boolean;
+    /** The daemon's own word: "Running", "NeedsLogin", "Stopped". */
+    state?: string;
+    /** What to type from away, e.g. homebase.tail9c4e2.ts.net */
+    name?: string;
+    addresses?: string[];
+  };
   message?: string;
 }
 

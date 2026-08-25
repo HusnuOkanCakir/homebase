@@ -80,6 +80,48 @@ export function RemoteAccess({ canManage }: { canManage: boolean }) {
         />
       ) : null}
 
+      {/*
+        Tailscale first, when it is carrying the traffic.
+
+        Not because it is better, but because it is *true*: on a connection
+        behind carrier-grade NAT the Wireguard section below describes something
+        that cannot work, and burying the working answer underneath it is how
+        somebody spends an evening re-checking a port forward that was never the
+        problem.
+      */}
+      {status.tailscale.installed ? (
+        status.tailscale.running ? (
+          <div className="remote-live">
+            <p className="remote-live-label">Reachable from anywhere, over Tailscale</p>
+            {status.tailscale.name ? (
+              <p className="remote-live-name">{status.tailscale.name}</p>
+            ) : null}
+            {status.tailscale.addresses?.length ? (
+              <p className="muted remote-live-addresses">
+                {status.tailscale.addresses.join(" · ")}
+              </p>
+            ) : null}
+            <p className="muted">
+              Install Tailscale on your phone or laptop, sign in to the same
+              account, and this server is on its network wherever it is. Use the
+              name above — <strong>not</strong> the .local one, which only works
+              beside the server and never over a tunnel.
+            </p>
+          </div>
+        ) : (
+          <Message
+            tone="warning"
+            title="Tailscale is installed but not signed in."
+            detail={
+              "Until it is, this server cannot be reached from outside through it. " +
+              "This is the state that looks finished and is not."
+            }
+            recovery="Run `sudo tailscale up` on the server and open the link it prints."
+            technical={status.tailscale.state ? `state: ${status.tailscale.state}` : undefined}
+          />
+        )
+      ) : null}
+
       {!status.configured ? (
         <>
           <p>
@@ -150,7 +192,14 @@ export function RemoteAccess({ canManage }: { canManage: boolean }) {
 
           {/* The one thing left, said until it has demonstrably been done.
               A port the router has not forwarded looks from a phone exactly
-              like a wrong key: no error, no reply, nothing. */}
+              like a wrong key: no error, no reply, nothing.
+
+              And sometimes it is neither. An internet connection behind
+              carrier-grade NAT cannot receive a forwarded port at all, however
+              correctly the router is configured — the public address belongs to
+              the provider and is shared. That case is named here because
+              everything about it looks like a mistake the reader made, and no
+              amount of care in the router will fix it. */}
           {!status.ever_connected ? (
             <Message
               tone="warning"
@@ -162,7 +211,10 @@ export function RemoteAccess({ canManage }: { canManage: boolean }) {
                 "exactly like a wrong key, because Wireguard deliberately answers " +
                 "nothing it does not recognise. Give the server a fixed address in the " +
                 "router at the same time, or the forwarding will break the next time it " +
-                "restarts."
+                "restarts. If it is already forwarded and still nothing connects, check " +
+                "the router's own internet address: one starting 100.64 to 100.127 means " +
+                "your provider shares it with other homes, and no port can be forwarded " +
+                "to you until they give you one of your own."
               }
             />
           ) : null}

@@ -1343,4 +1343,43 @@ select:focus-visible {
   margin: 1rem 0;
   border: 0;
   border-top: 1px solid var(--border);
+/* --- Remote access: the method that actually works ------------------------
+
+   Set apart from the Wireguard configuration below it because it answers a
+   different question. That one is "how do I set this up"; this one is "what do
+   I type right now", and on a connection where the setup below cannot work it
+   is the only true thing on the screen. */
+
+.remote-live {
+  margin-bottom: 1.25rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.remote-live p {
+  margin: 0;
+}
+
+.remote-live-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 0.15rem !important;
+}
+
+/* The name is the thing somebody came to this screen to copy, so it is the
+   largest thing in the block and selectable as one word. */
+.remote-live-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.remote-live-addresses {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  margin-bottom: 0.5rem !important;
 }

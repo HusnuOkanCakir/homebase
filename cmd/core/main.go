@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -80,6 +81,15 @@ func main() {
 		assistantKey = flag.String("assistant-key-file",
 			envOr("HOMEBASE_ASSISTANT_KEY_FILE", "/etc/qwen-lab/api-key"),
 			"file holding the local model's API key")
+		// A certificate a browser already trusts, when something can produce one.
+		//
+		// Empty by default: most machines have no public name, and the
+		// self-signed certificate with its printed fingerprint is the honest
+		// answer for them.
+		tlsCert = flag.String("tls-cert", envOr("HOMEBASE_TLS_CERT", ""),
+			"PEM certificate to serve instead of the self-signed one")
+		tlsKey = flag.String("tls-key", envOr("HOMEBASE_TLS_KEY", ""),
+			"PEM private key for --tls-cert")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
@@ -101,6 +111,8 @@ func main() {
 
 		assistantURL:     *assistantURL,
 		assistantKeyFile: *assistantKey,
+		tlsCert:          *tlsCert,
+		tlsKey:           *tlsKey,
 	}); err != nil {
 		log.Error("core failed", "error", err)
 		os.Exit(1)
@@ -121,6 +133,10 @@ type runOptions struct {
 	// Empty unless this machine has a local model. See the flag.
 	assistantURL     string
 	assistantKeyFile string
+
+	// Empty unless something can produce a certificate browsers trust.
+	tlsCert string
+	tlsKey  string
 }
 
 func run(log *slog.Logger, opts runOptions) error {
@@ -258,6 +274,31 @@ func run(log *slog.Logger, opts runOptions) error {
 			IdleTimeout:       2 * time.Minute,
 		}
 
+		// A certificate a browser already trusts, if this machine has one.
+		//
+		// Tailscale is currently the only thing that can produce one here: it
+		// gives the machine a real name in a real zone and obtains a Let's
+		// Encrypt certificate over DNS-01, without the machine being reachable
+		// from the internet — which is the part that used to be impossible.
+		// Nothing here is specific to it, though; any pair of PEM files works.
+		//
+		// The self-signed identity is still prepared above and still stands
+		// behind this. If the trusted pair is missing or broken at the moment of
+		// a handshake, that one is served and the browser warns — which somebody
+		// can click through to reach the screen where they would fix it.
+		if opts.tlsCert != "" && opts.tlsKey != "" {
+			fallback, err := tls.LoadX509KeyPair(identity.CertPath, identity.KeyPath)
+			if err != nil {
+				return fmt.Errorf("loading the self-signed certificate: %w", err)
+			}
+			reloading := api.NewReloadingCertificate(opts.tlsCert, opts.tlsKey, &fallback, log)
+			tlsServer.TLSConfig = &tls.Config{
+				MinVersion:     tls.VersionTLS12,
+				GetCertificate: reloading.GetCertificate,
+			}
+			log.Info("a trusted certificate will be served when present", "cert", opts.tlsCert)
+		}
+
 		// Logged so the fingerprint is in the journal as well as on the screen:
 		// somebody helping over the phone needs to be able to read it out.
 		log.Info("serving HTTPS",
@@ -266,7 +307,14 @@ func run(log *slog.Logger, opts runOptions) error {
 			"fingerprint", identity.Fingerprint)
 
 		go func() {
-			if err := tlsServer.ServeTLS(tlsListener, identity.CertPath, identity.KeyPath); err != nil &&
+			// Empty paths when TLSConfig already carries GetCertificate:
+			// ServeTLS only consults the config when it is given none, and
+			// passing both would pin the self-signed one forever.
+			certPath, keyPath := identity.CertPath, identity.KeyPath
+			if tlsServer.TLSConfig != nil && tlsServer.TLSConfig.GetCertificate != nil {
+				certPath, keyPath = "", ""
+			}
+			if err := tlsServer.ServeTLS(tlsListener, certPath, keyPath); err != nil &&
 				!errors.Is(err, http.ErrServerClosed) {
 				errCh <- err
 			}

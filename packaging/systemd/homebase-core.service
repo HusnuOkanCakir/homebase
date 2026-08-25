@@ -36,6 +36,14 @@ RestartSec=2s
 Environment=HOMEBASE_LISTEN=0.0.0.0:80
 Environment=HOMEBASE_LISTEN_TLS=0.0.0.0:443
 
+# A certificate a browser already trusts, if anything on this machine can
+# produce one. Named unconditionally and absent by default: with no such files
+# core serves its own self-signed certificate exactly as before, and the
+# homebase-tailscale-cert timer is what puts them there on a machine that has
+# Tailscale. Nothing breaks on a machine that does not.
+Environment=HOMEBASE_TLS_CERT=/var/lib/homebase/trusted.crt
+Environment=HOMEBASE_TLS_KEY=/var/lib/homebase/trusted.key
+
 # Unprivileged, and the whole design rests on it staying that way. If a feature
 # appears to need more privilege here, it needs a new hostd operation instead.
 User=homebase
