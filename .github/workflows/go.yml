@@ -120,7 +120,16 @@ jobs:
 
       - name: Vulnerability scan
         run: |
-          go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./... || {
+          # Pinned, and the pin has to move with the toolchain.
+          #
+          # v1.1.4 bundles an x/tools too old to parse Go 1.27, and panics with
+          # `unexpected expr: *ast.KeyValueExpr` while building SSA. It does not
+          # fail every time — govulncheck analyses packages concurrently, so
+          # whether it reaches the construct it cannot parse varies between
+          # runs. That intermittency is worse than a hard failure: it reads as a
+          # flaky job, and a scan people learn to re-run is a scan that is not
+          # protecting anything.
+          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./... || {
             echo
             echo "govulncheck reported a problem. If it is a false positive, say so"
             echo "in the pull request rather than suppressing it silently."
