@@ -36,7 +36,22 @@ type VPNStatus struct {
 	// DNS is the name that has to keep pointing here.
 	DNS DDNSStatus `json:"dns"`
 
+	// Tailscale is what is carrying remote access when Wireguard cannot.
+	Tailscale TailscaleStatus `json:"tailscale"`
+
 	Message string `json:"message,omitempty"`
+}
+
+// TailscaleStatus is what Homebase can say about Tailscale, which it does not
+// manage — it only reports it, because on some connections it is the only thing
+// that reaches this machine from outside.
+type TailscaleStatus struct {
+	Installed bool   `json:"installed"`
+	Running   bool   `json:"running"`
+	State     string `json:"state,omitempty"`
+	// Name is what somebody types from away.
+	Name      string   `json:"name,omitempty"`
+	Addresses []string `json:"addresses,omitempty"`
 }
 
 // DDNSStatus is what the dynamic DNS name is doing.

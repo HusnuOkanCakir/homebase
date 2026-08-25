@@ -3145,8 +3145,55 @@ components:
             check — evidence rather than a probe.
         dns:
           $ref: "#/components/schemas/DynamicDNS"
+        tailscale:
+          $ref: "#/components/schemas/TailscaleStatus"
         message:
           type: string
+
+    TailscaleStatus:
+      type: object
+      additionalProperties: false
+      required: [installed, running]
+      description: |
+        What Tailscale is doing on this machine, if it is here at all.
+
+        **Homebase does not manage Tailscale.** It does not install, configure, start or
+        stop it; this is read from tailscaled's local API and reported. Taking ownership
+        would mean owning its upgrades, its login state and its failures, for something
+        that manages itself perfectly well.
+
+        It is reported here, beside Wireguard, because they answer the same question. On a
+        connection behind carrier-grade NAT the Wireguard half can never work however
+        correctly it is configured, and a remote-access endpoint that names only the part
+        Homebase controls is accurate about itself and misleading about the machine.
+      properties:
+        installed:
+          type: boolean
+          description: Whether tailscaled is present and answering at all.
+        running:
+          type: boolean
+          description: |
+            Whether it is logged in and carrying traffic. Separate from `installed` because
+            an installed daemon awaiting login is the state most worth naming: everything
+            looks present and nothing works.
+        state:
+          type: string
+          description: |
+            The daemon's own word — `Running`, `NeedsLogin`, `Stopped`. Passed through
+            rather than translated, because it is the word Tailscale's own documentation
+            and error messages use.
+          example: Running
+        name:
+          type: string
+          description: |
+            What this machine answers to inside the tailnet, and what somebody types from
+            away. Note this is *not* the `.local` name, which is mDNS and does not cross a
+            tunnel of any kind.
+          example: homebase.tail9c4e2.ts.net
+        addresses:
+          type: array
+          items: { type: string }
+          description: Its tailnet addresses, the 100.x one first.
 
     VPNDevice:
       type: object

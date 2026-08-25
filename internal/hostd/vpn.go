@@ -92,6 +92,14 @@ type VPNStatus struct {
 	// can reach, and from outside the two look identical.
 	DNS DDNSStatus `json:"dns"`
 
+	// Tailscale is reported alongside because it answers the same question.
+	//
+	// On a connection behind carrier-grade NAT the Wireguard half of this
+	// screen can never work, and something else is carrying the traffic. A
+	// remote-access screen that names only the part Homebase manages tells the
+	// truth about itself and the wrong thing to the person reading it.
+	Tailscale TailscaleStatus `json:"tailscale"`
+
 	Message string `json:"message,omitempty"`
 }
 
@@ -148,6 +156,12 @@ func readVPNStatus(ctx context.Context) VPNStatus {
 	// device made the network screen unreachable, and the screen was not the
 	// bug.
 	status := VPNStatus{Port: vpnPort, Devices: []VPNDevice{}}
+
+	// Read before the early return below. Whether Tailscale is carrying this
+	// machine's remote access has nothing to do with whether Wireguard was ever
+	// set up, and on a connection where Wireguard cannot work it is the only
+	// true answer the screen has.
+	status.Tailscale = readTailscaleStatus(ctx, tailscaleSocket)
 
 	raw, err := os.ReadFile(wireguardConf)
 	if err != nil {
