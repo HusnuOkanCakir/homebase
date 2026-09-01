@@ -1420,3 +1420,38 @@ select:focus-visible {
   font-size: 0.9rem;
   line-height: 1.5;
 }
+
+/* --- People ---------------------------------------------------------------
+
+   Roles are chosen by reading a sentence about each one, not by picking a word
+   out of a dropdown. "Administrator" and "Member" mean nothing to somebody
+   adding their father to a server; "can read every file on it, including other
+   people's private folders" means exactly the thing they need to weigh. */
+
+.roles {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  margin: 0 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.roles legend {
+  padding: 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.role-choice {
+  display: block;
+  margin-bottom: 0;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.role-choice input[type="radio"] {
+  width: auto;
+  margin: 0 0.2rem 0 0;
+}

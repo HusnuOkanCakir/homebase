@@ -97,7 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/auth/recovery-code", s.authenticated(s.handleRecoveryStatus))
 	mux.Handle("POST /api/v1/auth/recovery-code", s.authenticated(s.handleReissueRecoveryCode))
 
-	mux.Handle("GET /api/v1/system", s.require(auth.PermSystemRead, s.handleSystem))
+	mux.Handle("GET /api/v1/system", s.authenticated(s.handleSystem))
 	mux.Handle("GET /api/v1/system/history", s.require(auth.PermSystemRead, s.handleSystemHistory))
 	mux.Handle("POST /api/v1/system/reboot", s.require(auth.PermSystemManage, s.handleReboot))
 	mux.Handle("POST /api/v1/system/shutdown", s.require(auth.PermSystemManage, s.handleShutdown))
@@ -399,7 +399,19 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, user *auth.Use
 	writeJSON(w, http.StatusOK, user)
 }
 
-func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+// handleSystem describes the machine, in as much detail as the caller may have.
+//
+// Authenticated rather than requiring system.read, and that is a deliberate
+// change from when every account was an administrator. The dashboard shell polls
+// this every five seconds to render itself at all, so an account without
+// system.read — somebody given a login only to fetch a file — got a 403 every
+// five seconds and an error banner across the whole screen, with the tab they
+// were entitled to use sitting underneath it.
+//
+// So the endpoint answers everyone and says less to some: the machine's name and
+// version, which is what the shell needs to draw a header, and nothing about
+// disks, memory, temperature or uptime, which is what system.read is for.
+func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, user *auth.User) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
@@ -414,6 +426,14 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.Us
 	resources, err := s.host.SystemResources(ctx)
 	if err != nil {
 		s.writeHostError(w, r, err)
+		return
+	}
+
+	if !user.Can(auth.PermSystemRead) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"hostname": info.Hostname,
+			"version":  s.version,
+		})
 		return
 	}
 

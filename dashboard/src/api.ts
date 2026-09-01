@@ -133,6 +133,32 @@ const post = <T>(path: string, body?: unknown, timeoutMs?: number) =>
 
 // --- Types -------------------------------------------------------------------
 
+/** A person on this server, as an administrator sees them. */
+export interface Account {
+  id: string;
+  username: string;
+  role: Role;
+  /**
+   * Whether they have ever signed in. An invitation nobody has accepted and an
+   * account in daily use look identical without it.
+   */
+  has_signed_in: boolean;
+  created_at: string;
+  last_login_at?: string;
+}
+
+export type Role = "administrator" | "member" | "limited";
+
+/** What comes back once, when an account is created or a code reissued. */
+export interface JoiningCode {
+  id?: string;
+  username: string;
+  role?: Role;
+  joining_code: string;
+  message: string;
+}
+
+
 /** What the local assistant is, and whether it can be used at all. */
 export interface AssistantStatus {
   available: boolean;
@@ -895,6 +921,28 @@ export const api = {
   me: () => get<User>("/auth/me"),
 
   system: () => get<SystemInfo>("/system"),
+
+  /** Everybody on this server. Requires `accounts.manage`. */
+  accounts: () => get<{ accounts: Account[] }>("/accounts"),
+
+  /**
+   * Add somebody, and get the code they sign in with — once.
+   *
+   * The code is not recoverable. It is stored the way a password is, so nothing
+   * can produce it again; `reissueJoiningCode` issues a replacement.
+   */
+  createAccount: (username: string, role: Role) =>
+    post<JoiningCode>("/accounts", { username, role }),
+
+  setAccountRole: (id: string, role: Role) =>
+    post<{ id: string; username: string; role: Role }>(`/accounts/${id}/role`, { role }),
+
+  /** The confirmation is their username, exactly. Their files are kept. */
+  removeAccount: (id: string, confirm: string) =>
+    post<{ removed: string; message: string }>(`/accounts/${id}/remove`, { confirm }),
+
+  reissueJoiningCode: (id: string) =>
+    post<JoiningCode>(`/accounts/${id}/joining-code`, undefined),
 
   /**
    * Whether this machine has a local model, and what it is.

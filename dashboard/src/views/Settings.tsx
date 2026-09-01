@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { type Job, type SystemInfo, type User } from "../api";
 import { RenameServer } from "../components/RenameServer";
+import { People } from "./People";
 import { Security } from "./Security";
 import { Updates } from "./Updates";
 import { PowerCard, type PowerChoice } from "../components/PowerCard";
@@ -129,6 +130,10 @@ export function Settings({ user, system, onLeaving }: Props) {
       </section>
 
       <Updates canManage={user.permissions.includes("update.manage")} />
+
+      {/* Only for somebody who can actually add people. A screen that lists
+          the household and refuses every button is worse than no screen. */}
+      {user.permissions.includes("accounts.manage") && <People me={user.username} />}
 
       <Security username={user.username} />
 

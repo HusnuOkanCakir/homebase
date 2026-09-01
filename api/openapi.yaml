@@ -98,6 +98,15 @@ paths:
         Read live from `hostd` on every request. Nothing here is cached or remembered —
         a remembered disk-usage figure is a wrong disk-usage figure, and the Stage 2
         operator must never reason about the machine from stale values.
+
+        **Answers every signed-in account, and says less to some.** With `system.read` this is
+        the whole machine. Without it — an account given a login only to fetch a file — it is
+        the machine's name and version and nothing else: no disks, no memory, no temperature,
+        no uptime.
+
+        That is not a courtesy. The dashboard polls this every five seconds to draw its own
+        header, so requiring `system.read` meant an account without it got a refusal every five
+        seconds and an error across every screen it *was* entitled to use.
       operationId: getSystem
       responses:
         "200":

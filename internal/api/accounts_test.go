@@ -193,3 +193,50 @@ func TestAccountNamesThatWouldBreakFileSharingAreExplained(t *testing.T) {
 		t.Fatalf("detail does not explain why: %q", e.Detail)
 	}
 }
+
+// The shell polls /system every five seconds to draw itself. An account without
+// system.read used to get a 403 every five seconds and an error banner over the
+// whole screen, with the one tab it was entitled to use underneath.
+func TestTheShellRendersForAnAccountWithoutSystemRead(t *testing.T) {
+	h := newHarness(t)
+	token := h.signIn(t)
+
+	rec := h.do(http.MethodPost, "/api/v1/accounts",
+		`{"username":"brother","role":"limited"}`, auth1(token))
+	var created struct {
+		JoiningCode string `json:"joining_code"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &created)
+	h.do(http.MethodPost, "/api/v1/auth/recover",
+		`{"username":"brother","recovery_code":"`+created.JoiningCode+
+			`","new_password":"another-long-password"}`, nil)
+	login := h.do(http.MethodPost, "/api/v1/auth/login",
+		`{"username":"brother","password":"another-long-password"}`, nil)
+	var theirs string
+	for _, cookie := range login.Result().Cookies() {
+		if cookie.Name == SessionCookie {
+			theirs = cookie.Value
+		}
+	}
+
+	rec = h.do(http.MethodGet, "/api/v1/system", "", auth1(theirs))
+	if rec.Code == http.StatusForbidden {
+		t.Fatal("a limited account cannot load the shell; the dashboard would " +
+			"show an error banner over every screen it is entitled to use")
+	}
+	// hostd is unreachable in this harness, so 503 is the honest answer here —
+	// what matters is that it is not a permission refusal.
+	if rec.Code == http.StatusOK {
+		var body map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &body)
+		if _, leaked := body["memory"]; leaked {
+			t.Fatal("an account without system.read was told the machine's memory")
+		}
+		if _, leaked := body["disks"]; leaked {
+			t.Fatal("an account without system.read was told about the disks")
+		}
+		if body["hostname"] == nil {
+			t.Fatal("the shell was not told the machine's name, which is all it needs")
+		}
+	}
+}
