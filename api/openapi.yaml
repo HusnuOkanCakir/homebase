@@ -58,6 +58,8 @@ tags:
     description: Structured events and the audit trail
   - name: assistant
     description: A language model running on this machine, if it has one
+  - name: accounts
+    description: The people who use this server
 
 security:
   - sessionCookie: []
@@ -529,6 +531,237 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /accounts:
+    get:
+      tags: [accounts]
+      summary: Everybody on this server
+      description: |
+        Requires `accounts.manage`.
+
+        Returns roles, not permission arrays. The point of naming roles is that nobody has to
+        read fourteen strings to answer "what can my father do".
+
+        `has_signed_in` separates an invitation nobody has accepted from an account somebody
+        is using — the question an administrator actually has a week later.
+      operationId: listAccounts
+      responses:
+        "200":
+          description: The household
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+    post:
+      tags: [accounts]
+      summary: Add somebody to this server
+      description: |
+        Requires `accounts.manage`.
+
+        **An administrator hands over a code, never a password.** The account is created with
+        a password that cannot be used — random bytes, hashed, discarded unread — and the
+        response carries a one-time joining code. The person exchanges it for a password only
+        they know, through `POST /auth/recover`. There is no endpoint that sets somebody
+        else's password and there should never be one.
+
+        The code is shown once. It is stored the way a password is, so nothing — including
+        this server — can produce it again; `POST /accounts/{id}/joining-code` issues a
+        replacement.
+
+        The name becomes their file-sharing login as well (`hbshare-<name>`), which is why it
+        is restricted to lower-case letters, numbers and hyphens. A name Linux accepts and
+        SMB does not is a name that works in the dashboard and fails at the file server with
+        an authentication box that never explains itself.
+
+        Returns the account rather than a job — a documented exception to the 202 convention,
+        alongside `POST /system/name`. It is one transaction, nothing can be usefully
+        interrupted, and the first thing a caller does is read the list back.
+      operationId: createAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, role]
+              additionalProperties: false
+              properties:
+                username:
+                  type: string
+                  pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+                  example: father
+                role: { $ref: "#/components/schemas/Role" }
+      responses:
+        "201":
+          description: The account, and the joining code — once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, username, role, joining_code, message]
+                properties:
+                  id: { type: string }
+                  username: { type: string }
+                  role: { $ref: "#/components/schemas/Role" }
+                  joining_code:
+                    type: string
+                    description: Shown once. Not recoverable.
+                  message: { type: string }
+        "400":
+          description: The name cannot be used, or the role is not one of the three
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Somebody already has that name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /accounts/{account_id}/role:
+    post:
+      tags: [accounts]
+      summary: Change what somebody may do
+      description: |
+        Requires `accounts.manage`.
+
+        Takes effect on that person's next request — permissions are read from the database
+        on every request, so nobody is signed out and nothing is cached.
+
+        `assistant.unrestricted` survives a role change. It is granted by hand at the machine,
+        deliberately outside every role, and a role change that silently revoked it would be a
+        mystery with no error message attached.
+
+        Refused with `accounts.last_administrator` if it would leave the server with nobody
+        able to administer it.
+      operationId: setAccountRole
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              additionalProperties: false
+              properties:
+                role: { $ref: "#/components/schemas/Role" }
+      responses:
+        "200":
+          description: The account's new role
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  username: { type: string }
+                  role: { $ref: "#/components/schemas/Role" }
+        "400": { description: Not one of the three roles, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: No such account, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: The last administrator, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /accounts/{account_id}/remove:
+    post:
+      tags: [accounts]
+      summary: Remove somebody from this server
+      description: |
+        Requires `accounts.manage`, and a confirmation naming the person.
+
+        **Their files are kept.** Removing an account and deleting somebody's photographs are
+        different intentions, and collapsing them into one button is how a decade of pictures
+        disappears behind a word like "Remove" — the same rule that applies to uninstalling an
+        application and to unsharing a folder.
+
+        Their sessions end immediately.
+
+        The confirmation names the person rather than their identifier, unlike applications and
+        backups: somebody removing their father knows his name and has never seen
+        `usr_b5075ca5…`.
+      operationId: removeAccount
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              additionalProperties: false
+              properties:
+                confirm:
+                  type: string
+                  description: The person's username, exactly.
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed: { type: string }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: No such account, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: The last administrator, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "428": { $ref: "#/components/responses/ConfirmationRequired" }
+
+  /accounts/{account_id}/joining-code:
+    post:
+      tags: [accounts]
+      summary: Issue a fresh sign-in code for somebody
+      description: |
+        Requires `accounts.manage`.
+
+        For the person who lost their joining code before using it, or who has forgotten their
+        password and cannot reach their own recovery code. Replaces any earlier code; shown
+        once.
+
+        This is not a way to learn somebody's password. It is a way to let them choose a new
+        one, and it is recorded as `auth.recovery_code_reissued` — the same event the recovery
+        screen writes, because it is the same act.
+      operationId: reissueJoiningCode
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The code — once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string }
+                  joining_code: { type: string }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: No such account, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /jobs:
     get:
@@ -3249,6 +3482,36 @@ components:
           type: array
           items: { type: string }
           description: Its tailnet addresses, the 100.x one first.
+
+    Account:
+      type: object
+      additionalProperties: false
+      required: [id, username, role, has_signed_in, created_at]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        has_signed_in:
+          type: boolean
+          description: |
+            Whether this person has ever signed in. An invitation nobody has accepted and an
+            account in daily use look identical without it.
+        created_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time }
+
+    Role:
+      type: string
+      enum: [administrator, member, limited]
+      description: |
+        A name for a set of permissions. The permissions are the real thing — every check in
+        the server is against one of them — and a role is a way of choosing a sensible set
+        without reading fourteen checkboxes and getting one wrong.
+
+        `administrator` can change anything about the server, including reading every file on
+        it. `member` has their own files and can see how the server is doing, but cannot
+        change it. `limited` has their own files and nothing else.
+
+        `assistant.unrestricted` belongs to no role and is granted only at the machine.
 
     VPNDevice:
       type: object

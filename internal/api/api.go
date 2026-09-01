@@ -110,6 +110,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/jobs/{id}", s.require(auth.PermSystemRead, s.handleGetJob))
 	mux.Handle("POST /api/v1/jobs/{id}/cancel", s.require(auth.PermSystemManage, s.handleCancelJob))
 
+	s.registerAccountRoutes(mux)
 	s.registerAppRoutes(mux)
 	s.registerStorageRoutes(mux)
 	s.registerBackupRoutes(mux)
