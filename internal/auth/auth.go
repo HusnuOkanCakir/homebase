@@ -391,6 +391,21 @@ func (s *Service) CreateSession(ctx context.Context, userID, userAgent string) (
 		return "", time.Time{}, err
 	}
 
+	// A session is a sign-in, however it was arrived at.
+	//
+	// Recorded here rather than only in Authenticate, because two paths produce
+	// a session without going through it: claiming the server at first-run
+	// setup, and claiming an account with a joining code. Both left
+	// last_login_at empty, so the People screen told the administrator looking
+	// at it that they had never signed in — while they were signed in, reading
+	// it. The flag is there to separate an invitation nobody has accepted from
+	// an account in use, and it was answering neither question.
+	//
+	// Best-effort, like the write in Authenticate: failing to record when
+	// somebody signed in must not stop them signing in.
+	_, _ = s.db.ExecContext(ctx, `UPDATE users SET last_login_at = ? WHERE id = ?`,
+		time.Now().UTC().Format(time.RFC3339), userID)
+
 	return token, expires, nil
 }
 

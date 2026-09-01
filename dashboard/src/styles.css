@@ -1343,6 +1343,8 @@ select:focus-visible {
   margin: 1rem 0;
   border: 0;
   border-top: 1px solid var(--border);
+}
+
 /* --- Remote access: the method that actually works ------------------------
 
    Set apart from the Wireguard configuration below it because it answers a
@@ -1454,4 +1456,46 @@ select:focus-visible {
 .role-choice input[type="radio"] {
   width: auto;
   margin: 0 0.2rem 0 0;
+}
+
+/* One person, one row: who they are on the left, what you can do to them on the
+   right. The controls stay on one line so a household of five does not become a
+   page of stacked buttons. */
+
+.people-row {
+  align-items: center;
+  gap: 1rem;
+}
+
+.people-row .app-row-main {
+  gap: 0.1rem;
+}
+
+.people-actions {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.people-actions select {
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.people-actions button {
+  width: auto;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
+/* `.hint` carries a negative top margin so it can tuck under a text input. Under
+   a fieldset that pulls it onto the border. */
+.roles + .hint {
+  margin-top: 0.9rem;
 }

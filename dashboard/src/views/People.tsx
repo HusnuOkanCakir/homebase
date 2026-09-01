@@ -121,7 +121,7 @@ export function People({ me }: { me: string }) {
       ) : (
         <ul className="app-list">
           {accounts.map((account) => (
-            <li className="app-row" key={account.id}>
+            <li className="app-row people-row" key={account.id}>
               <div className="app-row-main">
                 <span className="app-row-name">
                   {account.username}
@@ -135,7 +135,7 @@ export function People({ me }: { me: string }) {
                 </span>
               </div>
 
-              <div className="row">
+              <div className="row people-actions">
                 <select
                   value={account.role}
                   disabled={busy}

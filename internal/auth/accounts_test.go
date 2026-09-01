@@ -226,3 +226,37 @@ func writeRawPermissions(t *testing.T, service *Service, userID string, permissi
 		`UPDATE users SET permissions = ? WHERE id = ?`, string(encoded), userID)
 	return err
 }
+
+// The flag separates an invitation nobody has accepted from an account in use.
+// It was answering neither: setting the server up produces a session without
+// going through Authenticate, so the owner was told they had never signed in
+// while they were signed in, looking at the screen that said it.
+func TestClaimingAnAccountCountsAsSigningIn(t *testing.T) {
+	service, owner := withOwner(t)
+
+	// First-run setup issues a session directly.
+	if _, _, err := service.CreateSession(t.Context(), owner.ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := service.Accounts(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !accounts[0].HasSignedIn {
+		t.Fatal("the account that set this server up is reported as never signed in")
+	}
+
+	// An invitation nobody has accepted is still reported as such.
+	if _, _, err := service.CreateInvitedAccount(t.Context(), "father", RoleMember); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err = service.Accounts(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range accounts {
+		if account.Username == "father" && account.HasSignedIn {
+			t.Fatal("an unclaimed invitation is reported as signed in")
+		}
+	}
+}
