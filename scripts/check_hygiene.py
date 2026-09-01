@@ -87,7 +87,43 @@ def check(path: Path) -> list[str]:
     if "\t" in text and path.suffix in {".yml", ".yaml"}:
         problems.append("contains a tab; YAML must be indented with spaces")
 
+    if path.suffix == ".css":
+        problems.extend(check_css_braces(text))
+
     return problems
+
+
+def check_css_braces(text: str) -> list[str]:
+    """Report an unclosed CSS rule.
+
+    CSS has no compiler and no error. A missing closing brace does not fail the
+    build, does not warn, and does not break the page — it silently nests every
+    rule after it inside the one that was left open, so they match nothing. The
+    stylesheet still loads and the screen simply looks slightly wrong in a way
+    nobody attributes to a brace.
+
+    That happened here: one missing `}` in styles.css swallowed twelve rules
+    across three separate changes — a whole panel, a dropdown and a notice — and
+    shipped in two releases before a screenshot caught it. This is the check that
+    would have caught it in the first commit.
+
+    Deliberately a brace count rather than a parser. It is the failure that
+    actually occurs, it needs no dependency, and a real CSS parser here would be
+    a lot of machinery to catch one typo.
+    """
+    depth = 0
+    for number, line in enumerate(text.splitlines(), start=1):
+        # Strings and comments can legitimately contain braces. Neither appears
+        # in this project's stylesheets, and pretending to parse them properly
+        # would be the machinery this is avoiding — so they are counted, and a
+        # false positive is a thing somebody would notice immediately.
+        depth += line.count("{") - line.count("}")
+        if depth < 0:
+            return [f"line {number}: a closing brace with nothing open"]
+    if depth > 0:
+        return [f"{depth} CSS rule(s) left unclosed; every rule after the "
+                f"missing brace silently matches nothing"]
+    return []
 
 
 def main() -> int:

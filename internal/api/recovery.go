@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/HusnuOkanCakir/homebase/internal/auth"
+	"github.com/HusnuOkanCakir/homebase/internal/events"
 )
 
 // Password recovery — ADR-0015.
@@ -69,18 +72,36 @@ func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 
 	// Deliberately not recoverable: there is nothing for the reader to do
 	// except know. If this was not them, the server has been taken.
-	s.events.Error(r.Context(), "auth.password_recovered", user.Username, "recovery_code",
+	// Named explicitly: this route is not behind the middleware that marks a
+	// request as somebody's, because whoever is calling it cannot sign in. They
+	// have proved who they are with the code, which is what the actor records.
+	s.events.Error(events.WithActor(r.Context(), user.Username),
+		"auth.password_recovered", user.Username, "recovery_code",
 		"The password for "+user.Username+" was reset using the recovery code. "+
 			"Everything signed in as "+user.Username+" was signed out.", false)
 
 	s.log.Warn("password reset with a recovery code",
 		"user", user.Username, "from", clientKey(r))
 
+	// The same password opens folders from another computer.
+	//
+	// Done here rather than in the background, unlike a sign-in: this is a
+	// password *change*, so the old file-sharing password is now wrong and the
+	// person is standing in front of the screen that could tell them if the new
+	// one could not be set. It is also the moment somebody joining this server
+	// chooses their first password, which is where the whole arrangement earns
+	// its keep — they type one password, once, and Windows accepts it.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	note := s.syncFileSharingPassword(ctx, user.Username, body.NewPassword, false)
+
 	// The replacement code travels with the response and is never stored in a
 	// form that can produce it again. If the user closes the page without
 	// writing it down, a signed-in administrator can issue another.
 	s.issueSessionWithExtra(w, r, user, http.StatusOK, map[string]any{
 		"recovery_code": replacement,
+		"message": "This is also the password for opening folders from another " +
+			"computer." + note,
 	})
 }
 

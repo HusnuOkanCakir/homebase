@@ -75,7 +75,14 @@ async function request<T>(
     response = await fetch(BASE + path, {
       ...init,
       headers: {
-        "Content-Type": "application/json",
+        // Not for an upload. A multipart body carries a boundary string that
+        // separates its parts, and the browser writes the header naming it;
+        // setting Content-Type here — to anything, including an empty string —
+        // replaces that with one naming a boundary that does not exist, and the
+        // server answers "that request did not carry a file".
+        ...(init.body instanceof FormData
+          ? {}
+          : { "Content-Type": "application/json" }),
         ...(init.headers ?? {}),
       },
       // The session is a cookie; it has to travel.
@@ -131,7 +138,51 @@ const post = <T>(path: string, body?: unknown, timeoutMs?: number) =>
     timeoutMs,
   );
 
+/**
+ * A multipart upload.
+ *
+ * Separate from `post` for its timeout. The Content-Type is left to the browser
+ * — see `request`.
+ *
+ * Six hours, because this is a file crossing a home connection. A holiday's
+ * photographs over a slow upstream link is not an unusual thing to ask of a
+ * home server, and a request that times out at fifteen seconds is one that can
+ * never carry them.
+ */
+const upload = <T>(path: string, form: FormData) =>
+  request<T>(
+    path,
+    { method: "POST", body: form },
+    6 * 60 * 60 * 1000,
+  );
+
 // --- Types -------------------------------------------------------------------
+
+/** A person on this server, as an administrator sees them. */
+export interface Account {
+  id: string;
+  username: string;
+  role: Role;
+  /**
+   * Whether they have ever signed in. An invitation nobody has accepted and an
+   * account in daily use look identical without it.
+   */
+  has_signed_in: boolean;
+  created_at: string;
+  last_login_at?: string;
+}
+
+export type Role = "administrator" | "member" | "limited";
+
+/** What comes back once, when an account is created or a code reissued. */
+export interface JoiningCode {
+  id?: string;
+  username: string;
+  role?: Role;
+  joining_code: string;
+  message: string;
+}
+
 
 /** What the local assistant is, and whether it can be used at all. */
 export interface AssistantStatus {
@@ -306,6 +357,35 @@ export interface SharedFolder {
   available: boolean;
   /** What to type on Windows, composed by the server: \\name\share. */
   address: string;
+  /** Who may open it, by Homebase username. Absent or empty means everybody
+   *  with an account, which is what every folder is until somebody says
+   *  otherwise. There is deliberately no way to say "nobody". */
+  access?: string[];
+}
+
+/** One place a person may browse: a shared folder, or their own. */
+export interface FileArea {
+  /** A share name, or `me`. Never a path — a path in a response is a path
+   *  somebody sends back. */
+  id: string;
+  name: string;
+  kind: "personal" | "shared";
+  read_only: boolean;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  directory: boolean;
+  size: number;
+  modified: string;
+}
+
+export interface FileListing {
+  path: string;
+  entries: FileEntry[];
+  /** True when the folder holds more than the server will list at once. */
+  truncated: boolean;
 }
 
 export interface ShareStatus {
@@ -325,14 +405,27 @@ export interface ShareStatus {
   server_name: string;
 }
 
+/**
+ * What the server says about itself.
+ *
+ * Only `hostname` and `version` are always there. Everything else needs
+ * `system.read`, and an account without it — somebody given a login to fetch a
+ * file — gets the two fields and nothing more.
+ *
+ * Optional in the type because they are optional in fact. Declaring them
+ * mandatory is how `system.temperature.message` came to be read on an object
+ * that had no temperature, which took the whole dashboard down for exactly the
+ * accounts that could not have caused it.
+ */
 export interface SystemInfo {
   hostname: string;
-  os: string;
-  kernel: string;
-  architecture: string;
-  virtualised: boolean;
-  uptime_seconds: number;
-  cpu: { model: string; cores: number; threads: number };
+  version?: string;
+  os?: string;
+  kernel?: string;
+  architecture?: string;
+  virtualised?: boolean;
+  uptime_seconds?: number;
+  cpu?: { model: string; cores: number; threads: number };
   /**
    * The graphics hardware, and the name for it that will still be right after
    * a reboot.
@@ -842,6 +935,9 @@ export interface Event {
   recoverable: boolean | null;
   message: string | null;
   occurred_at: string;
+  /** Who did it, by Homebase username. Null is not "unknown": nothing did a
+   *  scheduled backup or an unplugged disk on anybody's behalf. */
+  actor: string | null;
 }
 
 // --- Calls -------------------------------------------------------------------
@@ -895,6 +991,28 @@ export const api = {
   me: () => get<User>("/auth/me"),
 
   system: () => get<SystemInfo>("/system"),
+
+  /** Everybody on this server. Requires `accounts.manage`. */
+  accounts: () => get<{ accounts: Account[] }>("/accounts"),
+
+  /**
+   * Add somebody, and get the code they sign in with — once.
+   *
+   * The code is not recoverable. It is stored the way a password is, so nothing
+   * can produce it again; `reissueJoiningCode` issues a replacement.
+   */
+  createAccount: (username: string, role: Role) =>
+    post<JoiningCode>("/accounts", { username, role }),
+
+  setAccountRole: (id: string, role: Role) =>
+    post<{ id: string; username: string; role: Role }>(`/accounts/${id}/role`, { role }),
+
+  /** The confirmation is their username, exactly. Their files are kept. */
+  removeAccount: (id: string, confirm: string) =>
+    post<{ removed: string; message: string }>(`/accounts/${id}/remove`, { confirm }),
+
+  reissueJoiningCode: (id: string) =>
+    post<JoiningCode>(`/accounts/${id}/joining-code`, undefined),
 
   /**
    * Whether this machine has a local model, and what it is.
@@ -1100,6 +1218,55 @@ export const api = {
 
   removeShareUser: (username: string) =>
     post<ShareStatus>("/shares/users/remove", { username }, 60_000),
+
+  // --- Files ----------------------------------------------------------------
+
+  /** The folders this person may browse: shared ones, and `me`. */
+  fileAreas: () => get<{ areas: FileArea[] }>("/files/areas"),
+
+  files: (area: string, path: string) =>
+    get<FileListing>(
+      `/files?area=${encodeURIComponent(area)}&path=${encodeURIComponent(path)}`,
+    ),
+
+  /** The address a download link points at.
+   *
+   *  A link rather than a fetch, deliberately. The browser then does the
+   *  downloading: a progress indicator it already has, a `Range` request when
+   *  the connection drops, and no film held in a JavaScript variable on the way
+   *  past. The session is a cookie, so the link carries it. */
+  fileContentUrl: (area: string, path: string) =>
+    `${BASE}/files/content?area=${encodeURIComponent(area)}&path=${encodeURIComponent(path)}`,
+
+  /** Long: this is a file crossing a home connection, not a request. */
+  uploadFiles: (area: string, path: string, files: File[]) => {
+    const form = new FormData();
+    // Before the file, always. The server has to know where it is going before
+    // a byte of it is written anywhere, and refuses if it does not.
+    form.append("area", area);
+    form.append("path", path);
+    for (const file of files) form.append("file", file, file.name);
+    return upload<{ saved: string[] }>("/files/upload", form);
+  },
+
+  createFolder: (area: string, path: string, name: string) =>
+    post<{ path: string }>("/files/folder", { area, path, name }),
+
+  renameFile: (area: string, path: string, name: string) =>
+    post<{ path: string }>("/files/rename", { area, path, name }),
+
+  /** `confirm` is the folder's own name, and is needed only for a folder with
+   *  something in it. There is no wastebasket. */
+  removeFile: (area: string, path: string, confirm?: string) =>
+    post<{ removed: string }>("/files/remove", { area, path, confirm }, 300_000),
+
+  /** Who may open a folder. An empty list means everybody with an account. */
+  setShareAccess: (name: string, access: string[]) =>
+    post<{ name: string; access: string[]; everyone: boolean; message: string }>(
+      "/shares/access",
+      { name, access },
+      120_000,
+    ),
 
   // --- Remote access ------------------------------------------------------------
 

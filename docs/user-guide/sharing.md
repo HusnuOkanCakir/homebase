@@ -29,6 +29,28 @@ The first folder you share takes a few minutes, because it installs the file ser
 Homebase does not ship it running: a service listening on your network that nobody asked for
 is one that can be misconfigured without anybody noticing.
 
+## Opening them in the dashboard
+
+The **Files** page shows everything you can open on this server: each shared folder, and
+your own. You can look through them, download something, drop a file in, make a folder,
+rename and delete.
+
+This is the way in that needs nothing at the other end. A mapped drive needs a computer that
+can map one — a phone cannot, and a borrowed laptop should not — and this works anywhere the
+dashboard works, including from another country over [Tailscale](remote-access.md).
+
+A few things worth knowing about it:
+
+- **A download is a normal browser download.** It resumes if the connection drops, which
+  matters for a film over a home upload link.
+- **There is no wastebasket.** Deleting a folder that has anything in it asks you to type its
+  name first; deleting one file does not, because a confirmation on every ordinary action is
+  one nobody reads by the third time.
+- **Names are held to what Windows can open.** A file called `report?`, or one ending in a
+  space, cannot be opened from a Windows machine at all, so Homebase will not create one.
+- **Files never open in the browser, they download.** A file on this server arrived from a
+  computer Homebase knows nothing about, and a page that ran here would run with your session.
+
 ## Opening it from another computer
 
 The **Files** page shows you exactly what to type. It differs by machine, so all three are
@@ -49,21 +71,60 @@ drag it into the Finder sidebar.
 
 Leave any "domain" or "workgroup" box empty.
 
-## The password is not your Homebase password
+## Your password is your Homebase password
 
-It is deliberately separate, and this catches people out.
+The same name and the same password open the dashboard and open a folder from your laptop.
+There is nothing separate to set up and nothing extra to remember.
 
-A file-sharing password is typed into a Windows dialog once and saved there for ever, which
-makes it exactly the kind nobody ever changes. It must not also be a way to administer the
-machine — so Homebase keeps these accounts apart from the ones that sign in to the
-dashboard, and gives them no access to anything but the shared folders.
+It used to be two, and two was worse. A file-sharing password is typed into a Windows dialog
+once and saved there for ever, which makes it exactly the kind nobody ever changes — so the
+day it has to be typed again is the day it cannot be remembered.
 
-You can use the same *name* in both places. Homebase stores the sharing account under a
-prefix and maps it back, so `alex` on the dashboard and `alex` on your laptop can be the
-same person with two different passwords.
+Homebase sets it at the only moments it can: when you choose your password, and when you
+sign in on a server where file sharing was switched on after you joined. It cannot read your
+password back afterwards, which is why there is no button that syncs them.
 
-Homebase cannot show you a sharing password again after you set it. Setting it again is how
-you change it.
+Changing your Homebase password changes both. Any computer with the old one saved will ask
+for it again.
+
+!!! note "What that means for how safe it is"
+
+    The file server keeps a weaker record of a password than Homebase does — an unsalted
+    hash, the way the SMB protocol requires. Anybody who can get root on your server could
+    already read both. It is not a reason to carry two passwords, and it *is* a reason not
+    to use your Homebase password anywhere else.
+
+## Your own folder
+
+Everything under **Shared folders** is open to everybody in the house who has an account.
+That is what most of a family server is for, and it is not all of it.
+
+Each person also gets a folder that is theirs, called **people** when you open it from
+another computer. Everybody connects to the same name and sees their own.
+
+| | |
+|---|---|
+| **Windows** | `\\homebase\people` |
+| **macOS, Linux** | `smb://homebase.local/people` |
+
+It is created with the account, on the server's own disk. It cannot be put on a disk
+formatted for Windows or a camera: those record no owner for a file, so a private folder on
+one would not actually be private, and Homebase refuses rather than pretending.
+
+!!! warning "What private means here, exactly"
+
+    The applications on your server cannot read these folders — Jellyfin and the rest are
+    kept out by the operating system itself.
+
+    Between people in the house, it is Homebase that checks, on every request, rather than
+    the operating system. Somebody who can already run commands as root on the server can
+    read anyone's folder. That is the price of these folders being visible in the dashboard
+    and openable from a phone; the alternative was a folder nothing but Windows could ever
+    reach.
+
+**Removing somebody does not delete their files.** Their folder is moved aside and kept, so
+that the next person with the same name starts with an empty one instead of inheriting the
+last one's files.
 
 ## Read-only folders
 
@@ -78,7 +139,24 @@ stay on the server exactly as they were, and sharing it again later brings it ba
 everything still in it.
 
 **Remove** next to a person's name stops them opening any shared folder. Any computer
-currently signed in as them is disconnected.
+currently signed in as them is disconnected. Removing their Homebase account does this too —
+an account that can no longer open the dashboard must not still open a drive.
+
+## Opening it when you are not at home
+
+If you reach your server over [Tailscale](remote-access.md), a shared folder works from
+anywhere, exactly as it does in the house. Use the address rather than the name:
+
+| | |
+|---|---|
+| **Windows** | `\\100.107.85.93\documents` — your server's Tailscale address |
+| **macOS, Linux** | `smb://100.107.85.93/documents` |
+
+The **Remote access** page shows the address to use. The name works on the home network and
+is unreliable over the tunnel on iOS and on Windows, which has cost this project two evenings
+— so the address is what is written here.
+
+Turn Tailscale off when you get home. You are already on the network it connects you to.
 
 ## When it does not work
 

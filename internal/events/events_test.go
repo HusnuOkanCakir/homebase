@@ -305,3 +305,63 @@ func TestRecordingWithNoSubscribersIsFine(t *testing.T) {
 		t.Errorf("got %d events", len(list))
 	}
 }
+
+// The first question anybody asks of an audit log, and the one it could not
+// answer. With one account "who" had one answer; there are roles, invitations
+// and removals now, all of which are things one person does to another.
+func TestAnEventRecordsWhoDidIt(t *testing.T) {
+	recorder := newRecorder(t)
+
+	recorder.Record(WithActor(context.Background(), "alex"), Event{
+		Type: "account.created", Severity: SeverityWarning,
+	})
+
+	found, err := recorder.List(context.Background(), Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("recorded %d events", len(found))
+	}
+	if found[0].Actor == nil || *found[0].Actor != "alex" {
+		t.Fatalf("the event says %v did it", found[0].Actor)
+	}
+}
+
+// Null is not "unknown". A disk being unplugged, a scheduled backup, an update
+// arriving — nothing did those on anybody's behalf, and putting a name there
+// would be inventing one.
+func TestSomethingNobodyDidHasNoActor(t *testing.T) {
+	recorder := newRecorder(t)
+
+	recorder.Record(context.Background(), Event{
+		Type: "storage.disk_removed", Severity: SeverityWarning,
+	})
+
+	found, err := recorder.List(context.Background(), Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found[0].Actor != nil {
+		t.Fatalf("an event nobody caused is attributed to %q", *found[0].Actor)
+	}
+}
+
+// A caller that names an actor is recording something on somebody else's
+// behalf, and knows better than the request does.
+func TestAnExplicitActorIsNotOverwrittenByTheRequest(t *testing.T) {
+	recorder := newRecorder(t)
+
+	behalf := "father"
+	recorder.Record(WithActor(context.Background(), "alex"), Event{
+		Type: "account.claimed", Severity: SeverityInfo, Actor: &behalf,
+	})
+
+	found, err := recorder.List(context.Background(), Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found[0].Actor == nil || *found[0].Actor != "father" {
+		t.Fatalf("the actor became %v", found[0].Actor)
+	}
+}

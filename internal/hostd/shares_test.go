@@ -1,6 +1,8 @@
 package hostd
 
 import (
+	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -20,7 +22,7 @@ func TestTheShareConfigurationRefusesTheDangerousDefaults(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "backup", Location: "internal"},
 		Path:  "/srv/homebase/storage/internal/shares/backup",
-	}})
+	}}, "")
 
 	required := map[string]string{
 		"security = user":               "a share anybody on the network can open",
@@ -28,7 +30,6 @@ func TestTheShareConfigurationRefusesTheDangerousDefaults(t *testing.T) {
 		"server min protocol = SMB2_10": "SMB1, the protocol with the wormable bugs",
 		"client min protocol = SMB2_10": "SMB1 when talking outward",
 		"hosts deny = 0.0.0.0/0":        "reachable from anywhere",
-		"bind interfaces only = yes":    "listening on every interface there is",
 		"valid users = @homebase":       "anybody who can authenticate at all",
 	}
 	for line, otherwise := range required {
@@ -46,6 +47,43 @@ func TestTheShareConfigurationRefusesTheDangerousDefaults(t *testing.T) {
 	}
 	if strings.Contains(config, "hosts allow = 0.0.0.0/0") {
 		t.Error("the share is offered to the whole internet")
+	}
+}
+
+// `bind interfaces only` used to be what kept the applications off the file
+// server, and it had to be turned off: smbd will not bind the Tailscale tunnel,
+// so with it on, everybody away from home was refused by every folder.
+//
+// Turning it off moves the boundary rather than removing it. This test is here
+// so that the move stays deliberate — if the firewall rule ever stops being
+// scoped to interfaces, nine containers can read every shared folder and
+// nothing else in the code will say so.
+func TestTheApplicationsAreKeptOffTheFileServerByTheFirewall(t *testing.T) {
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "backup", Location: "internal"},
+		Path:  "/srv/homebase/storage/internal/shares/backup",
+	}}, "")
+	if !strings.Contains(config, "bind interfaces only = no") {
+		t.Fatal("smbd is binding selected interfaces again; if that is deliberate, " +
+			"check first that it binds the tunnel, because it did not before")
+	}
+
+	// 172.16.0.0/12 is where Docker puts its bridges. Trusting it as a source
+	// range is the mistake this whole arrangement exists to avoid.
+	for _, network := range privateNetworks {
+		if network == "172.16.0.0/12" {
+			t.Fatal("172.16.0.0/12 is trusted as a source, which admits every container")
+		}
+	}
+	if strings.Contains(config, "hosts allow = 127.0.0.1 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12") {
+		t.Fatal("the container bridges are admitted by smbd itself")
+	}
+
+	// And the cards the port is opened on are the real ones, never a bridge.
+	for _, name := range shareInterfaces() {
+		if strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "br-") {
+			t.Fatalf("445 would be opened on %s, which is a container bridge", name)
+		}
 	}
 }
 
@@ -75,7 +113,7 @@ func TestAShareWhoseDiskIsGoneIsNotServedFromTheSystemDisk(t *testing.T) {
 	}
 
 	// And it must not reach the configuration at all.
-	config := renderSambaConfig("homebase", nil)
+	config := renderSambaConfig("homebase", nil, "")
 	if strings.Contains(config, "[films]") {
 		t.Error("the share was written into smb.conf with no disk behind it")
 	}
@@ -154,5 +192,157 @@ func TestACorruptShareFileIsRefusedRatherThanReset(t *testing.T) {
 	}
 	if _, err := s.load(); err == nil {
 		t.Fatal("a corrupt share file was accepted, which would silently unshare everything")
+	}
+}
+
+// Somebody away from home could open the dashboard and not one shared folder.
+// smbd binds the interfaces it is told about, and the tunnel was not among them.
+func TestTheConfigurationAdmitsTheTailscaleTunnel(t *testing.T) {
+	// The real render, with the tunnel present and absent, is decided by
+	// tailnetPresent() reading /sys/class/net — so this asserts the two shapes
+	// the renderer produces rather than reaching into the machine.
+	allowed := sambaHostsAllow()
+	if allowed[0] != "127.0.0.1" {
+		t.Fatalf("the machine itself is not first in %v", allowed)
+	}
+	if tailnetPresent() && !slices.Contains(allowed, tailnetNetwork) {
+		t.Fatalf("the tunnel is up and %v does not admit it", allowed)
+	}
+
+	// The range alone must never be the control. It is also what a carrier
+	// hands a subscriber's router — this project's own server has such an
+	// address — so the firewall rule that accompanies it is scoped to the
+	// interface, and that is asserted where it is written.
+	firewall, err := os.ReadFile("../../packaging/firewall")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(firewall), "allow in on $card") {
+		t.Fatal("the firewall rule is not scoped to the interface; " +
+			"a source range would admit the carrier's other subscribers")
+	}
+	if !strings.Contains(string(firewall), "interfaces) sources=\"\"") {
+		t.Fatal("the interface scope no longer exists, so 445 is opened by address range")
+	}
+	if !strings.Contains(string(firewall), "PRIVILEGED_PORTS=\"445\"") {
+		t.Fatal("445 is not in the privileged allowlist, so opening it is refused " +
+			"and the failure is discarded")
+	}
+}
+
+// The port the file server needs is below 1024, which the helper refuses by
+// default. It was refused, silently, and the screen said sharing was on.
+func TestTheFirewallHelperAcceptsTheFileSharingPort(t *testing.T) {
+	script, err := os.ReadFile("../../packaging/firewall")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(script)
+	// Still refuses the rest of the system's ports.
+	if !strings.Contains(body, `[ "$port" -lt 1024 ] && [ "$privileged_ok" = no ]`) {
+		t.Fatal("the allowlist replaced the restriction instead of narrowing it")
+	}
+}
+
+// The tunnel is reported as an ordinary interface on a machine where it is up,
+// so appending it unconditionally listed it twice — and smbd refuses a
+// configuration that names an interface twice.
+func TestTheTunnelIsNotListedTwice(t *testing.T) {
+	seen := map[string]int{}
+	for _, name := range localInterfaces() {
+		seen[name]++
+	}
+	for name, count := range seen {
+		if count > 1 {
+			t.Fatalf("%s appears %d times in the interface list", name, count)
+		}
+	}
+}
+
+// --- Who may open a folder ------------------------------------------------------
+
+// Every share was open to everybody before this field existed, and a share
+// written by an older version has no field at all. It must not become
+// restricted-to-nobody on upgrade.
+func TestAShareWithNoAccessListIsOpenToEverybody(t *testing.T) {
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "backup", Location: "internal"},
+		Path:  "/srv/homebase/storage/internal/shares/backup",
+	}}, "")
+	if !strings.Contains(config, "valid users = @homebase") {
+		t.Fatal("a share with no access list is not open to everybody, so an " +
+			"upgrade would take away folders that worked yesterday")
+	}
+}
+
+// A restricted folder names the file-sharing accounts, not the Homebase ones.
+// They differ by a prefix, and getting it wrong is a folder that refuses
+// everybody with no explanation.
+func TestARestrictedShareNamesTheFileSharingAccounts(t *testing.T) {
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "papers", Location: "internal", Access: []string{"alice", "bob"}},
+		Path:  "/srv/homebase/storage/internal/shares/papers",
+	}}, "")
+
+	if !strings.Contains(config, "valid users = hbshare-alice hbshare-bob") {
+		t.Fatalf("the access list is not written as file-sharing accounts:\n%s", config)
+	}
+	if strings.Contains(config, "valid users = @homebase") {
+		t.Fatal("the restricted folder is also open to everybody")
+	}
+}
+
+// A folder somebody cannot open should not be listed to them. Without this it
+// appears in Explorer for the whole house, refuses on being clicked — which
+// reads as a broken server — and tells everybody its name.
+func TestAFolderSomebodyCannotOpenIsNotListedToThem(t *testing.T) {
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "papers", Location: "internal", Access: []string{"alice"}},
+		Path:  "/srv/homebase/storage/internal/shares/papers",
+	}}, "")
+	if !strings.Contains(config, "access based share enum = yes") {
+		t.Fatal("restricted folders are listed to people who cannot open them")
+	}
+}
+
+// --- The applications, and the tunnel -------------------------------------------
+
+// ufw could not see this traffic at all, and nothing in the product knew.
+//
+// A published container port is never delivered to the host: Docker rewrites
+// the destination in the nat table and the packet is forwarded, so it misses
+// the chain every ufw rule lives in. On this project's own machine `ufw status`
+// listed no rule for File Browser's port and another computer on the network
+// reached it anyway — nine applications on every interface, the tunnel
+// included, with Homebase believing it decided this.
+func TestTheApplicationsAreKeptOffTheTunnel(t *testing.T) {
+	script, err := os.ReadFile("../../packaging/firewall")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(script)
+
+	// DOCKER-USER is the chain Docker provides for this. FORWARD jumps to it
+	// first and Docker never flushes it. Anywhere else is a rule Docker's own
+	// accept rules reach before ours.
+	if !strings.Contains(body, "-I DOCKER-USER 1 -i \"$TAILNET_INTERFACE\"") {
+		t.Fatal("the rule is not first in DOCKER-USER, so Docker's accept rules " +
+			"are consulted before it")
+	}
+	if !strings.Contains(body, "-j DROP") {
+		t.Fatal("the rule does not drop")
+	}
+
+	// Created rather than skipped when absent: hostd can start before Docker,
+	// and skipping would leave every application on the tunnel until something
+	// restarted hostd.
+	if !strings.Contains(body, "-N DOCKER-USER") {
+		t.Fatal("a boot where hostd starts before Docker leaves the applications " +
+			"reachable through the tunnel")
+	}
+
+	// Removed before it is added, because this runs at every start.
+	if !strings.Contains(body, "while \"$command\" -D DOCKER-USER") {
+		t.Fatal("repeated runs would stack identical rules")
 	}
 }

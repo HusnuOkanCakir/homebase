@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
+  type Account,
   type NetworkStatus,
   type ShareStatus,
   type SharedFolder,
@@ -32,9 +33,13 @@ import { Message } from "../components/Message";
 
 export function Shares({
   canManage,
+  canSetAccess,
   serverName,
 }: {
   canManage: boolean;
+  /** Whether this person may choose who opens a folder. It is an accounts
+   *  question, not a network one, so it is a separate permission. */
+  canSetAccess: boolean;
   serverName: string;
 }) {
   const [status, setStatus] = useState<ShareStatus | null>(null);
@@ -45,10 +50,18 @@ export function Shares({
 
   const refresh = useCallback(async () => {
     try {
-      const [shares, net] = await Promise.all([api.shares(), api.network()]);
+      const shares = await api.shares();
       setStatus(shares);
-      setNetwork(net);
       setError(null);
+      // The network is only needed to spell the address nicely, and reading it
+      // needs a permission somebody who only has files does not have. A failure
+      // here costs the .local name and nothing else — the address falls back to
+      // the server's IP, which is what happens on a network without mDNS too.
+      try {
+        setNetwork(await api.network());
+      } catch {
+        setNetwork(null);
+      }
     } catch (caught) {
       setError(describeError(caught));
     }
@@ -134,6 +147,7 @@ export function Shares({
             locations={locations}
             busy={busy}
             installed={status.installed}
+            canSetAccess={canSetAccess}
             run={run}
           />
         </>
@@ -157,6 +171,15 @@ interface Names {
   unix: string;
   /** True when the mDNS name is answering, so `.local` can be relied on. */
   byName: boolean;
+  /**
+   * Whether we were able to look at all.
+   *
+   * Reading the network needs a permission somebody who only has files does not
+   * have. "We could not look" and "the name is not being published" are
+   * different facts, and printing the second when the first is true says
+   * something false underneath addresses that use the name.
+   */
+  known: boolean;
 }
 
 function names(
@@ -166,7 +189,7 @@ function names(
 ): Names {
   const plain = status.server_name || network?.hostname || fallback || "homebase";
   if (network?.mdns_works && network.mdns_name) {
-    return { windows: plain, unix: network.mdns_name, byName: true };
+    return { windows: plain, unix: network.mdns_name, byName: true, known: true };
   }
 
   // No mDNS: the `.local` name will not resolve, so the address is the only
@@ -176,7 +199,7 @@ function names(
     .filter((i) => i.kind !== "loopback" && i.kind !== "container" && i.up)
     .flatMap((i) => i.addresses ?? [])
     .find((a) => !a.includes(":"));
-  return { windows: plain, unix: address ?? plain, byName: false };
+  return { windows: plain, unix: address ?? plain, byName: false, known: network !== null };
 }
 
 function Nothing() {
@@ -270,7 +293,11 @@ function Reaching({
         ) : null}
       </dl>
 
-      {!host.byName ? (
+      {/* Only when we actually know. An account without network.diagnose cannot
+          read the network status, and saying "this server is not publishing its
+          name" because we could not look is a different claim from the one it
+          reads as — especially printed underneath addresses that use the name. */}
+      {host.known && !host.byName ? (
         <p className="hint">
           This server is not publishing its name on the network, so the addresses
           above use its number instead — which changes from time to time. If they
@@ -383,12 +410,22 @@ function People({
           });
         }}
       >
+        {/* Not the ordinary way in any more, and it says so. Everybody who
+            signs in to Homebase gets a file-sharing account with the same
+            password, so this form is the fallback for the cases that leaves:
+            somebody who has not signed in since sharing was switched on, and a
+            name Homebase itself does not know. Removing it would take away the
+            only way out of both. */}
+        <p className="hint">
+          Everybody with a Homebase account can already open these folders,
+          using the same name and password they sign in with. This is for
+          setting one by hand.
+        </p>
         <label htmlFor="share-user">
           Add somebody, or change a password
           <span className="muted">
             {" "}
-            — a name they will type on the other computer. Using the same one as
-            here is fine; the password is separate either way.
+            — the name they type on the other computer.
           </span>
         </label>
         <input
@@ -423,18 +460,32 @@ function Folders({
   locations,
   installed,
   busy,
+  canSetAccess,
   run,
 }: {
   shares: SharedFolder[];
   locations: StorageLocation[];
   installed: boolean;
   busy: boolean;
+  canSetAccess: boolean;
   run: (action: () => Promise<unknown>) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
   const [readOnly, setReadOnly] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [choosing, setChoosing] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+
+  // Fetched once, and only by somebody who may act on it. A list of everybody
+  // on the server is not something to hand to a screen that cannot use it.
+  useEffect(() => {
+    if (!canSetAccess) return;
+    void api
+      .accounts()
+      .then((result) => setAccounts(result.accounts))
+      .catch(() => setAccounts([]));
+  }, [canSetAccess]);
 
   const usable = locations.filter((one) => one.mounted && !one.read_only);
   const chosen = location || usable[0]?.id || "";
@@ -464,6 +515,36 @@ function Folders({
                   Stop sharing
                 </button>
               </div>
+
+              {/* Who may open it, said on the row rather than behind the
+                  button. "Everyone" is the answer for most folders and the one
+                  worth being unable to miss: somebody restricting one folder
+                  should be able to see, without clicking anything, that the
+                  other five are not. */}
+              <div className="row row-spread">
+                <span className="muted">{describeAccess(share.access)}</span>
+                {canSetAccess ? (
+                  <button
+                    className="quiet"
+                    disabled={busy}
+                    onClick={() =>
+                      setChoosing(choosing === share.name ? null : share.name)
+                    }
+                  >
+                    {choosing === share.name ? "Cancel" : "Who can open it"}
+                  </button>
+                ) : null}
+              </div>
+
+              {choosing === share.name ? (
+                <AccessChooser
+                  share={share}
+                  accounts={accounts}
+                  busy={busy}
+                  onDone={() => setChoosing(null)}
+                  run={run}
+                />
+              ) : null}
               {removing === share.name ? (
                 <>
                   <Message
@@ -559,5 +640,134 @@ function Folders({
         </form>
       )}
     </section>
+  );
+}
+
+/** Who may open a folder, in words rather than as a list of nothing. */
+function describeAccess(access?: string[]): string {
+  if (!access || access.length === 0) {
+    return "Anybody with an account can open it";
+  }
+  if (access.length === 1) {
+    return `Only ${access[0]} can open it`;
+  }
+  return `Only ${access.slice(0, -1).join(", ")} and ${access[access.length - 1]} can open it`;
+}
+
+/**
+ * Choosing who may open one folder.
+ *
+ * Two states rather than a list that happens to be empty. "Everybody with an
+ * account" is not the same thought as "these people, and at the moment there
+ * are none of them" — and the second, saved, would be a folder nobody can
+ * open. The server refuses that anyway; this makes it unaskable.
+ */
+function AccessChooser({
+  share,
+  accounts,
+  busy,
+  onDone,
+  run,
+}: {
+  share: SharedFolder;
+  accounts: Account[];
+  busy: boolean;
+  onDone: () => void;
+  run: (action: () => Promise<unknown>) => Promise<void>;
+}) {
+  const current = share.access ?? [];
+  const [everyone, setEveryone] = useState(current.length === 0);
+  const [chosen, setChosen] = useState<string[]>(current);
+
+  const toggle = (username: string) =>
+    setChosen((people) =>
+      people.includes(username)
+        ? people.filter((one) => one !== username)
+        : [...people, username],
+    );
+
+  return (
+    <div className="roles">
+      <label className="role-choice">
+        <input
+          type="radio"
+          checked={everyone}
+          onChange={() => setEveryone(true)}
+        />
+        <span>
+          <strong>Anybody with an account</strong>
+          <span className="muted"> — how every folder starts</span>
+        </span>
+      </label>
+
+      <label className="role-choice">
+        <input
+          type="radio"
+          checked={!everyone}
+          onChange={() => setEveryone(false)}
+        />
+        <span>
+          <strong>Only the people I choose</strong>
+        </span>
+      </label>
+
+      {!everyone ? (
+        accounts.length === 0 ? (
+          <p className="muted">
+            Nobody else has an account on this server yet. Add somebody under
+            Settings, People.
+          </p>
+        ) : (
+          <ul className="list">
+            {accounts.map((account) => (
+              <li key={account.username}>
+                <label className="role-choice">
+                  <input
+                    type="checkbox"
+                    checked={chosen.includes(account.username)}
+                    onChange={() => toggle(account.username)}
+                  />
+                  <span>{account.username}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
+
+      {/* Said before it is done, not after. Widening this is the one change
+          here that puts somebody else's files in front of the whole house. */}
+      {everyone && current.length > 0 ? (
+        <Message
+          tone="warning"
+          title={`Everybody will be able to open ${share.name}.`}
+          recovery="It is restricted at the moment. This does not move or copy anything — it stops the folder being kept for the people it was kept for."
+        />
+      ) : null}
+
+      <div className="row">
+        <button
+          disabled={busy || (!everyone && chosen.length === 0)}
+          onClick={() => {
+            onDone();
+            void run(() =>
+              api.setShareAccess(share.name, everyone ? [] : chosen),
+            );
+          }}
+        >
+          Save
+        </button>
+        <button className="quiet" onClick={onDone}>
+          Cancel
+        </button>
+      </div>
+
+      {!everyone && chosen.length === 0 ? (
+        <p className="hint">
+          Choose at least one person. A folder nobody can open is not something
+          Homebase will make.
+        </p>
+      ) : null}
+    </div>
   );
 }

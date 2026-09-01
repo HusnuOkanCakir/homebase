@@ -148,6 +148,13 @@ def main() -> int:
          # installing something here needs no root and touches nothing outside
          # the repository. The packaged service uses the real path.
          "--app-data", str(RUN_DIR / "apps"),
+         # And the storage root, for the same reason and a sharper one: the
+         # default is /srv/homebase, which this cannot create without root. It
+         # failed, quietly, in hostd's log — so a development instance has never
+         # had a storage location, which now means it has no files to browse
+         # either. Anything that reads a disk was untestable here without
+         # noticing why.
+         "--storage-root", str(RUN_DIR / "storage"),
          "--state-dir", str(RUN_DIR / "hostd-state")],
         stdout=(RUN_DIR / "hostd.log").open("w"),
         stderr=subprocess.STDOUT,

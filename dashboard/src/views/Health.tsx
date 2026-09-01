@@ -104,7 +104,7 @@ export function Health({ system }: { system: SystemInfo }) {
         ) : null}
         <div className="tile">
           <dt>Up</dt>
-          <dd className="unit">{duration(system.uptime_seconds)}</dd>
+          <dd className="unit">{duration(system.uptime_seconds ?? 0)}</dd>
         </div>
       </dl>
 

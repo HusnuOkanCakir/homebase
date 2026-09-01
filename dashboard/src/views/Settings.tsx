@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { type Job, type SystemInfo, type User } from "../api";
 import { RenameServer } from "../components/RenameServer";
+import { People } from "./People";
 import { Security } from "./Security";
 import { Updates } from "./Updates";
 import { PowerCard, type PowerChoice } from "../components/PowerCard";
@@ -41,18 +42,20 @@ export function Settings({ user, system, onLeaving }: Props) {
           <dd>{system.hostname}</dd>
 
           <dt>Running for</dt>
-          <dd>{duration(system.uptime_seconds)}</dd>
+          <dd>{duration(system.uptime_seconds ?? 0)}</dd>
 
           <dt>Operating system</dt>
           <dd>{system.os}</dd>
 
           <dt>Processor</dt>
           <dd>
-            {system.cpu.model}
-            <span className="muted">
-              {" "}
-              — {system.cpu.cores} core{system.cpu.cores === 1 ? "" : "s"}
-            </span>
+            {system.cpu?.model ?? "—"}
+            {system.cpu && (
+              <span className="muted">
+                {" "}
+                — {system.cpu.cores} core{system.cpu.cores === 1 ? "" : "s"}
+              </span>
+            )}
           </dd>
 
           <dt>Memory</dt>
@@ -129,6 +132,10 @@ export function Settings({ user, system, onLeaving }: Props) {
       </section>
 
       <Updates canManage={user.permissions.includes("update.manage")} />
+
+      {/* Only for somebody who can actually add people. A screen that lists
+          the household and refuses every button is worse than no screen. */}
+      {user.permissions.includes("accounts.manage") && <People me={user.username} />}
 
       <Security username={user.username} />
 

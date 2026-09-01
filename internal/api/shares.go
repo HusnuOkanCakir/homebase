@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/HusnuOkanCakir/homebase/internal/auth"
@@ -19,11 +20,114 @@ import (
 // written — see internal/hostd/shares.go.
 
 func (s *Server) registerShareRoutes(mux *http.ServeMux) {
-	mux.Handle("GET /api/v1/shares", s.require(auth.PermNetworkDiag, s.handleShares))
+	// files.read, not network.diagnose.
+	//
+	// Seeing how to reach your own files is a files question. It was a network
+	// one because everybody was an administrator and held both; the first
+	// account that held neither could not open the only screen its role was for.
+	mux.Handle("GET /api/v1/shares", s.require(auth.PermFilesRead, s.handleShares))
 	mux.Handle("POST /api/v1/shares", s.require(auth.PermNetworkModify, s.handleAddShare))
 	mux.Handle("POST /api/v1/shares/remove", s.require(auth.PermNetworkModify, s.handleRemoveShare))
 	mux.Handle("POST /api/v1/shares/users", s.require(auth.PermNetworkModify, s.handleSetSharePassword))
 	mux.Handle("POST /api/v1/shares/users/remove", s.require(auth.PermNetworkModify, s.handleRemoveShareUser))
+	// accounts.manage, not network.modify.
+	//
+	// Choosing who may open a folder is a question about people, not about the
+	// network — and it is the one share operation that can hand somebody else's
+	// files to the whole house without touching a disk.
+	mux.Handle("POST /api/v1/shares/access", s.require(auth.PermAccountsManage, s.handleSetShareAccess))
+}
+
+// handleSetShareAccess restricts a folder to named people, or opens it to
+// everybody with an account.
+func (s *Server) handleSetShareAccess(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	var body struct {
+		Name string `json:"name"`
+		// Absent or empty means everybody with an account. There is no way to
+		// say "nobody", deliberately: see Share.Access in hostd.
+		Access []string `json:"access"`
+	}
+	if !s.decode(w, r, &body) {
+		return
+	}
+	if strings.TrimSpace(body.Name) == "" {
+		s.writeError(w, r, http.StatusBadRequest, apiError{
+			Code:        "request.missing_field",
+			Message:     "Homebase needs to know which folder.",
+			Detail:      "name is required",
+			Recoverable: true,
+			Recovery:    "Choose a folder.",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	// Every name has to be somebody who exists, and this is the layer that can
+	// tell: hostd knows about Samba accounts, core knows about people. A name
+	// that is not an account would be written into `valid users` and would
+	// simply never match, so the folder would be restricted to nobody and look
+	// restricted to somebody — a typo producing a locked folder with no
+	// explanation anywhere.
+	if unknown := s.unknownAccounts(ctx, body.Access); len(unknown) > 0 {
+		s.writeError(w, r, http.StatusUnprocessableEntity, apiError{
+			Code:        "share.no_such_account",
+			Message:     "Nobody on this server has that name.",
+			Detail:      strings.Join(unknown, ", "),
+			Recoverable: true,
+			Recovery: "Check the spelling, or add them under People first. " +
+				"Somebody has to have an account before a folder can be kept for them.",
+		})
+		return
+	}
+
+	result, err := s.host.SetShareAccess(ctx, body.Name, body.Access)
+	if err != nil {
+		s.writeHostError(w, r, err)
+		return
+	}
+
+	// Warn, not Info. Widening this is the one share change that can put
+	// somebody's files in front of the whole house without moving a file, and
+	// the audit log is where that has to be visible afterwards.
+	who := "everybody with an account"
+	if len(body.Access) > 0 {
+		who = strings.Join(body.Access, ", ")
+	}
+	s.events.Warn(r.Context(), "share.access_changed", body.Name, who,
+		body.Name+" can now be opened by "+who+".")
+	s.log.Info("share access changed", "share", body.Name, "access", who,
+		"by", user.Username)
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// unknownAccounts returns the names that belong to nobody on this server.
+func (s *Server) unknownAccounts(ctx context.Context, names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	accounts, err := s.auth.Accounts(ctx)
+	if err != nil {
+		// Unreadable account list. Refusing every name would be wrong — the
+		// caller has done nothing incorrect — and this check is a safety net
+		// rather than the boundary: hostd validates the shape either way.
+		return nil
+	}
+	known := make(map[string]bool, len(accounts))
+	for _, account := range accounts {
+		known[strings.ToLower(account.Username)] = true
+	}
+
+	var unknown []string
+	for _, name := range names {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" && !known[name] {
+			unknown = append(unknown, name)
+		}
+	}
+	return unknown
 }
 
 func (s *Server) handleShares(w http.ResponseWriter, r *http.Request, _ *auth.User) {

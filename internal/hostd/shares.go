@@ -3,11 +3,14 @@ package hostd
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,7 +78,30 @@ type Share struct {
 	// ReadOnly publishes it without allowing writes.
 	ReadOnly bool `json:"read_only"`
 
+	// Access is who may open it, by Homebase username.
+	//
+	// Empty means everybody with an account, which is what every share was
+	// before this field existed and what a share written by an older version
+	// loads as. There is deliberately no way to express "nobody": a folder
+	// nobody can open is not a state anybody wants and is one a typo could
+	// produce.
+	//
+	// Names are kept even after somebody is removed from the server. A stale
+	// name is a door that stays shut — Samba refuses an account that does not
+	// exist — whereas tidying it away could empty the list, and an empty list
+	// means everybody. The safe direction for a mistake here is closed.
+	Access []string `json:"access,omitempty"`
+
 	AddedAt string `json:"added_at"`
+}
+
+// RestrictedTo reports the accounts a share is limited to, or nil for a share
+// everybody may open.
+func (s Share) RestrictedTo() []string {
+	if len(s.Access) == 0 {
+		return nil
+	}
+	return s.Access
 }
 
 // ShareState is a share plus what is currently true about it.
@@ -115,6 +141,16 @@ type ShareStatus struct {
 
 	// ServerName is what the server is called on the network.
 	ServerName string `json:"server_name"`
+
+	// PeoplePath is the directory holding everybody's private folders, or empty
+	// if the disk it lives on is not available.
+	//
+	// Reported rather than assumed, because core is the thing that has to serve
+	// these folders in a browser and it must not compose a path of its own. A
+	// path core built for itself from a share's path and a guess about the
+	// layout is a path that keeps working after the layout changes and lands
+	// somewhere else entirely.
+	PeoplePath string `json:"people_path,omitempty"`
 }
 
 // ShareServices is what the sharing operations need.
@@ -191,6 +227,7 @@ func (s *ShareServices) status(ctx context.Context) (ShareStatus, error) {
 	if users := s.shareUsers(); users != nil {
 		status.Users = users
 	}
+	status.PeoplePath = s.peopleRoot()
 
 	shares, err := s.load()
 	if err != nil {
@@ -273,7 +310,7 @@ func renderUserMap(users []string) string {
 // Written by hand rather than by editing what is there, and deliberately short.
 // Every line is either required or is a decision worth being able to see in one
 // screen — which is the point of owning the file rather than adding to it.
-func renderSambaConfig(server string, shares []ShareState) string {
+func renderSambaConfig(server string, shares []ShareState, peopleDir string) string {
 	var out strings.Builder
 
 	out.WriteString("# Written by Homebase. Changes here are replaced.\n")
@@ -299,13 +336,37 @@ func renderSambaConfig(server string, shares []ShareState) string {
 	// this is a local network where the alternative to Homebase is a USB stick
 	// carried between rooms.
 	out.WriteString("   server signing = auto\n")
-	// Only the local network. The way into this server from outside is the VPN,
-	// where the whole tunnel is encrypted — SMB exposed to the internet is one
-	// of the most attacked services there is.
-	out.WriteString("   bind interfaces only = yes\n")
+	// Which cards the file server answers on, and it is the firewall that
+	// decides — not this file.
+	//
+	// `bind interfaces only = yes` was the control here, and it had to go.
+	// smbd will not bind a point-to-point tunnel: tailscale0 carries a /32
+	// with no peer address, and smbd skipped it however it was named — by
+	// interface, by bare address, by address with a mask, and by the tailnet
+	// as a network. The result was somebody away from home reaching the
+	// dashboard and being refused by every folder, with nothing in any log
+	// saying why. That was reported as remote access working.
+	//
+	// So smbd now listens on everything and the packet filter says who may
+	// arrive: one rule per real card and one for the tunnel, in apply() below.
+	// The thing `bind interfaces only` was really protecting against is the
+	// Docker bridges — a container that can reach the file server can read
+	// every shared folder — and an interface-scoped rule excludes them by the
+	// same reasoning, without needing smbd to cooperate.
+	//
+	// `interfaces` is still listed. With binding off it no longer decides what
+	// smbd opens, but it is what Samba announces itself on, and it keeps this
+	// file readable about which cards were meant.
+	out.WriteString("   bind interfaces only = no\n")
 	out.WriteString("   interfaces = lo " + strings.Join(localInterfaces(), " ") + "\n")
-	out.WriteString("   hosts allow = 127.0.0.1 " + strings.Join(privateNetworks, " ") + "\n")
+	out.WriteString("   hosts allow = " + strings.Join(sambaHostsAllow(), " ") + "\n")
 	out.WriteString("   hosts deny = 0.0.0.0/0\n")
+	// A folder somebody cannot open is not listed to them.
+	//
+	// Without this, a restricted share appears in Explorer for the whole house
+	// and refuses on being clicked, which reads as a broken server rather than
+	// as somebody else's folder — and tells everybody the name of it.
+	out.WriteString("   access based share enum = yes\n")
 	out.WriteString("   log level = 1\n")
 	out.WriteString("   disable netbios = yes\n")
 	out.WriteString("   smb ports = 445\n")
@@ -319,7 +380,15 @@ func renderSambaConfig(server string, shares []ShareState) string {
 		} else {
 			out.WriteString("   read only = no\n")
 		}
-		out.WriteString("   valid users = @" + serviceAccount + "\n")
+		if people := share.RestrictedTo(); people != nil {
+			accounts := make([]string, 0, len(people))
+			for _, person := range people {
+				accounts = append(accounts, shareUserPrefix+person)
+			}
+			out.WriteString("   valid users = " + strings.Join(accounts, " ") + "\n")
+		} else {
+			out.WriteString("   valid users = @" + serviceAccount + "\n")
+		}
 		// Everything lands owned by the service account's group, so that files
 		// written from a Windows laptop are readable by an application on the
 		// server and by the backup, rather than by whichever account happened
@@ -330,22 +399,174 @@ func renderSambaConfig(server string, shares []ShareState) string {
 		out.WriteString("   veto files = /.DS_Store/Thumbs.db/desktop.ini/\n")
 		out.WriteString("   delete veto files = yes\n")
 	}
+
+	if peopleDir != "" {
+		out.WriteString(renderPeopleShare(peopleDir))
+	}
 	return out.String()
 }
 
-// privateNetworks are the address ranges a home network uses. Sharing is offered
-// to those and to nothing else.
-var privateNetworks = []string{"192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"}
+// renderPeopleShare is the one stanza that serves everybody a different folder.
+//
+// `%U` is the name the client signed in as, substituted by Samba after the
+// authentication succeeded and after the username map turned `alice` into
+// `hbshare-alice`. So it is not a string from the network: a name that is not a
+// Homebase account never gets this far, because `security = user` and
+// `map to guest = never` mean an unauthenticated session has no name at all.
+//
+// One stanza rather than one per person, which matters for a reason beyond
+// tidiness: with a share each, everybody would see everybody's folder listed in
+// Explorer and be refused on opening it. Here each person sees one share called
+// "people" and it is theirs.
+//
+// `force user` is what makes it work at all. The folder is owned by the service
+// account and readable by nobody else, which is what keeps the applications out
+// — see peopleDirName — and it means smbd, impersonating `hbshare-alice`, could
+// not read it. Acting as the service account instead also makes a file written
+// from a Windows laptop readable by the Files screen, which is the same account
+// again. The boundary between one person and another is `valid users` and the
+// `%U` in the path, not the kernel; that is the trade, and it is written down.
+func renderPeopleShare(peopleDir string) string {
+	var out strings.Builder
+	out.WriteString("\n[people]\n")
+	out.WriteString("   comment = Your own folder on this server\n")
+	out.WriteString("   path = " + peopleDir + "/%U\n")
+	out.WriteString("   browseable = yes\n")
+	out.WriteString("   read only = no\n")
+	out.WriteString("   valid users = @" + serviceAccount + "\n")
+	out.WriteString("   force user = " + serviceAccount + "\n")
+	out.WriteString("   force group = " + serviceAccount + "\n")
+	// Tighter than the shared folders on purpose. Everything under here belongs
+	// to one person, so nothing needs to be readable by the group that every
+	// application runs in.
+	out.WriteString("   create mask = 0600\n")
+	out.WriteString("   directory mask = 0700\n")
+	out.WriteString("   veto files = /.DS_Store/Thumbs.db/desktop.ini/\n")
+	out.WriteString("   delete veto files = yes\n")
+	return out.String()
+}
+
+// privateNetworks are the address ranges a home network uses and a container
+// cannot. Sharing is offered to those and to nothing else.
+//
+// 172.16.0.0/12 is missing on purpose, and its absence is the point. It is a
+// range a house may legitimately use, but it is also where Docker puts its
+// bridges — nine of them on this machine — so admitting the block wholesale
+// admits every application on the server to every shared folder. A house that
+// really is on that range is not left out: sambaHostsAllow adds back the exact
+// subnet a real network card sits on, which a bridge never matches.
+var privateNetworks = []string{"192.168.0.0/16", "10.0.0.0/8"}
+
+// sambaHostsAllow is who smbd will answer, as a second opinion after the
+// firewall.
+//
+// Two layers saying the same thing, deliberately. The packet filter is the one
+// that decides, and it is also the one that can be switched off from a terminal
+// by somebody debugging something else; this list is what still stands if it is.
+func sambaHostsAllow() []string {
+	allowed := append([]string{"127.0.0.1"}, privateNetworks...)
+	allowed = append(allowed, cardSubnets()...)
+	if tailnetPresent() {
+		allowed = append(allowed, tailnetNetwork)
+	}
+	return allowed
+}
+
+// cardSubnets is the networks the real cards are actually on, minus the ones
+// privateNetworks already covers.
+//
+// In practice this is empty. It exists for the house whose router hands out
+// 172.16.0.0/12 addresses, where the choice would otherwise be between letting
+// the containers in and locking the family out — a silent failure either way,
+// on a range chosen by their router rather than by them. A card's own subnet is
+// a fact about this machine's network, not a guess about the block it sits in,
+// and no Docker bridge will ever match one.
+func cardSubnets() []string {
+	names := localInterfaces()
+	var subnets []string
+	for _, name := range names {
+		if name == tailnetInterface {
+			continue
+		}
+		iface, err := net.InterfaceByName(name)
+		if err != nil {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			network, ok := addr.(*net.IPNet)
+			if !ok || network.IP.To4() == nil || !network.IP.IsPrivate() {
+				continue
+			}
+			subnet := network.IP.Mask(network.Mask).String() + "/" +
+				strconv.Itoa(maskBits(network))
+			if coveredBy(privateNetworks, network.IP) ||
+				slices.Contains(subnets, subnet) {
+				continue
+			}
+			subnets = append(subnets, subnet)
+		}
+	}
+	sort.Strings(subnets)
+	return subnets
+}
+
+// coveredBy reports whether one of the ranges already contains an address.
+func coveredBy(ranges []string, ip net.IP) bool {
+	for _, r := range ranges {
+		_, network, err := net.ParseCIDR(r)
+		if err == nil && network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// tailnetInterface is the tunnel Tailscale creates, if this machine has one.
+//
+// A fixed name chosen by tailscaled rather than one assigned in probe order, so
+// unlike a network card it is safe to write down — a distinction that has cost
+// this project three outages.
+const tailnetInterface = "tailscale0"
+
+// tailnetNetwork is the range Tailscale gives its own machines.
+//
+// Admitted in `hosts allow` *and* paired with an interface-scoped firewall rule,
+// never on its own. This range is also what carriers hand a subscriber's router
+// — this very machine has such an address — so treating it as trusted by source
+// would, on a connection that puts subscribers on a shared segment, admit the
+// neighbours. The interface is what makes it safe; the range is what stops
+// Samba refusing traffic that already arrived through it.
+const tailnetNetwork = "100.64.0.0/10"
+
+// tailnetPresent reports whether the tunnel exists on this machine.
+func tailnetPresent() bool {
+	_, err := os.Stat(filepath.Join(sysClassNet, tailnetInterface))
+	return err == nil
+}
 
 // localInterfaces names the cards Samba should listen on: the real ones, never
 // the Docker bridges. A container that can reach the file server is a container
 // that can read everything on it.
 func localInterfaces() []string {
-	var names []string
-	for _, iface := range ReadNetworkStatus().Interfaces {
-		if iface.Kind == "ethernet" || iface.Kind == "wireless" {
-			names = append(names, iface.Name)
-		}
+	// The same list avahi is given, from the same place, so the two cannot
+	// disagree about what a real card is — they did, and one of them was wrong.
+	names := realInterfaces(sysClassNet)
+	// And the Tailscale tunnel, when there is one.
+	//
+	// Without this, a household member away from home can reach the dashboard
+	// and cannot open a single folder: smbd binds the cards it was told about,
+	// and the tunnel arrived after this configuration was last written. It was
+	// reported as remote file access working, and the connection was refused.
+	//
+	// Guarded, because smbd refuses a configuration that names an interface
+	// twice and an earlier version of this function did exactly that: it read
+	// the interface list from network status, which calls a tunnel "ethernet".
+	if tailnetPresent() && !slices.Contains(names, tailnetInterface) {
+		names = append(names, tailnetInterface)
 	}
 	return names
 }
@@ -373,21 +594,70 @@ func writeSambaConfig(content string) error {
 // did not change is a share nobody can reach — visible immediately and fixable
 // by hand — whereas refusing to share at all because ufw has been removed from
 // the machine would be worse.
-func openPort(ctx context.Context, port int, proto, scope, label string) {
-	setFirewall(ctx, "open", port, proto, scope, label)
+func openPort(ctx context.Context, port int, proto, scope, label string, interfaces ...string) {
+	setFirewall(ctx, "open", port, proto, scope, label, interfaces...)
 }
 
-func closePort(ctx context.Context, port int, proto, scope, label string) {
-	setFirewall(ctx, "close", port, proto, scope, label)
+func closePort(ctx context.Context, port int, proto, scope, label string, interfaces ...string) {
+	setFirewall(ctx, "close", port, proto, scope, label, interfaces...)
 }
 
-func setFirewall(ctx context.Context, action string, port int, proto, scope, label string) {
+// IsolateContainersFromTheTunnel keeps the applications on the house's own
+// network, where their manifests say they are.
+//
+// Applied at start and after every application change, because iptables rules
+// do not survive a reboot and Docker recreates its chains when the daemon
+// restarts. Idempotent: the helper removes its own rule before adding it.
+//
+// This is not the same job as opening a port, and the reason is worth knowing:
+// a published container port is never delivered to the host. Docker rewrites
+// the destination in the nat table and the packet is forwarded, so it never
+// passes through the chain every ufw rule lives in. `ufw status` on this
+// project's own machine listed no rule for File Browser's port and another
+// computer on the network reached it anyway. See the helper.
+func IsolateContainersFromTheTunnel(ctx context.Context) {
+	setFirewall(ctx, "isolate_containers", 0, "tcp", "interfaces", shareLabel)
+}
+
+// openSharePort and closeSharePort open 445 to the cards the house is on and
+// to the tunnel, and to nothing else.
+//
+// Scoped to interfaces rather than to address ranges because smbd no longer
+// scopes itself: see the note above `bind interfaces only` in
+// renderSambaConfig. This rule is what keeps the applications off the file
+// server, so it is the one to read first when something can see a folder it
+// should not.
+func openSharePort(ctx context.Context) {
+	openPort(ctx, 445, "tcp", "interfaces", shareLabel, shareInterfaces()...)
+	// The rule earlier versions wrote, which trusted 172.16.0.0/12 as a source
+	// and so trusted every container. Removed rather than left alongside the
+	// new one, where it would quietly go on granting what it always did.
+	closePort(ctx, 445, "tcp", "local", shareLabel)
+}
+
+func closeSharePort(ctx context.Context) {
+	closePort(ctx, 445, "tcp", "interfaces", shareLabel, shareInterfaces()...)
+	closePort(ctx, 445, "tcp", "local", shareLabel)
+}
+
+const shareLabel = "Homebase file sharing"
+
+// shareInterfaces is the cards 445 is opened on: the real ones and the tunnel,
+// which is exactly what smbd is told to announce itself on. Loopback is not
+// among them because ufw admits it before any rule of ours is consulted.
+func shareInterfaces() []string {
+	return localInterfaces()
+}
+
+func setFirewall(ctx context.Context, action string, port int, proto, scope, label string,
+	interfaces ...string) {
 	request := "# Written by Homebase for homebase-firewall.service.\n" +
 		"action=" + action + "\n" +
 		"port=" + strconv.Itoa(port) + "\n" +
 		"proto=" + proto + "\n" +
 		"scope=" + scope + "\n" +
-		"comment=" + label + "\n"
+		"comment=" + label + "\n" +
+		"interfaces=" + strings.Join(interfaces, " ") + "\n"
 	if err := writeRootFile(firewallRequest, request, 0o600); err != nil {
 		return
 	}
@@ -476,7 +746,7 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 		states = append(states, state)
 	}
 
-	if err := writeSambaConfig(renderSambaConfig(server, states)); err != nil {
+	if err := writeSambaConfig(renderSambaConfig(server, states, s.peopleDir())); err != nil {
 		return err
 	}
 	if err := writeRootFile(sambaUserMap, renderUserMap(s.shareUsers()), 0o644); err != nil {
@@ -493,7 +763,7 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 		// with no purpose is surface, and an open port with nothing behind it
 		// is surface somebody has forgotten about.
 		disableUnit(ctx, "smbd.service")
-		closePort(ctx, 445, "tcp", "local", "Homebase file sharing")
+		closeSharePort(ctx)
 		return nil
 	}
 
@@ -502,7 +772,7 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 	}
 	// After the server is configured and before it is started, so there is never
 	// a moment when the port is open onto a stale configuration.
-	openPort(ctx, 445, "tcp", "local", "Homebase file sharing")
+	openSharePort(ctx)
 
 	if err := runSystemctl(ctx, "restart", "smbd.service"); err != nil {
 		return &Error{
@@ -718,4 +988,39 @@ func findShare(shares []Share, name string) (Share, int, bool) {
 		}
 	}
 	return Share{}, 0, false
+}
+
+// Reapply rewrites smb.conf from the shares this machine already has.
+//
+// Called once at startup, because the configuration is otherwise only written
+// when somebody adds or removes a share — so everything it derives from the
+// machine is a snapshot of the day that last happened.
+//
+// That is not a theoretical staleness. The interface list is one of those
+// derived things, and on this project's own server the Tailscale tunnel was
+// installed months after the last share was created: smbd went on binding the
+// cards it had been told about, the tunnel was not among them, and somebody
+// away from home could open the dashboard and not a single folder. Nothing
+// reported a fault, because nothing was faulty — the file was simply older than
+// the machine.
+//
+// Does nothing when no share exists, so a machine that has never shared a folder
+// does not acquire an smb.conf by starting up.
+func (s *ShareServices) Reapply(ctx context.Context, log *slog.Logger) {
+	shares, err := s.load()
+	if err != nil {
+		log.Warn("could not read the shared folders", "error", err)
+		return
+	}
+	if len(shares) == 0 {
+		return
+	}
+	if err := s.apply(ctx, shares); err != nil {
+		// Logged, never fatal. hostd refusing to start because Samba is
+		// unhappy would take away the tool somebody needs to fix Samba.
+		log.Warn("could not refresh the file server's configuration", "error", err)
+		return
+	}
+	log.Info("file sharing refreshed", "shares", len(shares),
+		"interfaces", strings.Join(localInterfaces(), " "))
 }

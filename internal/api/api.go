@@ -97,7 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/auth/recovery-code", s.authenticated(s.handleRecoveryStatus))
 	mux.Handle("POST /api/v1/auth/recovery-code", s.authenticated(s.handleReissueRecoveryCode))
 
-	mux.Handle("GET /api/v1/system", s.require(auth.PermSystemRead, s.handleSystem))
+	mux.Handle("GET /api/v1/system", s.authenticated(s.handleSystem))
 	mux.Handle("GET /api/v1/system/history", s.require(auth.PermSystemRead, s.handleSystemHistory))
 	mux.Handle("POST /api/v1/system/reboot", s.require(auth.PermSystemManage, s.handleReboot))
 	mux.Handle("POST /api/v1/system/shutdown", s.require(auth.PermSystemManage, s.handleShutdown))
@@ -110,11 +110,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/jobs/{id}", s.require(auth.PermSystemRead, s.handleGetJob))
 	mux.Handle("POST /api/v1/jobs/{id}/cancel", s.require(auth.PermSystemManage, s.handleCancelJob))
 
+	s.registerAccountRoutes(mux)
 	s.registerAppRoutes(mux)
 	s.registerStorageRoutes(mux)
 	s.registerBackupRoutes(mux)
 	s.registerNetworkRoutes(mux)
 	s.registerShareRoutes(mux)
+	s.registerFileRoutes(mux)
 	s.registerUpdateRoutes(mux)
 	s.registerRecoveryToolRoutes(mux)
 	s.registerEventRoutes(mux)
@@ -177,7 +179,13 @@ func (s *Server) authenticated(next func(http.ResponseWriter, *http.Request, *au
 			s.writeAuthError(w, r, err)
 			return
 		}
-		next(w, r, user)
+		// Everything recorded during this request is recorded as them.
+		//
+		// Here rather than at each call site: every event in this server is
+		// recorded from inside a handler that already knows who is calling, and
+		// threading an actor through forty of them would be forty chances to
+		// pass nothing — with a silently anonymous audit entry as the failure.
+		next(w, r.WithContext(events.WithActor(r.Context(), user.Username)), user)
 	})
 }
 
@@ -318,6 +326,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One password, caught up. Somebody who joined before file sharing was
+	// switched on has a password Homebase can only check, not read; this is the
+	// one moment it holds the plaintext again. Does nothing if they already
+	// have a file-sharing account, and nothing at all on a server without a
+	// file server.
+	s.catchUpFileSharing(user.Username, body.Password)
+
 	s.issueSession(w, r, user, http.StatusOK)
 }
 
@@ -398,7 +413,19 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, user *auth.Use
 	writeJSON(w, http.StatusOK, user)
 }
 
-func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+// handleSystem describes the machine, in as much detail as the caller may have.
+//
+// Authenticated rather than requiring system.read, and that is a deliberate
+// change from when every account was an administrator. The dashboard shell polls
+// this every five seconds to render itself at all, so an account without
+// system.read — somebody given a login only to fetch a file — got a 403 every
+// five seconds and an error banner across the whole screen, with the tab they
+// were entitled to use sitting underneath it.
+//
+// So the endpoint answers everyone and says less to some: the machine's name and
+// version, which is what the shell needs to draw a header, and nothing about
+// disks, memory, temperature or uptime, which is what system.read is for.
+func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, user *auth.User) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
@@ -413,6 +440,14 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request, _ *auth.Us
 	resources, err := s.host.SystemResources(ctx)
 	if err != nil {
 		s.writeHostError(w, r, err)
+		return
+	}
+
+	if !user.Can(auth.PermSystemRead) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"hostname": info.Hostname,
+			"version":  s.version,
+		})
 		return
 	}
 

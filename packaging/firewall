@@ -19,7 +19,29 @@
 set -eu
 
 REQUEST=/etc/homebase/firewall
+
+# The ranges the "local" scope means.
+#
+# 172.16.0.0/12 is in this list and is also where Docker puts its bridges, which
+# is why nothing security-sensitive uses this scope any more: file sharing moved
+# to interface rules below. It is kept because deleting a rule in ufw means
+# repeating it exactly, and Homebase still has to remove the ones earlier
+# versions wrote.
 LOCAL_NETWORKS="192.168.0.0/16 10.0.0.0/8 172.16.0.0/12"
+
+# The tunnel Tailscale creates.
+#
+# A fixed name chosen by tailscaled rather than one assigned in probe order, so
+# unlike a network card it is safe to write down.
+TAILNET_INTERFACE=tailscale0
+
+# Ports below 1024 that Homebase is nonetheless responsible for.
+#
+# The rule below exists because the system's own ports are not Homebase's to
+# hand out. File sharing is the exception: 445 is fixed by the protocol, nothing
+# else on the machine wants it, and the alternative was the installer opening it
+# blind at install time whether or not anybody ever shares a folder.
+PRIVILEGED_PORTS="445"
 
 [ -r "$REQUEST" ] || { echo "firewall: no request" >&2; exit 1; }
 
@@ -28,10 +50,88 @@ port=$(sed -n   's/^port=//p'    "$REQUEST" | head -1)
 proto=$(sed -n  's/^proto=//p'   "$REQUEST" | head -1)
 scope=$(sed -n  's/^scope=//p'   "$REQUEST" | head -1)
 label=$(sed -n  's/^comment=//p' "$REQUEST" | head -1)
+cards=$(sed -n  's/^interfaces=//p' "$REQUEST" | head -1)
+
+# Keeping the applications off the tunnel.
+#
+# This is a different job from every other rule in this file, and it needs a
+# different chain, because ufw cannot see this traffic at all.
+#
+# A published container port is not delivered to the host. Docker writes a DNAT
+# rule in the nat table that rewrites the destination to the container, and the
+# packet is then *forwarded* rather than delivered locally — so it never reaches
+# the INPUT chain where every ufw rule lives. The consequence, on this project's
+# own machine: `ufw status` listed no rule for port 8080 and File Browser
+# answered a request from another computer on the network anyway. Nine
+# applications were reachable on every interface, including the Tailscale
+# tunnel, and Homebase believed it was deciding this.
+#
+# DOCKER-USER is the chain Docker provides for exactly this. It is the first
+# thing FORWARD jumps to, Docker never flushes it, and it is consulted before
+# any of Docker's own accept rules. It was empty.
+#
+# The rule is `-i tailscale0 -j DROP`: applications answer on the house's own
+# network, which is what their manifests claim, and the tunnel carries the two
+# things that have real accounts — the dashboard and file sharing. Somebody
+# given a shared machine gets the server, governed by their Homebase account,
+# rather than nine web interfaces each protected by a login of its own.
+#
+# Not narrowed to container address ranges on purpose. This drops *all*
+# forwarded traffic off the tunnel, which is correct while Homebase advertises
+# no subnet routes — and if that ever changes, this rule is the thing to revisit
+# first. It fails shut, which is the direction to fail in.
+CONTAINER_RULE_COMMENT="Homebase: applications are not on the tunnel"
+
+if [ "$action" = "isolate_containers" ]; then
+    if ! command -v iptables >/dev/null 2>&1; then
+        echo "firewall: no iptables on this machine, nothing to do" >&2
+        exit 0
+    fi
+    if ! ip link show "$TAILNET_INTERFACE" >/dev/null 2>&1; then
+        echo "firewall: no $TAILNET_INTERFACE on this machine, nothing to do" >&2
+        exit 0
+    fi
+
+    for command in iptables ip6tables; do
+        command -v "$command" >/dev/null 2>&1 || continue
+        # Created if it is not there yet, rather than skipped.
+        #
+        # Docker normally makes this chain, and hostd can start before Docker
+        # does — on a boot where it did, skipping would leave every application
+        # reachable from the tunnel until something restarted hostd, which is
+        # the kind of gap that only appears on somebody else's machine. Making
+        # the chain ourselves is safe and removes the ordering question: the
+        # rule sits in it either way, and Docker adds the jump from FORWARD when
+        # it starts.
+        "$command" -n -L DOCKER-USER >/dev/null 2>&1 ||
+            "$command" -N DOCKER-USER 2>/dev/null ||
+            continue
+
+        # Removed first, and in a loop, so that repeated runs leave one rule
+        # rather than a stack of identical ones — this is applied at every
+        # start and after every application change.
+        while "$command" -D DOCKER-USER -i "$TAILNET_INTERFACE" \
+            -m comment --comment "$CONTAINER_RULE_COMMENT" -j DROP 2>/dev/null; do
+            :
+        done
+        # First in the chain: anything Docker or another tool has put here
+        # already is consulted after this, never instead of it.
+        "$command" -I DOCKER-USER 1 -i "$TAILNET_INTERFACE" \
+            -m comment --comment "$CONTAINER_RULE_COMMENT" -j DROP
+    done
+
+    echo "firewall: applications are reachable on the local network only" >&2
+    exit 0
+fi
 
 # Ports below 1024 are the system's own and are not Homebase's to hand out; the
 # four it needs are opened by the installer, where they are visible in one file.
-if ! printf '%s' "$port" | grep -qE '^[0-9]{2,5}$' || [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
+privileged_ok=no
+for allowed in $PRIVILEGED_PORTS; do
+    [ "$port" = "$allowed" ] && privileged_ok=yes
+done
+if ! printf '%s' "$port" | grep -qE '^[0-9]{2,5}$' || [ "$port" -gt 65535 ] ||
+   { [ "$port" -lt 1024 ] && [ "$privileged_ok" = no ]; }; then
     echo "firewall: refusing the port '$port'" >&2
     exit 1
 fi
@@ -40,20 +140,82 @@ case "$proto" in tcp|udp) ;; *) echo "firewall: refusing '$proto'" >&2; exit 1 ;
 # than trusted to be harmless.
 printf '%s' "$label" | grep -qE '^[A-Za-z][A-Za-z0-9 -]{0,40}$' || label="Homebase"
 
-# scope is the security decision in this file, so it is two literal words rather
+# scope is the security decision in this file, so it is literal words rather
 # than an address anybody could widen.
 #
-#   local  the house only, for things that have no business off it
-#   any    the whole internet, for the one service whose purpose is being
-#          reachable from outside it
+#   local       the house only, described by address range
+#   any         the whole internet, for the one service whose purpose is being
+#               reachable from outside it
+#   interfaces  whatever arrived on named network cards, and nothing else
 case "$scope" in
-    local) sources="$LOCAL_NETWORKS" ;;
-    any)   sources="any" ;;
-    *)     echo "firewall: refusing the scope '$scope'" >&2; exit 1 ;;
+    local)      sources="$LOCAL_NETWORKS" ;;
+    any)        sources="any" ;;
+    interfaces) sources="" ;;
+    *)          echo "firewall: refusing the scope '$scope'" >&2; exit 1 ;;
 esac
+
+# Interface names reach a ufw command, so they are held to the shape the kernel
+# actually allows and counted, rather than trusted to be a short list of words.
+if [ "$scope" = interfaces ]; then
+    [ -n "$cards" ] || { echo "firewall: scope=interfaces with none named" >&2; exit 1; }
+    count=0
+    for card in $cards; do
+        count=$((count + 1))
+        if [ "$count" -gt 8 ]; then
+            echo "firewall: refusing more than 8 interfaces" >&2
+            exit 1
+        fi
+        printf '%s' "$card" | grep -qE '^[a-z][a-z0-9._-]{0,14}$' || {
+            echo "firewall: refusing the interface '$card'" >&2
+            exit 1
+        }
+    done
+fi
 
 if ! command -v ufw >/dev/null 2>&1; then
     echo "firewall: no ufw on this machine, nothing to do" >&2
+    exit 0
+fi
+
+# One rule per named card, rather than one per source address range.
+#
+# This is the security decision in this file, and it is worth the extra work.
+# Two ranges cannot be described honestly by source address:
+#
+#   Tailscale gives its machines addresses in 100.64.0.0/10, which is also the
+#   range carriers hand a subscriber's router — this very machine has one.
+#   Trusting that range by source would, on a connection that puts subscribers
+#   on a shared segment, admit the neighbours.
+#
+#   Docker's bridges live inside 172.16.0.0/12, the same block a house might
+#   use. Trusting it by source admits every container on the machine to
+#   whatever is being opened.
+#
+# An interface has no such ambiguity: traffic that arrived on the Ethernet card
+# came off the house's own wire, and traffic that arrived on tailscale0 was
+# authenticated and decrypted before the kernel saw it.
+#
+# The cost is that card names are assigned in probe order and change between
+# boots — a fact that has cost this project three outages. It is survivable
+# here, and only here, because of which way it fails: a rule naming a card that
+# no longer exists matches nothing. Stale means shut, not open. hostd rewrites
+# these rules every time it starts, so the correct ones are never far behind.
+if [ "$scope" = interfaces ]; then
+    for card in $cards; do
+        if ! ip link show "$card" >/dev/null 2>&1; then
+            echo "firewall: no $card on this machine, skipping it" >&2
+            continue
+        fi
+        rule="allow in on $card to any port $port proto $proto"
+        case "$action" in
+        # shellcheck disable=SC2086
+        open)  ufw $rule comment "$label" >/dev/null ;;
+        # shellcheck disable=SC2086
+        close) ufw delete $rule >/dev/null 2>&1 || true ;;
+        *)     echo "firewall: refusing the action '$action'" >&2; exit 1 ;;
+        esac
+    done
+    echo "firewall: $port/$proto is $action on $cards" >&2
     exit 0
 fi
 

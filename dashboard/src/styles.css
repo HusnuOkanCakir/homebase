@@ -1343,6 +1343,8 @@ select:focus-visible {
   margin: 1rem 0;
   border: 0;
   border-top: 1px solid var(--border);
+}
+
 /* --- Remote access: the method that actually works ------------------------
 
    Set apart from the Wireguard configuration below it because it answers a
@@ -1419,4 +1421,129 @@ select:focus-visible {
   background: var(--bg);
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+/* --- People ---------------------------------------------------------------
+
+   Roles are chosen by reading a sentence about each one, not by picking a word
+   out of a dropdown. "Administrator" and "Member" mean nothing to somebody
+   adding their father to a server; "can read every file on it, including other
+   people's private folders" means exactly the thing they need to weigh. */
+
+.roles {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  margin: 0 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.roles legend {
+  padding: 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.role-choice {
+  display: block;
+  margin-bottom: 0;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.role-choice input[type="radio"],
+.role-choice input[type="checkbox"] {
+  width: auto;
+  margin: 0 0.2rem 0 0;
+}
+
+/* One person, one row: who they are on the left, what you can do to them on the
+   right. The controls stay on one line so a household of five does not become a
+   page of stacked buttons. */
+
+.people-row {
+  align-items: center;
+  gap: 1rem;
+}
+
+.people-row .app-row-main {
+  gap: 0.1rem;
+}
+
+.people-actions {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.people-actions select {
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.people-actions button {
+  width: auto;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
+/* `.hint` carries a negative top margin so it can tuck under a text input. Under
+   a fieldset that pulls it onto the border. */
+.roles + .hint {
+  margin-top: 0.9rem;
+}
+
+/* The file browser.
+ *
+ * Deliberately plain: a list of names, folders first, with the actions beside
+ * each one. The temptation with a file browser is icons and a grid, and the
+ * thing somebody actually needs on a phone over a slow connection is a row they
+ * can hit with a thumb. */
+.file-areas {
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+.file-crumbs {
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0;
+  margin-bottom: 0.8rem;
+}
+.file-crumbs button {
+  padding: 0.1rem 0.3rem;
+}
+.file-list {
+  /* No bullets. A row here is a thing to act on, with buttons beside it, and a
+     bullet in front of a button reads as a list of prose. */
+  list-style: none;
+  padding-left: 0;
+}
+.file-list > li {
+  padding: 0.15rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.file-list > li:last-child {
+  border-bottom: none;
+}
+.file-list .file-name {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+/* Quieter than the actions that change the server. Renaming a file is an
+   ordinary thing to do and should not compete with the file's own name. */
+.file-list .row button.quiet {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.85rem;
+}
+.file-list .file-name button {
+  padding: 0.1rem 0.3rem;
+  text-align: left;
 }

@@ -134,3 +134,24 @@ The applications you had stopped stay stopped.
   reached on its own port, over plain HTTP, and guards itself with its own accounts. Which
   applications may do that is decided per application in the catalogue and reviewed in a
   diff.
+
+## From outside the house
+
+You cannot reach these from outside your home network, and that is on purpose.
+
+An application published on your network is protected by whatever login it ships with — some
+have a good one, some have a weak default, and some have none. That is a reasonable trade for
+something reachable only from the rooms in your house. It is not a reasonable trade for
+something reachable from the internet, and it becomes a worse one the moment you give
+somebody else [access to your server](remote-access.md): sharing the machine would otherwise
+hand them every application on it.
+
+So the tunnel carries the dashboard and your files, both of which have Homebase accounts
+behind them, and stops at the applications.
+
+!!! note "This was not always true"
+
+    Until recently these ports were reachable from anywhere the server was, and Homebase's
+    firewall had no say in it: a published container port is redirected before it reaches the
+    place firewall rules are applied, so the rules never saw it. The firewall now writes a
+    rule in the one chain that is consulted first.

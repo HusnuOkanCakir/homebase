@@ -58,6 +58,10 @@ tags:
     description: Structured events and the audit trail
   - name: assistant
     description: A language model running on this machine, if it has one
+  - name: accounts
+    description: The people who use this server
+  - name: files
+    description: Browsing, fetching and changing files, over HTTPS rather than SMB
 
 security:
   - sessionCookie: []
@@ -96,6 +100,15 @@ paths:
         Read live from `hostd` on every request. Nothing here is cached or remembered —
         a remembered disk-usage figure is a wrong disk-usage figure, and the Stage 2
         operator must never reason about the machine from stale values.
+
+        **Answers every signed-in account, and says less to some.** With `system.read` this is
+        the whole machine. Without it — an account given a login only to fetch a file — it is
+        the machine's name and version and nothing else: no disks, no memory, no temperature,
+        no uptime.
+
+        That is not a courtesy. The dashboard polls this every five seconds to draw its own
+        header, so requiring `system.read` meant an account without it got a refusal every five
+        seconds and an error across every screen it *was* entitled to use.
       operationId: getSystem
       responses:
         "200":
@@ -529,6 +542,237 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /accounts:
+    get:
+      tags: [accounts]
+      summary: Everybody on this server
+      description: |
+        Requires `accounts.manage`.
+
+        Returns roles, not permission arrays. The point of naming roles is that nobody has to
+        read fourteen strings to answer "what can my father do".
+
+        `has_signed_in` separates an invitation nobody has accepted from an account somebody
+        is using — the question an administrator actually has a week later.
+      operationId: listAccounts
+      responses:
+        "200":
+          description: The household
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts:
+                    type: array
+                    items: { $ref: "#/components/schemas/Account" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+    post:
+      tags: [accounts]
+      summary: Add somebody to this server
+      description: |
+        Requires `accounts.manage`.
+
+        **An administrator hands over a code, never a password.** The account is created with
+        a password that cannot be used — random bytes, hashed, discarded unread — and the
+        response carries a one-time joining code. The person exchanges it for a password only
+        they know, through `POST /auth/recover`. There is no endpoint that sets somebody
+        else's password and there should never be one.
+
+        The code is shown once. It is stored the way a password is, so nothing — including
+        this server — can produce it again; `POST /accounts/{id}/joining-code` issues a
+        replacement.
+
+        The name becomes their file-sharing login as well (`hbshare-<name>`), which is why it
+        is restricted to lower-case letters, numbers and hyphens. A name Linux accepts and
+        SMB does not is a name that works in the dashboard and fails at the file server with
+        an authentication box that never explains itself.
+
+        Returns the account rather than a job — a documented exception to the 202 convention,
+        alongside `POST /system/name`. It is one transaction, nothing can be usefully
+        interrupted, and the first thing a caller does is read the list back.
+      operationId: createAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, role]
+              additionalProperties: false
+              properties:
+                username:
+                  type: string
+                  pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+                  example: father
+                role: { $ref: "#/components/schemas/Role" }
+      responses:
+        "201":
+          description: The account, and the joining code — once
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, username, role, joining_code, message]
+                properties:
+                  id: { type: string }
+                  username: { type: string }
+                  role: { $ref: "#/components/schemas/Role" }
+                  joining_code:
+                    type: string
+                    description: Shown once. Not recoverable.
+                  message: { type: string }
+        "400":
+          description: The name cannot be used, or the role is not one of the three
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Somebody already has that name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /accounts/{account_id}/role:
+    post:
+      tags: [accounts]
+      summary: Change what somebody may do
+      description: |
+        Requires `accounts.manage`.
+
+        Takes effect on that person's next request — permissions are read from the database
+        on every request, so nobody is signed out and nothing is cached.
+
+        `assistant.unrestricted` survives a role change. It is granted by hand at the machine,
+        deliberately outside every role, and a role change that silently revoked it would be a
+        mystery with no error message attached.
+
+        Refused with `accounts.last_administrator` if it would leave the server with nobody
+        able to administer it.
+      operationId: setAccountRole
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              additionalProperties: false
+              properties:
+                role: { $ref: "#/components/schemas/Role" }
+      responses:
+        "200":
+          description: The account's new role
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  username: { type: string }
+                  role: { $ref: "#/components/schemas/Role" }
+        "400": { description: Not one of the three roles, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: No such account, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: The last administrator, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /accounts/{account_id}/remove:
+    post:
+      tags: [accounts]
+      summary: Remove somebody from this server
+      description: |
+        Requires `accounts.manage`, and a confirmation naming the person.
+
+        **Their files are kept.** Removing an account and deleting somebody's photographs are
+        different intentions, and collapsing them into one button is how a decade of pictures
+        disappears behind a word like "Remove" — the same rule that applies to uninstalling an
+        application and to unsharing a folder.
+
+        Their sessions end immediately.
+
+        The confirmation names the person rather than their identifier, unlike applications and
+        backups: somebody removing their father knows his name and has never seen
+        `usr_b5075ca5…`.
+      operationId: removeAccount
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              additionalProperties: false
+              properties:
+                confirm:
+                  type: string
+                  description: The person's username, exactly.
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed: { type: string }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: No such account, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: The last administrator, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "428": { $ref: "#/components/responses/ConfirmationRequired" }
+
+  /accounts/{account_id}/joining-code:
+    post:
+      tags: [accounts]
+      summary: Issue a fresh sign-in code for somebody
+      description: |
+        Requires `accounts.manage`.
+
+        For the person who lost their joining code before using it, or who has forgotten their
+        password and cannot reach their own recovery code. Replaces any earlier code; shown
+        once.
+
+        This is not a way to learn somebody's password. It is a way to let them choose a new
+        one, and it is recorded as `auth.recovery_code_reissued` — the same event the recovery
+        screen writes, because it is the same act.
+      operationId: reissueJoiningCode
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The code — once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  username: { type: string }
+                  joining_code: { type: string }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { description: No such account, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /jobs:
     get:
@@ -1932,6 +2176,376 @@ paths:
         "503":
           $ref: "#/components/responses/HostUnavailable"
 
+  /files/areas:
+    get:
+      tags: [files]
+      summary: The folders this person may browse
+      description: |
+        Requires `files.read`. An **area** is a shared folder or `me`, which is the caller's
+        own private folder. The list is computed from their account on every request, so a
+        folder kept for somebody else is not merely absent from it — it is not a name they
+        can use, and naming it directly answers 404.
+
+        A shared folder whose disk is unplugged is left out. It is still configured and still
+        listed under `/shares`; browsing it would create the folder on the system disk and
+        show an empty one that looks exactly like the place somebody's files used to be.
+
+        **No path on the server is ever returned.** A browser has no use for one, and a path
+        in a response is a path somebody will send back.
+      operationId: listFileAreas
+      responses:
+        "200":
+          description: The areas this person may open
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  areas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, description: "A share name, or `me`" }
+                        name: { type: string }
+                        kind: { type: string, enum: [personal, shared] }
+                        read_only: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /files:
+    get:
+      tags: [files]
+      summary: List a folder
+      description: |
+        Requires `files.read`.
+
+        Names beginning with a dot are left out: they are Homebase's own housekeeping in a
+        private folder — a removed person's files are kept as `.removed-<name>-<when>` — and
+        the operating system's everywhere else.
+
+        A symlink is described as what it is rather than as what it points at. Following one
+        would report a size and a date for a target that opening it will refuse to reach.
+      operationId: listFiles
+      parameters:
+        - name: area
+          in: query
+          required: true
+          schema: { type: string }
+        - name: path
+          in: query
+          description: A path inside the area. Empty is the top of it.
+          schema: { type: string }
+      responses:
+        "200":
+          description: What is in the folder
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: { type: string }
+                  truncated:
+                    type: boolean
+                    description: |
+                      True when the folder holds more than 5000 entries. A downloads folder
+                      with forty thousand files should produce a slow screen rather than a
+                      response that never finishes.
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        path: { type: string }
+                        directory: { type: boolean }
+                        size: { type: integer, format: int64 }
+                        modified: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such area, or nothing there by that name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /files/content:
+    get:
+      tags: [files]
+      summary: Fetch a file
+      description: |
+        Requires `files.read`. Supports `Range`, so a film that stops downloading on a train
+        resumes rather than starts again.
+
+        **Always `application/octet-stream`, always an attachment, always `nosniff`.** A file
+        here arrived over a Windows drive mapping from a machine Homebase knows nothing
+        about; served as its apparent type, an HTML file would be a page running on the
+        server's own origin — the session cookie, the API, everything. Downloading is what a
+        file browser is for; rendering is not.
+      operationId: downloadFile
+      parameters:
+        - name: area
+          in: query
+          required: true
+          schema: { type: string }
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The file
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "206":
+          description: Part of the file, for a resumed download
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such area, or nothing there by that name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /files/upload:
+    post:
+      tags: [files]
+      summary: Put a file into a folder
+      description: |
+        Requires `files.write`. `multipart/form-data`, streamed rather than parsed: the
+        fields `area` and `path` **must come before the file**, because the destination has
+        to be known before a byte is written anywhere.
+
+        The upload is written under a temporary dotted name in the destination folder and
+        renamed when it is complete, so an upload that fails halfway leaves nothing rather
+        than a file that looks finished and is not.
+
+        The name a browser sends is reduced to its last element. A folder upload sends
+        `photos/holiday/one.jpg`, and the directories in it are not this endpoint's to
+        create.
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [area, file]
+              properties:
+                area: { type: string }
+                path: { type: string }
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: What was saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  saved:
+                    type: array
+                    items: { type: string }
+        "400":
+          description: No file, or a name no file can have
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: No permission, or the folder is shared read-only
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /files/folder:
+    post:
+      tags: [files]
+      summary: Make a folder
+      description: |
+        Requires `files.write`. One folder, not a path: `name` that turns out to contain a
+        separator is a mistake rather than an instruction, and is refused.
+
+        Names are held to what **Windows** can open, which is stricter than Linux. A file
+        called `report?` or one ending in a space cannot be opened from the machine most of
+        a household uses, and creating it would produce a file that is invisible there with
+        nothing to explain it. A leading dot is refused too, because listings hide those and
+        the folder would vanish the moment it was made.
+      operationId: createFolder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [area, name]
+              properties:
+                area: { type: string }
+                path: { type: string }
+                name: { type: string }
+      responses:
+        "201":
+          description: The folder was made
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: { type: string }
+        "400":
+          description: A name Homebase will not create
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /files/rename:
+    post:
+      tags: [files]
+      summary: Rename a file or folder
+      description: |
+        Requires `files.write`. A new **name**, not a new place: it stays in the folder it is
+        in. Moving between folders is a different operation with a different way to go wrong,
+        and offering both through one endpoint would make the careless call the destructive
+        one.
+
+        Refuses rather than overwriting something already called that.
+      operationId: renameFile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [area, path, name]
+              properties:
+                area: { type: string }
+                path: { type: string }
+                name: { type: string }
+      responses:
+        "200":
+          description: Its new path inside the area
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Something here is already called that
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /files/remove:
+    post:
+      tags: [files]
+      summary: Delete a file or folder
+      description: |
+        Requires `files.write`. **There is no wastebasket.**
+
+        A folder with anything in it needs its own name typed in `confirm`. One file does
+        not: asking for a confirmation to delete a single file makes an ordinary action
+        tedious enough that people stop reading it, and the difference between that and
+        deleting a folder is five hundred photographs.
+
+        An unconfirmed delete can never take a subtree with it — the recursive form runs only
+        after the name has been typed.
+
+        The area itself cannot be deleted here. Stopping a share is a different action and
+        leaves the files where they are.
+      operationId: removeFile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [area, path]
+              properties:
+                area: { type: string }
+                path: { type: string }
+                confirm:
+                  type: string
+                  description: The folder's own name. Required for a folder that is not empty.
+      responses:
+        "200":
+          description: It is gone
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: A folder that is not empty, with no confirmation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /shares/access:
+    post:
+      tags: [shares]
+      summary: Choose who may open a shared folder
+      description: |
+        Requires `accounts.manage` — this is a question about people rather than about the
+        network, and it is the one share operation that can put somebody's files in front of
+        the whole house without touching a disk.
+
+        An empty or absent `access` list means everybody with an account, which is what every
+        share is until somebody says otherwise. **There is no way to say "nobody"**: a folder
+        nobody can open is not a state anybody wants and is one a typo could produce.
+
+        Every name must belong to an existing account. A name that belongs to nobody would be
+        written into Samba's `valid users` and simply never match, leaving a folder that is
+        restricted to nobody and looks restricted to somebody.
+
+        Names are kept when somebody is removed from the server. A stale name is a door that
+        stays shut, whereas tidying it away could empty the list — and an empty list means
+        everybody.
+      operationId: setShareAccess
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+                access:
+                  type: array
+                  description: Homebase usernames. Empty means everybody with an account.
+                  items:
+                    type: string
+                    pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+      responses:
+        "200":
+          description: Who may open the folder was changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  access:
+                    type: array
+                    items: { type: string }
+                  everyone: { type: boolean }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: A name that belongs to nobody on this server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /shares/users:
     post:
       tags: [shares]
@@ -3250,6 +3864,36 @@ components:
           items: { type: string }
           description: Its tailnet addresses, the 100.x one first.
 
+    Account:
+      type: object
+      additionalProperties: false
+      required: [id, username, role, has_signed_in, created_at]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        has_signed_in:
+          type: boolean
+          description: |
+            Whether this person has ever signed in. An invitation nobody has accepted and an
+            account in daily use look identical without it.
+        created_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time }
+
+    Role:
+      type: string
+      enum: [administrator, member, limited]
+      description: |
+        A name for a set of permissions. The permissions are the real thing — every check in
+        the server is against one of them — and a role is a way of choosing a sensible set
+        without reading fourteen checkboxes and getting one wrong.
+
+        `administrator` can change anything about the server, including reading every file on
+        it. `member` has their own files and can see how the server is doing, but cannot
+        change it. `limited` has their own files and nothing else.
+
+        `assistant.unrestricted` belongs to no role and is granted only at the machine.
+
     VPNDevice:
       type: object
       additionalProperties: false
@@ -4368,6 +5012,17 @@ components:
         occurred_at:
           type: string
           format: date-time
+        actor:
+          type: [string, "null"]
+          description: |
+            Who did it, by Homebase username.
+
+            **Null is not "unknown".** A disk being unplugged, a scheduled backup, an update
+            arriving — nothing did those on somebody's behalf, and a name there would be an
+            invented one. Rows written before this field existed are null for the same
+            reason: nobody knows, and a migration that guessed would put a wrong name in an
+            audit log.
+          examples: ["alex"]
 
     ErrorDetail:
       type: object

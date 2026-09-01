@@ -66,7 +66,105 @@ const (
 	// defaults, which is exactly what would happen if it lived in the list
 	// below.
 	PermAssistantUnrestricted = "assistant.unrestricted"
+
+	// PermFilesRead and PermFilesWrite say whether somebody may use the file
+	// screens, and whether they may change anything there.
+	//
+	// Neither says *which* files. What somebody can see is decided per area,
+	// from their own folder and the ones shared with them — a permission cannot
+	// express "the films but not the documents" and should not pretend to. These
+	// are the on switches; the areas are the answer.
+	//
+	// Split like everything else here, because read and write are different
+	// powers: an account that may fetch a document is not thereby an account
+	// that may delete the folder it was in.
+	PermFilesRead  = "files.read"
+	PermFilesWrite = "files.write"
+
+	// PermAccountsManage is the right to add people to this server, change what
+	// they may do, and remove them.
+	//
+	// Separate from system.manage because they are different powers. Rebooting
+	// the machine inconveniences whoever is watching something; creating an
+	// account hands somebody a way in that outlives the person who granted it.
+	PermAccountsManage = "accounts.manage"
 )
+
+// A role is a name for a set of permissions.
+//
+// The permissions are the real thing and stay the real thing — every check in
+// this codebase is against one of them. A role is a way of choosing a sensible
+// set without reading fourteen checkboxes and getting one wrong, which is what
+// somebody adding their father to a home server is actually trying to do.
+//
+// Deliberately three. A household is not an organisation, and the distinction
+// that matters is between the person who owns the machine, the people who live
+// with them, and somebody who should only ever see files.
+const (
+	RoleAdministrator = "administrator"
+	RoleMember        = "member"
+	RoleLimited       = "limited"
+)
+
+// MemberPermissions is what somebody who lives here gets.
+//
+// Everything readable and nothing that changes the machine. They can see what is
+// installed, whether the backup ran and how much space is left — the questions a
+// person actually asks about a server they share — and they can use their files
+// and the assistant. They cannot install, format, reboot, or add people.
+var MemberPermissions = []string{
+	PermSystemRead,
+	PermAppsRead,
+	PermStorageRead,
+	PermNetworkDiag,
+	PermBackupRead,
+	PermUpdateRead,
+	PermFilesRead,
+	PermFilesWrite,
+	PermAssistantUse,
+}
+
+// LimitedPermissions is files and nothing else.
+//
+// For somebody who is given an account to fetch a file and has no reason to see
+// what applications run on the machine or when it was last backed up.
+var LimitedPermissions = []string{
+	PermFilesRead,
+	PermFilesWrite,
+}
+
+// PermissionsForRole returns the set a role carries, or nil for an unknown one.
+//
+// Returning nil rather than a default is deliberate: a typo in a role name must
+// not quietly produce an account with permissions nobody chose.
+func PermissionsForRole(role string) []string {
+	switch role {
+	case RoleAdministrator:
+		return append([]string(nil), AdministratorPermissions...)
+	case RoleMember:
+		return append([]string(nil), MemberPermissions...)
+	case RoleLimited:
+		return append([]string(nil), LimitedPermissions...)
+	}
+	return nil
+}
+
+// RoleOf names the role an account's permissions correspond to.
+//
+// Permissions are the stored truth and a role is a reading of them, so an
+// account whose set matches none of the three — one built by hand, or left over
+// from before roles existed — is reported as its nearest honest description
+// rather than being forced into a name that would misdescribe it.
+func RoleOf(user *User) string {
+	switch {
+	case user.Can(PermAccountsManage) && user.Can(PermSystemManage):
+		return RoleAdministrator
+	case user.Can(PermSystemRead) || user.Can(PermAppsRead):
+		return RoleMember
+	default:
+		return RoleLimited
+	}
+}
 
 // AdministratorPermissions is what the first-run administrator receives.
 var AdministratorPermissions = []string{
@@ -77,6 +175,7 @@ var AdministratorPermissions = []string{
 	PermBackupRead, PermBackupRun,
 	PermUpdateRead, PermUpdateManage,
 	PermAssistantUse,
+	PermFilesRead, PermFilesWrite, PermAccountsManage,
 }
 
 const (
@@ -291,6 +390,21 @@ func (s *Service) CreateSession(ctx context.Context, userID, userAgent string) (
 	if err != nil {
 		return "", time.Time{}, err
 	}
+
+	// A session is a sign-in, however it was arrived at.
+	//
+	// Recorded here rather than only in Authenticate, because two paths produce
+	// a session without going through it: claiming the server at first-run
+	// setup, and claiming an account with a joining code. Both left
+	// last_login_at empty, so the People screen told the administrator looking
+	// at it that they had never signed in — while they were signed in, reading
+	// it. The flag is there to separate an invitation nobody has accepted from
+	// an account in use, and it was answering neither question.
+	//
+	// Best-effort, like the write in Authenticate: failing to record when
+	// somebody signed in must not stop them signing in.
+	_, _ = s.db.ExecContext(ctx, `UPDATE users SET last_login_at = ? WHERE id = ?`,
+		time.Now().UTC().Format(time.RFC3339), userID)
 
 	return token, expires, nil
 }
