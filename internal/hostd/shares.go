@@ -276,7 +276,7 @@ func renderUserMap(users []string) string {
 // Written by hand rather than by editing what is there, and deliberately short.
 // Every line is either required or is a decision worth being able to see in one
 // screen — which is the point of owning the file rather than adding to it.
-func renderSambaConfig(server string, shares []ShareState) string {
+func renderSambaConfig(server string, shares []ShareState, peopleDir string) string {
 	var out strings.Builder
 
 	out.WriteString("# Written by Homebase. Changes here are replaced.\n")
@@ -351,6 +351,50 @@ func renderSambaConfig(server string, shares []ShareState) string {
 		out.WriteString("   veto files = /.DS_Store/Thumbs.db/desktop.ini/\n")
 		out.WriteString("   delete veto files = yes\n")
 	}
+
+	if peopleDir != "" {
+		out.WriteString(renderPeopleShare(peopleDir))
+	}
+	return out.String()
+}
+
+// renderPeopleShare is the one stanza that serves everybody a different folder.
+//
+// `%U` is the name the client signed in as, substituted by Samba after the
+// authentication succeeded and after the username map turned `alice` into
+// `hbshare-alice`. So it is not a string from the network: a name that is not a
+// Homebase account never gets this far, because `security = user` and
+// `map to guest = never` mean an unauthenticated session has no name at all.
+//
+// One stanza rather than one per person, which matters for a reason beyond
+// tidiness: with a share each, everybody would see everybody's folder listed in
+// Explorer and be refused on opening it. Here each person sees one share called
+// "people" and it is theirs.
+//
+// `force user` is what makes it work at all. The folder is owned by the service
+// account and readable by nobody else, which is what keeps the applications out
+// — see peopleDirName — and it means smbd, impersonating `hbshare-alice`, could
+// not read it. Acting as the service account instead also makes a file written
+// from a Windows laptop readable by the Files screen, which is the same account
+// again. The boundary between one person and another is `valid users` and the
+// `%U` in the path, not the kernel; that is the trade, and it is written down.
+func renderPeopleShare(peopleDir string) string {
+	var out strings.Builder
+	out.WriteString("\n[people]\n")
+	out.WriteString("   comment = Your own folder on this server\n")
+	out.WriteString("   path = " + peopleDir + "/%U\n")
+	out.WriteString("   browseable = yes\n")
+	out.WriteString("   read only = no\n")
+	out.WriteString("   valid users = @" + serviceAccount + "\n")
+	out.WriteString("   force user = " + serviceAccount + "\n")
+	out.WriteString("   force group = " + serviceAccount + "\n")
+	// Tighter than the shared folders on purpose. Everything under here belongs
+	// to one person, so nothing needs to be readable by the group that every
+	// application runs in.
+	out.WriteString("   create mask = 0600\n")
+	out.WriteString("   directory mask = 0700\n")
+	out.WriteString("   veto files = /.DS_Store/Thumbs.db/desktop.ini/\n")
+	out.WriteString("   delete veto files = yes\n")
 	return out.String()
 }
 
@@ -637,7 +681,7 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 		states = append(states, state)
 	}
 
-	if err := writeSambaConfig(renderSambaConfig(server, states)); err != nil {
+	if err := writeSambaConfig(renderSambaConfig(server, states, s.peopleDir())); err != nil {
 		return err
 	}
 	if err := writeRootFile(sambaUserMap, renderUserMap(s.shareUsers()), 0o644); err != nil {

@@ -75,6 +75,22 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request, use
 	s.log.Info("account created",
 		"username", created.Username, "role", body.Role, "by", user.Username)
 
+	// And somewhere of their own to put things.
+	//
+	// After the account, and not allowed to undo it. A folder that could not be
+	// made is a folder that can be made on the next attempt — the disk was
+	// busy, hostd was restarting — whereas an account rolled back at this point
+	// leaves an administrator holding a joining code for somebody who does not
+	// exist. So the failure is reported beside the code rather than instead of
+	// it.
+	folderNote := ""
+	if _, err := s.host.MakePersonalFolder(ctx, created.Username); err != nil {
+		s.log.Warn("could not create a private folder",
+			"username", created.Username, "error", err)
+		folderNote = " Their private folder could not be created yet; it will be " +
+			"made the next time they are given one."
+	}
+
 	// The code is here once and nowhere else. It is stored the way a password
 	// is, so nothing — including this server — can produce it again.
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -84,7 +100,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request, use
 		"joining_code": code,
 		"message": "Give this code to " + created.Username +
 			". They use it to sign in for the first time and choose their own " +
-			"password. It is shown once and cannot be shown again.",
+			"password. It is shown once and cannot be shown again." + folderNote,
 	})
 }
 
@@ -144,6 +160,27 @@ func (s *Server) handleRemoveAccount(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 
+	// Their private folder is moved aside, not deleted. Doing it here rather
+	// than leaving it means the next person to have this name gets an empty
+	// folder instead of the last one's files — which is the kind of thing
+	// nobody discovers until it has already happened.
+	//
+	// The account is already gone. A folder that could not be moved is worth
+	// saying out loud and is not worth putting the account back for.
+	kept := ""
+	result, err := s.host.RetirePersonalFolder(ctx, target.Username)
+	switch {
+	case err != nil:
+		s.log.Warn("could not move a private folder aside",
+			"username", target.Username, "error", err)
+		kept = " Their private folder could not be moved aside; a new account " +
+			"with the same name would be able to open it."
+	case result["retired"] == true:
+		if path, ok := result["path"].(string); ok {
+			kept = " Their private folder was kept, at " + path + "."
+		}
+	}
+
 	s.events.Warn(r.Context(), "account.removed", target.Username, "",
 		target.Username+" was removed from this server. Their files were kept.")
 	s.log.Info("account removed", "username", target.Username, "by", user.Username)
@@ -151,7 +188,7 @@ func (s *Server) handleRemoveAccount(w http.ResponseWriter, r *http.Request, use
 	writeJSON(w, http.StatusOK, map[string]any{
 		"removed": target.Username,
 		"message": "Their files were kept. Removing an account and deleting " +
-			"somebody's files are different things.",
+			"somebody's files are different things." + kept,
 	})
 }
 

@@ -22,7 +22,7 @@ func TestTheShareConfigurationRefusesTheDangerousDefaults(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "backup", Location: "internal"},
 		Path:  "/srv/homebase/storage/internal/shares/backup",
-	}})
+	}}, "")
 
 	required := map[string]string{
 		"security = user":               "a share anybody on the network can open",
@@ -62,7 +62,7 @@ func TestTheApplicationsAreKeptOffTheFileServerByTheFirewall(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "backup", Location: "internal"},
 		Path:  "/srv/homebase/storage/internal/shares/backup",
-	}})
+	}}, "")
 	if !strings.Contains(config, "bind interfaces only = no") {
 		t.Fatal("smbd is binding selected interfaces again; if that is deliberate, " +
 			"check first that it binds the tunnel, because it did not before")
@@ -113,7 +113,7 @@ func TestAShareWhoseDiskIsGoneIsNotServedFromTheSystemDisk(t *testing.T) {
 	}
 
 	// And it must not reach the configuration at all.
-	config := renderSambaConfig("homebase", nil)
+	config := renderSambaConfig("homebase", nil, "")
 	if strings.Contains(config, "[films]") {
 		t.Error("the share was written into smb.conf with no disk behind it")
 	}

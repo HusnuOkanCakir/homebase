@@ -72,6 +72,35 @@ func RegisterShareOperations(r *Registry, services *ShareServices) {
 	})
 
 	r.MustRegister(Operation{
+		Name: "share.make_personal_folder",
+		Summary: "Create the private folder that belongs to one person on " +
+			"this server.",
+		// Low. It makes an empty directory on the server's own disk, and the
+		// only thing it can overwrite is a folder of the same name, which it
+		// converges on rather than replaces.
+		Risk:        RiskLow,
+		Permissions: []string{"storage.modify"},
+		Confirm:     ConfirmNone,
+		Timeout:     1 * time.Minute,
+		Handler:     Typed(services.makePersonalFolderOp),
+	})
+
+	r.MustRegister(Operation{
+		Name: "share.retire_personal_folder",
+		Summary: "Move somebody's private folder aside when their account is " +
+			"removed. The files are kept.",
+		// Medium: nothing is deleted, but a folder moves and the person it
+		// belonged to is gone, so the only record of where it went is the
+		// answer this returns and the audit entry beside it.
+		Risk:        RiskMedium,
+		Permissions: []string{"storage.modify"},
+		Confirm:     ConfirmRequired,
+		Timeout:     1 * time.Minute,
+		Rollback:    "rename the folder back by hand; nothing is deleted",
+		Handler:     Typed(services.retirePersonalFolderOp),
+	})
+
+	r.MustRegister(Operation{
 		Name:        "share.remove_user",
 		Summary:     "Stop somebody being able to open the shared folders.",
 		Risk:        RiskMedium,
@@ -304,5 +333,78 @@ func (s *ShareServices) removeUser(ctx context.Context, params ShareUserRef) (an
 		"username": username,
 		"removed":  true,
 		"message":  username + " can no longer open the shared folders.",
+	}, nil
+}
+
+// --- Private folders ------------------------------------------------------------
+
+type PersonalFolderParams struct {
+	Username string `json:"username"`
+}
+
+func (s *ShareServices) makePersonalFolderOp(ctx context.Context, params PersonalFolderParams) (any, error) {
+	username := strings.ToLower(strings.TrimSpace(params.Username))
+	path, err := s.makePersonalFolder(PeopleLocation, username)
+	if err != nil {
+		return nil, err
+	}
+
+	// The file server is told about it now rather than at the next share
+	// change. `[people]` is only written once a folder exists, so the first
+	// person to get one is also the moment the share appears — and without
+	// this, it would appear whenever somebody next happened to share a folder.
+	//
+	// Only if there is a file server at all. A Homebase where nobody has shared
+	// anything still gives people their folders; the Files screen serves them
+	// either way, and Samba is what a Windows drive letter needs.
+	if sambaInstalled() {
+		shares, err := s.load()
+		if err != nil {
+			return nil, err
+		}
+		if err := s.apply(ctx, shares); err != nil {
+			return nil, err
+		}
+	}
+
+	return map[string]any{
+		"username": username,
+		"path":     path,
+		"message":  username + " has a private folder on this server.",
+	}, nil
+}
+
+func (s *ShareServices) retirePersonalFolderOp(ctx context.Context, params PersonalFolderParams) (any, error) {
+	username := strings.ToLower(strings.TrimSpace(params.Username))
+	retired, err := s.retirePersonalFolder(PeopleLocation, username)
+	if err != nil {
+		return nil, err
+	}
+	if retired == "" {
+		return map[string]any{
+			"username": username,
+			"retired":  false,
+			"message":  username + " had no private folder on this server.",
+		}, nil
+	}
+
+	if sambaInstalled() {
+		shares, err := s.load()
+		if err != nil {
+			return nil, err
+		}
+		if err := s.apply(ctx, shares); err != nil {
+			return nil, err
+		}
+	}
+
+	return map[string]any{
+		"username": username,
+		"retired":  true,
+		"path":     retired,
+		// Said plainly, because an administrator removing an account is
+		// entitled to assume it took the files with it, and it did not.
+		"message": "The files that were in " + username + "'s folder are still on " +
+			"the server, at " + retired + ".",
 	}, nil
 }
