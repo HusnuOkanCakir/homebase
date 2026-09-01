@@ -935,6 +935,9 @@ export interface Event {
   recoverable: boolean | null;
   message: string | null;
   occurred_at: string;
+  /** Who did it, by Homebase username. Null is not "unknown": nothing did a
+   *  scheduled backup or an unplugged disk on anybody's behalf. */
+  actor: string | null;
 }
 
 // --- Calls -------------------------------------------------------------------

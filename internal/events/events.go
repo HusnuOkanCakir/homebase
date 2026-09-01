@@ -67,6 +67,42 @@ type Event struct {
 
 	Message    *string   `json:"message"`
 	OccurredAt time.Time `json:"occurred_at"`
+
+	// Actor is who did it, by Homebase username.
+	//
+	// Null where nothing did it on somebody's behalf — a disk that was
+	// unplugged, a backup that ran on a schedule, an update that arrived. That
+	// is a different thing from "unknown", and the two are worth being able to
+	// tell apart when reading back what happened.
+	//
+	// It exists because the question the audit log could not answer was the
+	// first one anybody asks. Until this server had one account, "who" was not
+	// a question: there was only one answer. It has more than one now.
+	Actor *string `json:"actor"`
+}
+
+// actorKey carries the signed-in person through the request.
+//
+// A context value rather than an argument on Record, and that is the decision
+// worth explaining. Every event in this server is recorded from inside a
+// handler that already knows who is calling, and threading an actor through
+// forty call sites would mean forty chances to pass the wrong one or nothing at
+// all — with a silently anonymous audit entry as the failure. Set once by the
+// middleware that authenticates the request, read once here.
+type actorKey struct{}
+
+// WithActor marks a context as belonging to somebody.
+func WithActor(ctx context.Context, username string) context.Context {
+	if username == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, actorKey{}, username)
+}
+
+// ActorFrom returns who a context belongs to, if anybody.
+func ActorFrom(ctx context.Context) string {
+	name, _ := ctx.Value(actorKey{}).(string)
+	return name
 }
 
 // Recorder persists events and hands them to anyone watching.
@@ -111,11 +147,22 @@ func (r *Recorder) Record(ctx context.Context, event Event) {
 	}
 	event.OccurredAt = event.OccurredAt.UTC()
 
+	// Taken from the request unless the caller was explicit. A caller that
+	// names an actor is recording something on somebody else's behalf and knows
+	// better than the context does.
+	if event.Actor == nil {
+		if actor := ActorFrom(ctx); actor != "" {
+			event.Actor = &actor
+		}
+	}
+
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO events (id, type, severity, subject, reason, recoverable, message, occurred_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO events (id, type, severity, subject, reason, recoverable, message,
+		                    occurred_at, actor)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.Type, string(event.Severity), event.Subject, event.Reason,
-		event.Recoverable, event.Message, event.OccurredAt.Format(time.RFC3339Nano))
+		event.Recoverable, event.Message, event.OccurredAt.Format(time.RFC3339Nano),
+		event.Actor)
 	if err != nil {
 		// Logged at error rather than warn: a machine that has stopped recording
 		// events looks, from the dashboard, exactly like a machine where nothing
@@ -192,7 +239,8 @@ func (r *Recorder) List(ctx context.Context, q Query) ([]Event, error) {
 	args = append(args, limit)
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, type, severity, subject, reason, recoverable, message, occurred_at
+		SELECT id, type, severity, subject, reason, recoverable, message, occurred_at,
+		       actor
 		FROM events
 		WHERE `+strings.Join(where, " AND ")+`
 		ORDER BY occurred_at DESC, id DESC
@@ -224,7 +272,7 @@ func scanEvent(rows *sql.Rows) (Event, error) {
 		recoverable sql.NullBool
 	)
 	if err := rows.Scan(&event.ID, &event.Type, &severity, &event.Subject,
-		&event.Reason, &recoverable, &event.Message, &occurred); err != nil {
+		&event.Reason, &recoverable, &event.Message, &occurred, &event.Actor); err != nil {
 		return Event{}, err
 	}
 	event.Severity = Severity(severity)

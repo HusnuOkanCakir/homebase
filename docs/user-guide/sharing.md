@@ -29,6 +29,28 @@ The first folder you share takes a few minutes, because it installs the file ser
 Homebase does not ship it running: a service listening on your network that nobody asked for
 is one that can be misconfigured without anybody noticing.
 
+## Opening them in the dashboard
+
+The **Files** page shows everything you can open on this server: each shared folder, and
+your own. You can look through them, download something, drop a file in, make a folder,
+rename and delete.
+
+This is the way in that needs nothing at the other end. A mapped drive needs a computer that
+can map one — a phone cannot, and a borrowed laptop should not — and this works anywhere the
+dashboard works, including from another country over [Tailscale](remote-access.md).
+
+A few things worth knowing about it:
+
+- **A download is a normal browser download.** It resumes if the connection drops, which
+  matters for a film over a home upload link.
+- **There is no wastebasket.** Deleting a folder that has anything in it asks you to type its
+  name first; deleting one file does not, because a confirmation on every ordinary action is
+  one nobody reads by the third time.
+- **Names are held to what Windows can open.** A file called `report?`, or one ending in a
+  space, cannot be opened from a Windows machine at all, so Homebase will not create one.
+- **Files never open in the browser, they download.** A file on this server arrived from a
+  computer Homebase knows nothing about, and a page that ran here would run with your session.
+
 ## Opening it from another computer
 
 The **Files** page shows you exactly what to type. It differs by machine, so all three are

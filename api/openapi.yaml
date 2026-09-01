@@ -5012,6 +5012,17 @@ components:
         occurred_at:
           type: string
           format: date-time
+        actor:
+          type: [string, "null"]
+          description: |
+            Who did it, by Homebase username.
+
+            **Null is not "unknown".** A disk being unplugged, a scheduled backup, an update
+            arriving — nothing did those on somebody's behalf, and a name there would be an
+            invented one. Rows written before this field existed are null for the same
+            reason: nobody knows, and a migration that guessed would put a wrong name in an
+            audit log.
+          examples: ["alex"]
 
     ErrorDetail:
       type: object

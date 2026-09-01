@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/HusnuOkanCakir/homebase/internal/auth"
+	"github.com/HusnuOkanCakir/homebase/internal/events"
 )
 
 // Password recovery — ADR-0015.
@@ -71,7 +72,11 @@ func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 
 	// Deliberately not recoverable: there is nothing for the reader to do
 	// except know. If this was not them, the server has been taken.
-	s.events.Error(r.Context(), "auth.password_recovered", user.Username, "recovery_code",
+	// Named explicitly: this route is not behind the middleware that marks a
+	// request as somebody's, because whoever is calling it cannot sign in. They
+	// have proved who they are with the code, which is what the actor records.
+	s.events.Error(events.WithActor(r.Context(), user.Username),
+		"auth.password_recovered", user.Username, "recovery_code",
 		"The password for "+user.Username+" was reset using the recovery code. "+
 			"Everything signed in as "+user.Username+" was signed out.", false)
 

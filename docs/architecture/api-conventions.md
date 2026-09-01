@@ -173,11 +173,27 @@ apps.read        apps.manage
 storage.read     storage.modify
 network.diagnose network.modify
 backup.read      backup.run
-media.play
+update.read      update.manage
+files.read       files.write
+assistant.use    accounts.manage
 ```
 
 Read and write are separate throughout. That split is what makes Stage 2A — an AI that can
 explain the server but change nothing — expressible as a token rather than as a promise.
+
+Two of these do not follow the read/write pattern, and both are deliberate.
+
+`accounts.manage` has no read half. Seeing who else lives in your house is not a power worth
+separating, and the write half is: creating an account hands somebody a way in that outlives
+whoever granted it.
+
+`assistant.unrestricted` is absent from the list above because it is absent from every role,
+including administrator. It is granted by hand at the machine and never through the API — an
+endpoint that grants it is an endpoint a stolen session can call.
+
+Neither `files.read` nor `files.write` says *which* files. What somebody can see is decided
+per area, from their own folder and the ones shared with them; a permission cannot express
+"the films but not the documents" and should not pretend to.
 
 ## Idempotency
 

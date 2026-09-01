@@ -179,7 +179,13 @@ func (s *Server) authenticated(next func(http.ResponseWriter, *http.Request, *au
 			s.writeAuthError(w, r, err)
 			return
 		}
-		next(w, r, user)
+		// Everything recorded during this request is recorded as them.
+		//
+		// Here rather than at each call site: every event in this server is
+		// recorded from inside a handler that already knows who is calling, and
+		// threading an actor through forty of them would be forty chances to
+		// pass nothing — with a silently anonymous audit entry as the failure.
+		next(w, r.WithContext(events.WithActor(r.Context(), user.Username)), user)
 	})
 }
 

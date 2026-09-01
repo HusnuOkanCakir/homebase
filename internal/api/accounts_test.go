@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/HusnuOkanCakir/homebase/internal/auth"
+	"github.com/HusnuOkanCakir/homebase/internal/events"
 )
 
 func accountsOf(t *testing.T, h *harness, token string) []auth.Account {
@@ -274,5 +276,39 @@ func TestSomebodyWithOnlyFilesCanSeeHowToReachThem(t *testing.T) {
 	// And it is still refused what it is not for.
 	if rec := h.do(http.MethodGet, "/api/v1/network", "", auth1(theirs)); rec.Code != http.StatusForbidden {
 		t.Fatalf("GET /network = %d, want 403", rec.Code)
+	}
+}
+
+// "Who added this account" is answerable from the audit log, not only from a
+// log file on the machine. It is the question a household server has to be able
+// to answer once more than one person can change things.
+func TestTheAuditLogSaysWhoActed(t *testing.T) {
+	h := newHarness(t)
+	token := h.signIn(t)
+
+	rec := h.do(http.MethodPost, "/api/v1/accounts",
+		`{"username":"father","role":"member"}`, auth1(token))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+
+	found, err := h.events.List(context.Background(), events.Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created *events.Event
+	for i := range found {
+		if found[i].Type == "account.created" {
+			created = &found[i]
+		}
+	}
+	if created == nil {
+		t.Fatal("adding an account recorded no event")
+	}
+	if created.Actor == nil {
+		t.Fatal("the event does not say who added them, which is the whole question")
+	}
+	if *created.Actor != "alex" {
+		t.Fatalf("the event says %q added them", *created.Actor)
 	}
 }
