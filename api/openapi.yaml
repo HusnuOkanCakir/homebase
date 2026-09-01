@@ -370,6 +370,51 @@ paths:
                   max_chars:
                     type: integer
                     description: Longest single message accepted.
+                  models:
+                    type: array
+                    description: |
+                      Every model this account may select, in offer order.
+
+                      **Filtered by permission before it is written, not after.** A model
+                      somebody may not use is not one they should learn exists from a
+                      greyed-out entry, so it is absent rather than disabled.
+                    items:
+                      type: object
+                      required: [id, label, available, unrestricted]
+                      properties:
+                        id:
+                          type: string
+                          description: What to send as `model`. Stable; the label is not.
+                          example: local
+                        label:
+                          type: string
+                        name:
+                          type: string
+                          description: What the server underneath reports.
+                          example: Qwen3.8-4B-Q4_K_M
+                        available:
+                          type: boolean
+                        reason:
+                          type: string
+                          description: |
+                            Why it is unavailable. For a contained model, "it is not
+                            running" is the ordinary state rather than a fault.
+                        unrestricted:
+                          type: boolean
+                          description: |
+                            A model whose refusal behaviour was removed by a third party.
+
+                            Requires `assistant.unrestricted`, which is **not** granted by
+                            setting up the machine, **not** granted by being an
+                            administrator, and cannot be granted through this API at all —
+                            an endpoint that grants it is an endpoint a stolen session can
+                            call. It is added with `homebasectl assistant unrestricted`,
+                            run on the server.
+
+                            Homebase can use such a model and has no way to start one.
+                            There is no operation here that unlocks its volume or launches
+                            it, deliberately: that would be a privileged operation whose
+                            purpose is to make it easier to reach.
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -427,6 +472,16 @@ paths:
                         enum: [user, assistant]
                       content:
                         type: string
+                model:
+                  type: string
+                  description: |
+                    Which offered model answers. Omit for the primary one.
+
+                    Selecting an unrestricted model is always deliberate: a request naming
+                    no model never reaches one, and naming one without holding
+                    `assistant.unrestricted` is refused with `assistant.not_permitted`
+                    whether or not it was offered.
+                  example: local
                 think:
                   type: boolean
                   default: false

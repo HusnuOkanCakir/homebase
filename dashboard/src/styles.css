@@ -1383,3 +1383,40 @@ select:focus-visible {
   font-size: 0.82rem;
   margin-bottom: 0.5rem !important;
 }
+
+/* The model selector, and the thing it must say when the unrestricted one is
+   chosen.
+
+   Set as a standing notice rather than a one-off confirmation: a dialog is
+   agreed to once and then forgotten, and what matters here is that the state is
+   visible for as long as it lasts. */
+
+.assistant-model-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0;
+  font-size: 0.88rem;
+  font-weight: 400;
+}
+
+.assistant-model-choice select {
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.assistant-unrestricted {
+  margin: 0.9rem 0 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}

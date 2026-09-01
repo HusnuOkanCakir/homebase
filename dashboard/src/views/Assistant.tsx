@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, askAssistant, type AssistantMessage, type AssistantStatus } from "../api";
+import {
+  api,
+  askAssistant,
+  type AssistantMessage,
+  type AssistantModel,
+  type AssistantStatus,
+} from "../api";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
 import { Markdown } from "../components/Markdown";
@@ -39,6 +45,10 @@ export function Assistant() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState("");
   const [think, setThink] = useState(false);
+  // Which model answers. Empty means the primary one; the server treats a
+  // request naming no model as the safe one, so this never defaults to the
+  // unrestricted one by accident.
+  const [model, setModel] = useState("");
   const [error, setError] = useState<ReturnType<typeof describeError> | null>(null);
   const [asking, setAsking] = useState(false);
 
@@ -135,9 +145,9 @@ export function Assistant() {
           stopRef.current = null;
         },
       },
-      { think },
+      model ? { think, model } : { think },
     );
-  }, [draft, asking, turns, think]);
+  }, [draft, asking, turns, think, model]);
 
   const stop = useCallback(() => {
     stopRef.current?.();
@@ -174,6 +184,14 @@ export function Assistant() {
       </section>
     );
   }
+
+  // Offer order comes from the server. The first non-unrestricted model is the
+  // one a request naming nothing reaches, so it is what an empty selection
+  // means here too.
+  const choices: AssistantModel[] = status?.models ?? [];
+  const selected =
+    choices.find((choice) => choice.id === model) ??
+    choices.find((choice) => !choice.unrestricted);
 
   const nearLimit = status !== null && turns.length >= status.max_turns - 4;
   const full = status !== null && turns.length >= status.max_turns;
@@ -265,7 +283,38 @@ export function Assistant() {
         )}
       </form>
 
+      {selected?.unrestricted && (
+        <p className="assistant-unrestricted" role="status">
+          <strong>Unrestricted model.</strong> Its refusals were removed by
+          someone other than the people who trained it, so it will answer things
+          the usual one declines, and it is less reliable exactly there. It runs
+          with no network and cannot see your files. Homebase did not start it
+          and cannot stop it.
+        </p>
+      )}
+
       <div className="row row-between assistant-footer">
+        {choices.length > 1 && (
+          <label className="assistant-model-choice">
+            Model{" "}
+            <select
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              disabled={asking}
+            >
+              {choices.map((choice) => (
+                <option
+                  key={choice.id}
+                  value={choice.id}
+                  disabled={!choice.available}
+                >
+                  {choice.label}
+                  {choice.available ? "" : " — not running"}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="assistant-think">
           <input
             type="checkbox"
