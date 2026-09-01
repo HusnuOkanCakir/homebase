@@ -141,6 +141,16 @@ type ShareStatus struct {
 
 	// ServerName is what the server is called on the network.
 	ServerName string `json:"server_name"`
+
+	// PeoplePath is the directory holding everybody's private folders, or empty
+	// if the disk it lives on is not available.
+	//
+	// Reported rather than assumed, because core is the thing that has to serve
+	// these folders in a browser and it must not compose a path of its own. A
+	// path core built for itself from a share's path and a guess about the
+	// layout is a path that keeps working after the layout changes and lands
+	// somewhere else entirely.
+	PeoplePath string `json:"people_path,omitempty"`
 }
 
 // ShareServices is what the sharing operations need.
@@ -217,6 +227,7 @@ func (s *ShareServices) status(ctx context.Context) (ShareStatus, error) {
 	if users := s.shareUsers(); users != nil {
 		status.Users = users
 	}
+	status.PeoplePath = s.peopleRoot()
 
 	shares, err := s.load()
 	if err != nil {

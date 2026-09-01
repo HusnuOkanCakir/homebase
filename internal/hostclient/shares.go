@@ -37,6 +37,11 @@ type ShareStatus struct {
 	Shares     []Share  `json:"shares"`
 	Users      []string `json:"users"`
 	ServerName string   `json:"server_name"`
+
+	// PeoplePath is where private folders live on this server, as hostd reports
+	// it. Never composed here: a path core builds for itself keeps working
+	// after the layout changes and lands somewhere else entirely.
+	PeoplePath string `json:"people_path,omitempty"`
 }
 
 func (c *Client) Shares(ctx context.Context) (*ShareStatus, error) {

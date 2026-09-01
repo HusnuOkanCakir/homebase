@@ -43,6 +43,19 @@ const peopleDirName = "people"
 // is not something a person should have to work out from an error message.
 const PeopleLocation = InternalLocationID
 
+// peopleRoot is where private folders live, whether or not any exist.
+//
+// Distinct from peopleDir, which answers a different question: this is where
+// they *would* be, and is what core needs to open somebody's folder; that one
+// is whether there is anything for the file server to publish.
+func (s *ShareServices) peopleRoot() string {
+	mountPoint, ok := s.storage.ResolveLocation(PeopleLocation)
+	if !ok {
+		return ""
+	}
+	return filepath.Join(mountPoint, peopleDirName)
+}
+
 // peopleDir is the directory the `[people]` share is served from, or empty if
 // there is nothing to serve.
 //

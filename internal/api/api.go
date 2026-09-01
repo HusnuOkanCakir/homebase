@@ -116,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerBackupRoutes(mux)
 	s.registerNetworkRoutes(mux)
 	s.registerShareRoutes(mux)
+	s.registerFileRoutes(mux)
 	s.registerUpdateRoutes(mux)
 	s.registerRecoveryToolRoutes(mux)
 	s.registerEventRoutes(mux)
