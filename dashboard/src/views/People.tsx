@@ -112,14 +112,13 @@ export function People({ me }: { me: string }) {
       <p className="muted">
         Everybody who uses this server signs in as themselves.
       </p>
-      {/* Said plainly rather than implied by three role names. Private folders
-          per person are the next piece of work, and until they exist a role
-          decides what somebody can change about the server — not which files
-          they can open. Promising otherwise here would be the screen lying
-          about the product. */}
+      {/* Said plainly rather than implied by three role names. A role decides
+          what somebody can change about the server; the sentence below is the
+          one thing it does not decide, and the one people assume it does. */}
       <p className="hint">
         Folders shared on this server are open to everyone with an account.
-        Private folders for each person are not built yet.
+        Each person also gets a folder of their own, which the others cannot
+        open.
       </p>
 
       {error && <Message tone="error" {...error} />}
