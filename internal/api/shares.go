@@ -19,7 +19,12 @@ import (
 // written — see internal/hostd/shares.go.
 
 func (s *Server) registerShareRoutes(mux *http.ServeMux) {
-	mux.Handle("GET /api/v1/shares", s.require(auth.PermNetworkDiag, s.handleShares))
+	// files.read, not network.diagnose.
+	//
+	// Seeing how to reach your own files is a files question. It was a network
+	// one because everybody was an administrator and held both; the first
+	// account that held neither could not open the only screen its role was for.
+	mux.Handle("GET /api/v1/shares", s.require(auth.PermFilesRead, s.handleShares))
 	mux.Handle("POST /api/v1/shares", s.require(auth.PermNetworkModify, s.handleAddShare))
 	mux.Handle("POST /api/v1/shares/remove", s.require(auth.PermNetworkModify, s.handleRemoveShare))
 	mux.Handle("POST /api/v1/shares/users", s.require(auth.PermNetworkModify, s.handleSetSharePassword))

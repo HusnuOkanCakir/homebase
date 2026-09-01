@@ -240,3 +240,39 @@ func TestTheShellRendersForAnAccountWithoutSystemRead(t *testing.T) {
 		}
 	}
 }
+
+// The Files screen is the only thing a Limited account is for, so the endpoint
+// that tells them how to reach their files must not need a network permission
+// they do not have.
+func TestSomebodyWithOnlyFilesCanSeeHowToReachThem(t *testing.T) {
+	h := newHarness(t)
+	token := h.signIn(t)
+
+	rec := h.do(http.MethodPost, "/api/v1/accounts",
+		`{"username":"brother","role":"limited"}`, auth1(token))
+	var created struct {
+		JoiningCode string `json:"joining_code"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &created)
+	h.do(http.MethodPost, "/api/v1/auth/recover",
+		`{"username":"brother","recovery_code":"`+created.JoiningCode+
+			`","new_password":"another-long-password"}`, nil)
+	login := h.do(http.MethodPost, "/api/v1/auth/login",
+		`{"username":"brother","password":"another-long-password"}`, nil)
+	var theirs string
+	for _, cookie := range login.Result().Cookies() {
+		if cookie.Name == SessionCookie {
+			theirs = cookie.Value
+		}
+	}
+
+	rec = h.do(http.MethodGet, "/api/v1/shares", "", auth1(theirs))
+	if rec.Code == http.StatusForbidden {
+		t.Fatal("a files-only account is refused the screen its role exists for")
+	}
+
+	// And it is still refused what it is not for.
+	if rec := h.do(http.MethodGet, "/api/v1/network", "", auth1(theirs)); rec.Code != http.StatusForbidden {
+		t.Fatalf("GET /network = %d, want 403", rec.Code)
+	}
+}

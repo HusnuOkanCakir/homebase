@@ -51,21 +51,34 @@ type Tab =
   | "settings"
   | "help";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "home", label: "Home" },
-  { id: "apps", label: "Apps" },
+/**
+ * Each tab, and the permission it needs to be worth showing.
+ *
+ * Not decoration: a tab an account cannot use is a tab that opens onto a
+ * permission error. Until there were second accounts, everybody was an
+ * administrator and every tab worked, so the list was flat. The first Limited
+ * account — somebody given a login purely to fetch a file — landed on Home,
+ * which read a field the server had not sent it, and took the whole shell down.
+ *
+ * The permission named here is the one the *screen's own first request* needs,
+ * not the one its buttons need. Screens already grey out what a person cannot
+ * change; this decides whether the screen is reachable at all.
+ */
+const TABS: { id: Tab; label: string; needs?: string }[] = [
+  { id: "home", label: "Home", needs: "system.read" },
+  { id: "apps", label: "Apps", needs: "apps.read" },
   // After the applications rather than before them: this is a thing the server
   // can do, not the thing it is for. Shown only on a machine that actually has
   // a model — see assistantReady below — so most installations still see seven.
-  { id: "assistant", label: "Assistant" },
-  { id: "files", label: "Files" },
-  { id: "storage", label: "Storage" },
-  { id: "network", label: "Network" },
-  { id: "settings", label: "Settings" },
+  { id: "assistant", label: "Assistant", needs: "assistant.use" },
+  { id: "files", label: "Files", needs: "files.read" },
+  { id: "storage", label: "Storage", needs: "storage.read" },
+  { id: "network", label: "Network", needs: "network.diagnose" },
+  { id: "settings", label: "Settings", needs: "system.read" },
   // Last, and named for what somebody is thinking rather than for what it does.
   // Nobody looks for "recovery"; they look for the tab that sounds like "this
   // is not working".
-  { id: "help", label: "Help" },
+  { id: "help", label: "Help", needs: "system.manage" },
 ];
 
 interface Props {
@@ -93,6 +106,25 @@ export function Dashboard({ user, onSignOut }: Props) {
   // permission, model down, key unreadable — which is right for a navigation
   // decision, and the reasons stay available on the screen itself.
   const [assistantReady, setAssistantReady] = useState(false);
+
+  // What this account can actually open.
+  //
+  // Declared after assistantReady rather than beside the other state, because
+  // the filter runs immediately and reading that value before its declaration
+  // is a crash the type checker does not catch.
+  const visible = TABS.filter(
+    (entry) =>
+      (entry.needs === undefined || user.permissions.includes(entry.needs)) &&
+      (entry.id !== "assistant" || assistantReady),
+  );
+
+  // Land somewhere that exists. "home" needs system.read, which an account
+  // given a login purely to fetch a file does not have, and a shell that opens
+  // on a tab it will not render is a blank screen.
+  const current = visible.some((entry) => entry.id === tab)
+    ? tab
+    : (visible[0]?.id ?? "home");
+
 
   useEffect(() => {
     if (!user.permissions.includes("assistant.use")) return;
@@ -155,11 +187,11 @@ export function Dashboard({ user, onSignOut }: Props) {
       </header>
 
       <nav className="tabs" aria-label="Sections">
-        {TABS.filter((entry) => entry.id !== "assistant" || assistantReady).map((entry) => (
+        {visible.map((entry) => (
           <button
             key={entry.id}
-            className={tab === entry.id ? "tab tab-current" : "tab"}
-            aria-current={tab === entry.id ? "page" : undefined}
+            className={current === entry.id ? "tab tab-current" : "tab"}
+            aria-current={current === entry.id ? "page" : undefined}
             onClick={() => {
               // Cleared here so that pressing "Apps" in the navigation shows
               // the list, rather than reopening whatever Home last sent us to.
@@ -182,7 +214,7 @@ export function Dashboard({ user, onSignOut }: Props) {
           />
         ) : null}
 
-        {tab === "home" ? (
+        {current === "home" ? (
           system ? (
             <>
               {/*
@@ -203,19 +235,19 @@ export function Dashboard({ user, onSignOut }: Props) {
           ) : (
             !error && <p className="muted">Reading your server…</p>
           )
-        ) : tab === "apps" ? (
+        ) : current === "apps" ? (
           <Applications
             canManage={user.permissions.includes("apps.manage")}
             initial={openApp}
           />
-        ) : tab === "assistant" ? (
+        ) : current === "assistant" ? (
           <Assistant />
-        ) : tab === "files" ? (
+        ) : current === "files" ? (
           <Shares
             canManage={user.permissions.includes("network.modify")}
             serverName={system?.hostname ?? ""}
           />
-        ) : tab === "storage" ? (
+        ) : current === "storage" ? (
           <>
             {/* Disks and backups on one screen, because a backup *is* a disk
                 decision: it needs a second one, and the first question either
@@ -223,9 +255,9 @@ export function Dashboard({ user, onSignOut }: Props) {
             <Storage canManage={user.permissions.includes("storage.modify")} />
             <Backup canManage={user.permissions.includes("backup.run")} />
           </>
-        ) : tab === "network" ? (
+        ) : current === "network" ? (
           <Network canManage={user.permissions.includes("network.modify")} />
-        ) : tab === "settings" ? (
+        ) : current === "settings" ? (
           system ? (
             <Settings
               user={user}

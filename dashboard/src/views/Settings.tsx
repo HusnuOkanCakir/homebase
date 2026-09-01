@@ -42,18 +42,20 @@ export function Settings({ user, system, onLeaving }: Props) {
           <dd>{system.hostname}</dd>
 
           <dt>Running for</dt>
-          <dd>{duration(system.uptime_seconds)}</dd>
+          <dd>{duration(system.uptime_seconds ?? 0)}</dd>
 
           <dt>Operating system</dt>
           <dd>{system.os}</dd>
 
           <dt>Processor</dt>
           <dd>
-            {system.cpu.model}
-            <span className="muted">
-              {" "}
-              — {system.cpu.cores} core{system.cpu.cores === 1 ? "" : "s"}
-            </span>
+            {system.cpu?.model ?? "—"}
+            {system.cpu && (
+              <span className="muted">
+                {" "}
+                — {system.cpu.cores} core{system.cpu.cores === 1 ? "" : "s"}
+              </span>
+            )}
           </dd>
 
           <dt>Memory</dt>

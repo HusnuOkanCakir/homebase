@@ -351,14 +351,27 @@ export interface ShareStatus {
   server_name: string;
 }
 
+/**
+ * What the server says about itself.
+ *
+ * Only `hostname` and `version` are always there. Everything else needs
+ * `system.read`, and an account without it — somebody given a login to fetch a
+ * file — gets the two fields and nothing more.
+ *
+ * Optional in the type because they are optional in fact. Declaring them
+ * mandatory is how `system.temperature.message` came to be read on an object
+ * that had no temperature, which took the whole dashboard down for exactly the
+ * accounts that could not have caused it.
+ */
 export interface SystemInfo {
   hostname: string;
-  os: string;
-  kernel: string;
-  architecture: string;
-  virtualised: boolean;
-  uptime_seconds: number;
-  cpu: { model: string; cores: number; threads: number };
+  version?: string;
+  os?: string;
+  kernel?: string;
+  architecture?: string;
+  virtualised?: boolean;
+  uptime_seconds?: number;
+  cpu?: { model: string; cores: number; threads: number };
   /**
    * The graphics hardware, and the name for it that will still be right after
    * a reboot.

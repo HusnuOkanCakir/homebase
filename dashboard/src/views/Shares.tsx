@@ -45,10 +45,18 @@ export function Shares({
 
   const refresh = useCallback(async () => {
     try {
-      const [shares, net] = await Promise.all([api.shares(), api.network()]);
+      const shares = await api.shares();
       setStatus(shares);
-      setNetwork(net);
       setError(null);
+      // The network is only needed to spell the address nicely, and reading it
+      // needs a permission somebody who only has files does not have. A failure
+      // here costs the .local name and nothing else — the address falls back to
+      // the server's IP, which is what happens on a network without mDNS too.
+      try {
+        setNetwork(await api.network());
+      } catch {
+        setNetwork(null);
+      }
     } catch (caught) {
       setError(describeError(caught));
     }
@@ -157,6 +165,15 @@ interface Names {
   unix: string;
   /** True when the mDNS name is answering, so `.local` can be relied on. */
   byName: boolean;
+  /**
+   * Whether we were able to look at all.
+   *
+   * Reading the network needs a permission somebody who only has files does not
+   * have. "We could not look" and "the name is not being published" are
+   * different facts, and printing the second when the first is true says
+   * something false underneath addresses that use the name.
+   */
+  known: boolean;
 }
 
 function names(
@@ -166,7 +183,7 @@ function names(
 ): Names {
   const plain = status.server_name || network?.hostname || fallback || "homebase";
   if (network?.mdns_works && network.mdns_name) {
-    return { windows: plain, unix: network.mdns_name, byName: true };
+    return { windows: plain, unix: network.mdns_name, byName: true, known: true };
   }
 
   // No mDNS: the `.local` name will not resolve, so the address is the only
@@ -176,7 +193,7 @@ function names(
     .filter((i) => i.kind !== "loopback" && i.kind !== "container" && i.up)
     .flatMap((i) => i.addresses ?? [])
     .find((a) => !a.includes(":"));
-  return { windows: plain, unix: address ?? plain, byName: false };
+  return { windows: plain, unix: address ?? plain, byName: false, known: network !== null };
 }
 
 function Nothing() {
@@ -270,7 +287,11 @@ function Reaching({
         ) : null}
       </dl>
 
-      {!host.byName ? (
+      {/* Only when we actually know. An account without network.diagnose cannot
+          read the network status, and saying "this server is not publishing its
+          name" because we could not look is a different claim from the one it
+          reads as — especially printed underneath addresses that use the name. */}
+      {host.known && !host.byName ? (
         <p className="hint">
           This server is not publishing its name on the network, so the addresses
           above use its number instead — which changes from time to time. If they
