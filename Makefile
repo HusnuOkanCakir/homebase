@@ -40,7 +40,7 @@ $(STAMP): requirements-dev.txt
 # --- The full check ----------------------------------------------------------
 
 .PHONY: check
-check: hygiene lint validate docs-build go-lint go-check test-repo test-seed hostd-check-operations ## Run every check CI runs
+check: hygiene lint validate docs-build go-lint go-check dash-lint test-repo test-seed hostd-check-operations ## Run every check CI runs
 	@echo
 	@echo "All checks passed."
 

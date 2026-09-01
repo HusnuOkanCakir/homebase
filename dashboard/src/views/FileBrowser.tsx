@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   api,
   type FileArea,
@@ -45,22 +45,34 @@ export function FileBrowser() {
       .catch((cause) => setError(describeError(cause)));
   }, []);
 
-  const load = useCallback(
-    async (which: FileArea, where: string) => {
-      try {
-        setListing(await api.files(which.id, where));
-        setError(null);
-      } catch (cause) {
-        setError(describeError(cause));
-      }
-    },
-    [],
-  );
+  // Bumped by anything that changes files, to ask for the folder again. A
+  // number rather than a function call, so that reading a folder happens in one
+  // place: the effect below, which knows how to abandon a read that has been
+  // overtaken.
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!area) return;
-    void load(area, path);
-  }, [area, path, load]);
+
+    // Abandoned if the person has moved on. Clicking through three folders
+    // quickly starts three reads, and without this the slowest one wins and the
+    // screen shows a folder nobody is looking at.
+    let current = true;
+    void (async () => {
+      try {
+        const result = await api.files(area.id, path);
+        if (current) {
+          setListing(result);
+          setError(null);
+        }
+      } catch (cause) {
+        if (current) setError(describeError(cause));
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [area, path, reload]);
 
   /** Runs something that changes files, then shows the folder as it now is. */
   const run = async (action: () => Promise<unknown>) => {
@@ -69,7 +81,7 @@ export function FileBrowser() {
     setError(null);
     try {
       await action();
-      await load(area, path);
+      setReload((n) => n + 1);
     } catch (cause) {
       setError(describeError(cause));
     } finally {

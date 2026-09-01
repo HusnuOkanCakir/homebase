@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 /**
  * The files, in a browser.
@@ -56,6 +56,18 @@ test("finding a file and taking it", async ({ page }) => {
   await expect(page.locator(".file-crumbs").getByRole("button")).toContainText("Your folder");
   await expect(page.getByText(/This folder is yours/i)).toBeVisible();
 
+  // Made through the screen rather than placed on the disk beforehand.
+  //
+  // A test that depends on fixtures somebody put there by hand is a test that
+  // passes on one machine, and this one did exactly that until the files were
+  // cleaned up. Creating them here covers uploading as well, which is the half
+  // of this screen an API test cannot reach: the browser writes the multipart
+  // boundary, and getting that wrong is invisible until a real one sends a
+  // real file.
+  await makeFolder(page, "Holiday photographs");
+  await upload(page, "tax-return-2026.pdf", "the tax return");
+  await upload(page, "Örnek Belge.txt", "belge");
+
   // A folder is somewhere to go; a file is something to take. The difference
   // has to be visible without clicking either.
   const folder = page.getByRole("button", { name: /Holiday photographs/ });
@@ -68,12 +80,14 @@ test("finding a file and taking it", async ({ page }) => {
   await expect(file).toHaveAttribute("href", /files\/content\?area=me/);
 
   // Sizes are read, not counted.
-  await expect(page.getByText(/400 kB|400.0 kB/)).toBeVisible();
+  await expect(page.getByText(/14 bytes/)).toBeVisible();
 
   // Into the folder, and back out again by the crumb rather than by the
   // browser's back button — which on a single-page dashboard leaves the screen
   // somewhere nobody asked for.
   await folder.click();
+  await expect(page.getByText(/This folder is empty/i)).toBeVisible();
+  await upload(page, "beach.jpg", "not really a photograph");
   await expect(page.getByRole("link", { name: "beach.jpg" })).toBeVisible();
   await page.locator(".file-crumbs").getByRole("button").first().click();
   await expect(file).toBeVisible();
@@ -103,8 +117,9 @@ test("deleting a folder asks for its name", async ({ page }) => {
   // is how a test quietly stops covering anything.
   const folder = page.getByRole("button", { name: /Holiday photographs/ });
   if (!(await folder.isVisible({ timeout: 10_000 }).catch(() => false))) {
-    test.skip(true, "nothing to delete on this server");
+    await makeFolder(page, "Holiday photographs");
   }
+  await expect(folder).toBeVisible();
 
   // The row's own Delete, not the first one on the screen.
   await page
@@ -125,3 +140,21 @@ test("deleting a folder asks for its name", async ({ page }) => {
   await page.getByRole("button", { name: "Keep it" }).click();
   await expect(folder).toBeVisible();
 });
+
+/** Makes a folder through the screen, the way a person does. */
+async function makeFolder(page: Page, name: string) {
+  await page.getByRole("button", { name: "New folder" }).click();
+  await page.getByPlaceholder("Holiday photographs").fill(name);
+  await page.getByRole("button", { name: "Make it" }).click();
+  await expect(page.getByRole("button", { name: new RegExp(name) })).toBeVisible();
+}
+
+/** Uploads a file through the screen's own file chooser. */
+async function upload(page: Page, name: string, contents: string) {
+  await page.locator('input[type="file"]').setInputFiles({
+    name,
+    mimeType: "text/plain",
+    buffer: Buffer.from(contents),
+  });
+  await expect(page.getByRole("link", { name })).toBeVisible();
+}
