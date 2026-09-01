@@ -27,10 +27,11 @@ func TestTheShareConfigurationRefusesTheDangerousDefaults(t *testing.T) {
 	required := map[string]string{
 		"security = user":               "a share anybody on the network can open",
 		"map to guest = never":          "guest access, which is a folder with no password",
-		"server min protocol = SMB2_10": "SMB1, the protocol with the wormable bugs",
-		"client min protocol = SMB2_10": "SMB1 when talking outward",
+		"server min protocol = SMB3_00": "SMB1 and SMB2.1, which cannot encrypt",
+		"client min protocol = SMB3_00": "an unencryptable protocol when talking outward",
+		"server smb encrypt = desired":  "readable by anybody watching the network",
 		"hosts deny = 0.0.0.0/0":        "reachable from anywhere",
-		"valid users = @homebase":       "anybody who can authenticate at all",
+		"valid users = @homebase-files": "anybody who can authenticate at all",
 	}
 	for line, otherwise := range required {
 		if !strings.Contains(config, line) {
@@ -269,7 +270,7 @@ func TestAShareWithNoAccessListIsOpenToEverybody(t *testing.T) {
 		Share: Share{Name: "backup", Location: "internal"},
 		Path:  "/srv/homebase/storage/internal/shares/backup",
 	}}, "")
-	if !strings.Contains(config, "valid users = @homebase") {
+	if !strings.Contains(config, "valid users = @homebase-files") {
 		t.Fatal("a share with no access list is not open to everybody, so an " +
 			"upgrade would take away folders that worked yesterday")
 	}
@@ -287,7 +288,7 @@ func TestARestrictedShareNamesTheFileSharingAccounts(t *testing.T) {
 	if !strings.Contains(config, "valid users = hbshare-alice hbshare-bob") {
 		t.Fatalf("the access list is not written as file-sharing accounts:\n%s", config)
 	}
-	if strings.Contains(config, "valid users = @homebase") {
+	if strings.Contains(config, "valid users = @homebase-files") {
 		t.Fatal("the restricted folder is also open to everybody")
 	}
 }
@@ -344,5 +345,47 @@ func TestTheApplicationsAreKeptOffTheTunnel(t *testing.T) {
 	// Removed before it is added, because this runs at every start.
 	if !strings.Contains(body, "while \"$command\" -D DOCKER-USER") {
 		t.Fatal("repeated runs would stack identical rules")
+	}
+}
+
+// The group Samba names must not be the group that owns the hostd socket.
+//
+// It was. Every file-sharing account was made a member of `homebase`, whose
+// membership decides who may ask hostd for a privileged operation — and a
+// household member now gets one of those accounts automatically at their first
+// sign-in, so that was a group of ordinary people. hostd checks the peer's user
+// id and refuses everything but core, which is why nothing was reachable; the
+// point of a second layer is that it holds when the first is wrong.
+func TestTheFileSharingGroupIsNotTheGroupThatOwnsTheSocket(t *testing.T) {
+	if shareGroup == serviceAccount {
+		t.Fatal("file-sharing accounts are in the group that owns the hostd socket")
+	}
+
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "backup", Location: "internal"},
+		Path:  "/srv/homebase/storage/internal/shares/backup",
+	}}, "/srv/homebase/storage/internal/people")
+
+	if strings.Contains(config, "valid users = @"+serviceAccount+"\n") {
+		t.Fatal("a share is opened by membership of the socket-owning group")
+	}
+	// `force group` is a different question — who may *read* the file
+	// afterwards, which is the backup and the applications — and stays.
+	if !strings.Contains(config, "force group = "+serviceAccount) {
+		t.Fatal("files written from a laptop would stop being readable by the " +
+			"backup and by the applications")
+	}
+
+	helper, err := os.ReadFile("../../packaging/share-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(helper), "FILES_GROUP=homebase-files") {
+		t.Fatal("the account helper still puts these accounts somewhere else")
+	}
+	// Set every time rather than only at creation, which is what moves an
+	// account made by an earlier version out of the socket-owning group.
+	if !strings.Contains(string(helper), `usermod --groups "$FILES_GROUP"`) {
+		t.Fatal("an account made by an earlier version never leaves the old group")
 	}
 }

@@ -134,7 +134,7 @@ graph LR
     B -->|No| R[Reject]
     B -->|Yes| C{Schema<br/>valid?}
     C -->|No| R
-    C -->|Yes| D{Caller<br/>permitted?}
+    C -->|Yes| D{Operation<br/>in registry?}
     D -->|No| R
     D -->|Yes| E{Risk needs<br/>confirmation?}
     E -->|Yes, absent| R
@@ -142,12 +142,37 @@ graph LR
     R --> G[Audit the rejection]
 ```
 
-`hostd` re-checks permissions even though `core` already did. Not redundancy for its own
-sake: `core` is the component most likely to be compromised, because it is the one talking to
-the network.
+**`hostd` does not check the signed-in person's permissions, and this document used to say
+it did.** That was wrong, and it is the kind of wrong that matters: somebody reading it would
+conclude there are two independent checks on who may reboot the machine, and there is one.
 
-Rejections are audited too. An attempt to invoke something not permitted is exactly what you
-want a record of.
+What `hostd` actually verifies, and it is not nothing:
+
+- **Who is connecting** — the peer's user id on the socket, which the kernel supplies and
+  nothing on the far side can claim. Anything but `core` is refused before the request is
+  read.
+- **That the operation exists** — resolved against a registry compiled into the binary.
+  There is no generic execution to reach, so a compromised `core` gets the operations that
+  were built, not the ones it can compose.
+- **That the request has the right shape**, against that operation's own schema.
+- **That a dangerous operation carries its confirmation.**
+- **And it audits the attempt before running anything**, including the rejections. An attempt
+  to invoke something that was refused is exactly what you want a record of.
+
+The permission a `hostd` operation declares is metadata: it is what `core` reads to decide
+whether the person asking may ask, and it is published in the operation catalogue. It is not
+a second gate inside `hostd`.
+
+So a compromised `core` can invoke any privileged operation that was compiled in. The typed
+surface is what limits the damage, and it is a real limit — it is the difference between
+"reboot the machine, format a disk" and "run this shell command as root" — but it is not
+independent authorisation of the user.
+
+**The fix is not to let `core` send the permissions it believes the caller has.** A
+compromised `core` would send whatever it liked, and the check would be theatre with a cost.
+Making this real needs a credential `hostd` can verify without trusting the sender — a
+short-lived capability issued by something that is not `core` — and that is a design, not a
+patch. Until it exists, authorisation lives in `core` and this document says so.
 
 ### What the audit log does not record
 

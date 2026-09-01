@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -335,5 +337,54 @@ func TestUnrestrictedAssistantIsNotAnAdministratorDefault(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("assistant.use is missing from AdministratorPermissions")
+	}
+}
+
+// Two people at the setup screen on an unclaimed server.
+//
+// The check and the insert used to be separate, with a comment saying the
+// username's unique constraint caught the race — which is only true when both
+// pick the same name. Different names and both succeeded: a stranger with an
+// administrator account on somebody's new server, and nothing anywhere saying a
+// second one was made.
+func TestOnlyOneAdministratorCanClaimAServer(t *testing.T) {
+	service := testService(t)
+
+	const attempts = 8
+	var (
+		wait      sync.WaitGroup
+		mu        sync.Mutex
+		succeeded []string
+	)
+	start := make(chan struct{})
+
+	for i := range attempts {
+		wait.Add(1)
+		go func(i int) {
+			defer wait.Done()
+			<-start
+			user, err := service.CreateAdministrator(context.Background(),
+				fmt.Sprintf("claimant%d", i), "a-sufficiently-long-password")
+			if err == nil {
+				mu.Lock()
+				succeeded = append(succeeded, user.Username)
+				mu.Unlock()
+			}
+		}(i)
+	}
+	close(start)
+	wait.Wait()
+
+	if len(succeeded) != 1 {
+		t.Fatalf("%d of %d claimed the server: %v", len(succeeded), attempts, succeeded)
+	}
+
+	// And the one that succeeded is the one that is there.
+	users, err := service.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 || users[0].Username != succeeded[0] {
+		t.Fatalf("the server has %d accounts: %v", len(users), users)
 	}
 }

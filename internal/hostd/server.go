@@ -173,9 +173,19 @@ func (s *Server) checkPeer(ctx context.Context) *Error {
 
 // handleOperation is the whole privileged surface.
 //
-// Order matters and is deliberate: identify the caller, resolve the operation
-// against the compiled-in registry, check permission, check confirmation, audit
-// the attempt, and only then run anything.
+// Order matters and is deliberate: identify the caller by the peer's user id,
+// resolve the operation against the compiled-in registry, check the request's
+// shape, check confirmation, audit the attempt, and only then run anything.
+//
+// Note what is *not* in that list. The signed-in person's permissions are not
+// checked here and cannot be: hostd is never told who they are, and a core that
+// claimed to know would be a core that could claim anything. The permission a
+// an operation declares is metadata for core to enforce and for the catalogue to
+// publish. This comment used to say "check permission", and so did
+// docs/security/privilege-boundaries.md — a description of two independent
+// gates where there is one. What hostd guarantees is that only core can ask,
+// that only compiled-in operations exist to be asked for, and that every
+// attempt is recorded.
 func (s *Server) handleOperation(w http.ResponseWriter, r *http.Request) {
 	reqID := requestID()
 

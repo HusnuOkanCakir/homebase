@@ -64,6 +64,23 @@ const (
 	// the machine. A file-sharing password is typed into a Windows dialog and
 	// saved there for ever; it must not also be a way to log in.
 	shareUserPrefix = "hbshare-"
+
+	// shareGroup is the Unix group Samba names in `valid users`, and it is not
+	// the group that owns the hostd socket.
+	//
+	// It used to be. Every file-sharing account was made a member of
+	// `homebase`, whose membership is what decides who may ask hostd for a
+	// privileged operation — and since a household member now gets one of those
+	// accounts automatically at their first sign-in, that was a group of
+	// ordinary people. hostd checks the peer's user id and refuses everything
+	// but core, so nothing was reachable through it. The point of a second
+	// layer is that it holds when the first is wrong, and this one had been
+	// spent to make one line of smb.conf match.
+	//
+	// `force group` stays as the service account: that is about who can *read*
+	// a file afterwards — the backup, and the applications — and is a different
+	// question from who may open the share.
+	shareGroup = "homebase-files"
 )
 
 var validShareName = regexp.MustCompile(shareNamePattern)
@@ -326,15 +343,33 @@ func renderSambaConfig(server string, shares []ShareState, peopleDir string) str
 	out.WriteString("   security = user\n")
 	out.WriteString("   username map = " + sambaUserMap + "\n")
 	out.WriteString("   map to guest = never\n")
-	// SMB1 is the protocol with the wormable bugs, off by default since Windows
-	// 10 and disabled here so that nothing turns it back on to make an old
-	// device work. A device that needs SMB1 needs replacing.
-	out.WriteString("   server min protocol = SMB2_10\n")
-	out.WriteString("   client min protocol = SMB2_10\n")
-	// Signing available but not required: required signing costs about a third
-	// of the throughput on the kind of CPU that is in a laptop from 2013, and
-	// this is a local network where the alternative to Homebase is a USB stick
-	// carried between rooms.
+	// SMB3, not SMB2.
+	//
+	// SMB1 was already refused — it is the protocol with the wormable bugs. The
+	// floor moved up again because SMB2.1 cannot encrypt at all, and everything
+	// this house owns has spoken SMB3 since Windows 8: Windows, macOS, Linux,
+	// Android and iOS. Keeping 2.1 available bought compatibility with devices
+	// nobody here has, at the price of a negotiation that can land on a
+	// protocol with no encryption in it.
+	out.WriteString("   server min protocol = SMB3_00\n")
+	out.WriteString("   client min protocol = SMB3_00\n")
+	// Encrypted where the client can, which in practice is everywhere.
+	//
+	// `desired` rather than `required`, and the difference is worth being
+	// deliberate about: `required` refuses a client that cannot, and the first
+	// thing that would refuse is a television or a games console reading a film
+	// from a shared folder. `desired` encrypts every session that can negotiate
+	// it and lets the rest through in the clear — which is strictly better than
+	// what was here, and does not turn a security improvement into an evening
+	// of somebody wondering why the living room stopped working.
+	//
+	// The cost used to be the argument against this. It is not any more: this
+	// machine's CPU has AES-NI, so SMB3's AES-GCM is close to free, and the
+	// laptop-from-2013 reasoning that kept signing optional was about
+	// pre-AES-NI hardware.
+	out.WriteString("   server smb encrypt = desired\n")
+	// Signing is implied by encryption on a session that has it, and this
+	// covers the sessions that do not.
 	out.WriteString("   server signing = auto\n")
 	// Which cards the file server answers on, and it is the firewall that
 	// decides — not this file.
@@ -387,7 +422,7 @@ func renderSambaConfig(server string, shares []ShareState, peopleDir string) str
 			}
 			out.WriteString("   valid users = " + strings.Join(accounts, " ") + "\n")
 		} else {
-			out.WriteString("   valid users = @" + serviceAccount + "\n")
+			out.WriteString("   valid users = @" + shareGroup + "\n")
 		}
 		// Everything lands owned by the service account's group, so that files
 		// written from a Windows laptop are readable by an application on the
@@ -433,7 +468,7 @@ func renderPeopleShare(peopleDir string) string {
 	out.WriteString("   path = " + peopleDir + "/%U\n")
 	out.WriteString("   browseable = yes\n")
 	out.WriteString("   read only = no\n")
-	out.WriteString("   valid users = @" + serviceAccount + "\n")
+	out.WriteString("   valid users = @" + shareGroup + "\n")
 	out.WriteString("   force user = " + serviceAccount + "\n")
 	out.WriteString("   force group = " + serviceAccount + "\n")
 	// Tighter than the shared folders on purpose. Everything under here belongs
@@ -1021,6 +1056,21 @@ func (s *ShareServices) Reapply(ctx context.Context, log *slog.Logger) {
 		log.Warn("could not refresh the file server's configuration", "error", err)
 		return
 	}
+	// And the accounts, whose group membership changed under them.
+	//
+	// Every file-sharing account made by an earlier version is in the group
+	// that owns the hostd socket. Nothing reads a list of accounts to fix that:
+	// the helper sets the group list every time it is asked for an account, so
+	// asking for each one that already exists is the whole upgrade. It is also
+	// what repairs an account somebody has edited by hand, which is the more
+	// likely reason for this to matter a year from now.
+	for _, username := range s.shareUsers() {
+		if err := makeShareAccount(ctx, "add", username); err != nil {
+			log.Warn("could not settle a file-sharing account",
+				"username", username, "error", err)
+		}
+	}
+
 	log.Info("file sharing refreshed", "shares", len(shares),
 		"interfaces", strings.Join(localInterfaces(), " "))
 }

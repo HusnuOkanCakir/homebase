@@ -21,7 +21,17 @@
 set -eu
 
 REQUEST=/etc/homebase/share-account
-SERVICE_GROUP=homebase
+
+# The group Samba names in `valid users`, and deliberately not the one that owns
+# the hostd socket.
+#
+# These two were the same group, which put every household member's
+# file-sharing account in the group whose membership decides who may ask for a
+# privileged operation. hostd checks the peer's user id and refuses anyone but
+# core, so nothing was reachable — but the point of a second layer is that it
+# holds when the first one is wrong, and this one had been removed to make
+# `valid users = @homebase` match. It matches a group of its own now.
+FILES_GROUP=homebase-files
 
 [ -r "$REQUEST" ] || { echo "share-account: no request" >&2; exit 1; }
 
@@ -42,10 +52,20 @@ fi
 
 case "$action" in
 add)
+    getent group "$FILES_GROUP" >/dev/null || addgroup --system --quiet "$FILES_GROUP"
+
     if ! getent passwd "$account" >/dev/null; then
         useradd --no-create-home --shell /usr/sbin/nologin \
-                --groups "$SERVICE_GROUP" "$account"
+                --groups "$FILES_GROUP" "$account"
     fi
+    # Set rather than added to, and every time rather than only at creation.
+    #
+    # --groups replaces the supplementary list, which is what moves an account
+    # created by an earlier version out of the socket-owning group. There is no
+    # separate upgrade step for that: this runs whenever a password is set and
+    # whenever the file server is reconfigured, so the machine converges on the
+    # right answer without anything having to remember to run once.
+    usermod --groups "$FILES_GROUP" "$account"
     # No Unix password at all, so this account cannot be logged in with — by
     # ssh, by su, or at the console. Its only use is opening a shared folder.
     passwd --lock "$account" >/dev/null
