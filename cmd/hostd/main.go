@@ -89,7 +89,8 @@ func main() {
 
 	// Sharing folders onto the local network. Registered after storage because
 	// a share is a folder on a disk storage already knows about.
-	hostd.RegisterShareOperations(registry, hostd.NewShareServices(storage, *stateDir))
+	shares := hostd.NewShareServices(storage, *stateDir)
+	hostd.RegisterShareOperations(registry, shares)
 
 	hostd.RegisterBackupOperations(registry, hostd.NewBackupServices(
 		storage, appServices, *databasePath, *configDir, *stateDir, buildVersion()))
@@ -114,6 +115,17 @@ func main() {
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// smb.conf is otherwise written only when somebody adds or removes a share,
+	// so everything it derives from the machine — the interfaces smbd binds
+	// above all — is a snapshot of the day that last happened. On this project's
+	// own server that meant the Tailscale tunnel, installed long afterwards, was
+	// not among them: the dashboard was reachable from away and not one shared
+	// folder was. See internal/hostd/shares.go.
+	//
+	// Before the socket opens, so the file server is right by the time anything
+	// can ask about it.
+	shares.Reapply(context.Background(), log)
 
 	if err := run(log, registry, apps, storage, *socketPath, *auditPath, *peerUser); err != nil {
 		log.Error("hostd failed", "error", err)

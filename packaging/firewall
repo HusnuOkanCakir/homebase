@@ -21,6 +21,29 @@ set -eu
 REQUEST=/etc/homebase/firewall
 LOCAL_NETWORKS="192.168.0.0/16 10.0.0.0/8 172.16.0.0/12"
 
+# The tunnel Tailscale creates.
+#
+# Named rather than described by address range, and that is the security
+# decision in this line. Tailscale addresses live in 100.64.0.0/10, which is
+# also the range carriers use for the address they give a subscriber's router —
+# this very machine has one. Allowing that range as a *source* would, on an
+# internet connection that puts subscribers on a shared segment, admit the
+# neighbours. Allowing the interface admits only what came out of the tunnel,
+# which is authenticated and encrypted before it arrives.
+#
+# The name is fixed by tailscaled rather than assigned in probe order, so unlike
+# a network card it is safe to write down. That distinction has cost this
+# project three separate outages.
+TAILNET_INTERFACE=tailscale0
+
+# Ports below 1024 that Homebase is nonetheless responsible for.
+#
+# The rule below exists because the system's own ports are not Homebase's to
+# hand out. File sharing is the exception: 445 is fixed by the protocol, nothing
+# else on the machine wants it, and the alternative was the installer opening it
+# blind at install time whether or not anybody ever shares a folder.
+PRIVILEGED_PORTS="445"
+
 [ -r "$REQUEST" ] || { echo "firewall: no request" >&2; exit 1; }
 
 action=$(sed -n 's/^action=//p'  "$REQUEST" | head -1)
@@ -31,7 +54,12 @@ label=$(sed -n  's/^comment=//p' "$REQUEST" | head -1)
 
 # Ports below 1024 are the system's own and are not Homebase's to hand out; the
 # four it needs are opened by the installer, where they are visible in one file.
-if ! printf '%s' "$port" | grep -qE '^[0-9]{2,5}$' || [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then
+privileged_ok=no
+for allowed in $PRIVILEGED_PORTS; do
+    [ "$port" = "$allowed" ] && privileged_ok=yes
+done
+if ! printf '%s' "$port" | grep -qE '^[0-9]{2,5}$' || [ "$port" -gt 65535 ] ||
+   { [ "$port" -lt 1024 ] && [ "$privileged_ok" = no ]; }; then
     echo "firewall: refusing the port '$port'" >&2
     exit 1
 fi
@@ -46,14 +74,34 @@ printf '%s' "$label" | grep -qE '^[A-Za-z][A-Za-z0-9 -]{0,40}$' || label="Homeba
 #   local  the house only, for things that have no business off it
 #   any    the whole internet, for the one service whose purpose is being
 #          reachable from outside it
+#   tailnet  whatever arrives through the Tailscale tunnel, and nothing else
 case "$scope" in
-    local) sources="$LOCAL_NETWORKS" ;;
-    any)   sources="any" ;;
-    *)     echo "firewall: refusing the scope '$scope'" >&2; exit 1 ;;
+    local)   sources="$LOCAL_NETWORKS" ;;
+    any)     sources="any" ;;
+    tailnet) sources="" ;;
+    *)       echo "firewall: refusing the scope '$scope'" >&2; exit 1 ;;
 esac
 
 if ! command -v ufw >/dev/null 2>&1; then
     echo "firewall: no ufw on this machine, nothing to do" >&2
+    exit 0
+fi
+
+# The tunnel is one rule about an interface rather than one per source range.
+# Written before the loop because there is nothing to iterate over.
+if [ "$scope" = tailnet ]; then
+    if ! ip link show "$TAILNET_INTERFACE" >/dev/null 2>&1; then
+        echo "firewall: no $TAILNET_INTERFACE on this machine, nothing to do" >&2
+        exit 0
+    fi
+    rule="allow in on $TAILNET_INTERFACE to any port $port proto $proto"
+    case "$action" in
+    # shellcheck disable=SC2086
+    open)  ufw $rule comment "$label" >/dev/null ;;
+    # shellcheck disable=SC2086
+    close) ufw delete $rule >/dev/null 2>&1 || true ;;
+    *)     echo "firewall: refusing the action '$action'" >&2; exit 1 ;;
+    esac
     exit 0
 fi
 

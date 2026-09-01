@@ -3,11 +3,13 @@ package hostd
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -304,7 +306,11 @@ func renderSambaConfig(server string, shares []ShareState) string {
 	// of the most attacked services there is.
 	out.WriteString("   bind interfaces only = yes\n")
 	out.WriteString("   interfaces = lo " + strings.Join(localInterfaces(), " ") + "\n")
-	out.WriteString("   hosts allow = 127.0.0.1 " + strings.Join(privateNetworks, " ") + "\n")
+	allowed := append([]string{"127.0.0.1"}, privateNetworks...)
+	if tailnetPresent() {
+		allowed = append(allowed, tailnetNetwork)
+	}
+	out.WriteString("   hosts allow = " + strings.Join(allowed, " ") + "\n")
 	out.WriteString("   hosts deny = 0.0.0.0/0\n")
 	out.WriteString("   log level = 1\n")
 	out.WriteString("   disable netbios = yes\n")
@@ -337,6 +343,29 @@ func renderSambaConfig(server string, shares []ShareState) string {
 // to those and to nothing else.
 var privateNetworks = []string{"192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"}
 
+// tailnetInterface is the tunnel Tailscale creates, if this machine has one.
+//
+// A fixed name chosen by tailscaled rather than one assigned in probe order, so
+// unlike a network card it is safe to write down — a distinction that has cost
+// this project three outages.
+const tailnetInterface = "tailscale0"
+
+// tailnetNetwork is the range Tailscale gives its own machines.
+//
+// Admitted in `hosts allow` *and* paired with an interface-scoped firewall rule,
+// never on its own. This range is also what carriers hand a subscriber's router
+// — this very machine has such an address — so treating it as trusted by source
+// would, on a connection that puts subscribers on a shared segment, admit the
+// neighbours. The interface is what makes it safe; the range is what stops
+// Samba refusing traffic that already arrived through it.
+const tailnetNetwork = "100.64.0.0/10"
+
+// tailnetPresent reports whether the tunnel exists on this machine.
+func tailnetPresent() bool {
+	_, err := os.Stat(filepath.Join(sysClassNet, tailnetInterface))
+	return err == nil
+}
+
 // localInterfaces names the cards Samba should listen on: the real ones, never
 // the Docker bridges. A container that can reach the file server is a container
 // that can read everything on it.
@@ -346,6 +375,20 @@ func localInterfaces() []string {
 		if iface.Kind == "ethernet" || iface.Kind == "wireless" {
 			names = append(names, iface.Name)
 		}
+	}
+	// And the Tailscale tunnel, when there is one.
+	//
+	// Without this, a household member away from home can reach the dashboard
+	// and cannot open a single folder: smbd binds the cards it was told about,
+	// and the tunnel arrived after this configuration was last written. It was
+	// reported as remote file access working, and the connection was refused.
+	//
+	// Appended only if the loop above did not already find it. It reports the
+	// tunnel as "ethernet" on a machine where Tailscale is up — anything that is
+	// not loopback, wireless or a container bridge is — and listing an interface
+	// twice makes smbd refuse the whole configuration.
+	if tailnetPresent() && !slices.Contains(names, tailnetInterface) {
+		names = append(names, tailnetInterface)
 	}
 	return names
 }
@@ -494,6 +537,7 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 		// is surface somebody has forgotten about.
 		disableUnit(ctx, "smbd.service")
 		closePort(ctx, 445, "tcp", "local", "Homebase file sharing")
+		closePort(ctx, 445, "tcp", "tailnet", "Homebase file sharing")
 		return nil
 	}
 
@@ -503,6 +547,11 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 	// After the server is configured and before it is started, so there is never
 	// a moment when the port is open onto a stale configuration.
 	openPort(ctx, 445, "tcp", "local", "Homebase file sharing")
+	// And through the tunnel, where somebody away from home actually is.
+	//
+	// A separate rule scoped to the interface rather than a wider source range:
+	// see tailnetNetwork. The helper does nothing when there is no tunnel.
+	openPort(ctx, 445, "tcp", "tailnet", "Homebase file sharing")
 
 	if err := runSystemctl(ctx, "restart", "smbd.service"); err != nil {
 		return &Error{
@@ -718,4 +767,39 @@ func findShare(shares []Share, name string) (Share, int, bool) {
 		}
 	}
 	return Share{}, 0, false
+}
+
+// Reapply rewrites smb.conf from the shares this machine already has.
+//
+// Called once at startup, because the configuration is otherwise only written
+// when somebody adds or removes a share — so everything it derives from the
+// machine is a snapshot of the day that last happened.
+//
+// That is not a theoretical staleness. The interface list is one of those
+// derived things, and on this project's own server the Tailscale tunnel was
+// installed months after the last share was created: smbd went on binding the
+// cards it had been told about, the tunnel was not among them, and somebody
+// away from home could open the dashboard and not a single folder. Nothing
+// reported a fault, because nothing was faulty — the file was simply older than
+// the machine.
+//
+// Does nothing when no share exists, so a machine that has never shared a folder
+// does not acquire an smb.conf by starting up.
+func (s *ShareServices) Reapply(ctx context.Context, log *slog.Logger) {
+	shares, err := s.load()
+	if err != nil {
+		log.Warn("could not read the shared folders", "error", err)
+		return
+	}
+	if len(shares) == 0 {
+		return
+	}
+	if err := s.apply(ctx, shares); err != nil {
+		// Logged, never fatal. hostd refusing to start because Samba is
+		// unhappy would take away the tool somebody needs to fix Samba.
+		log.Warn("could not refresh the file server's configuration", "error", err)
+		return
+	}
+	log.Info("file sharing refreshed", "shares", len(shares),
+		"interfaces", strings.Join(localInterfaces(), " "))
 }

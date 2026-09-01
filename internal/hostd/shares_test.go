@@ -1,6 +1,7 @@
 package hostd
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -154,5 +155,64 @@ func TestACorruptShareFileIsRefusedRatherThanReset(t *testing.T) {
 	}
 	if _, err := s.load(); err == nil {
 		t.Fatal("a corrupt share file was accepted, which would silently unshare everything")
+	}
+}
+
+// Somebody away from home could open the dashboard and not one shared folder.
+// smbd binds the interfaces it is told about, and the tunnel was not among them.
+func TestTheConfigurationAdmitsTheTailscaleTunnel(t *testing.T) {
+	// The real render, with the tunnel present and absent, is decided by
+	// tailnetPresent() reading /sys/class/net — so this asserts the two shapes
+	// the renderer produces rather than reaching into the machine.
+	withTunnel := "   hosts allow = 127.0.0.1 " + strings.Join(privateNetworks, " ") +
+		" " + tailnetNetwork
+	if !strings.Contains(withTunnel, "100.64.0.0/10") {
+		t.Fatal("the tailnet range is not what the renderer would add")
+	}
+
+	// The range alone must never be the control. It is also what a carrier
+	// hands a subscriber's router — this project's own server has such an
+	// address — so the firewall rule that accompanies it is scoped to the
+	// interface, and that is asserted where it is written.
+	firewall, err := os.ReadFile("../../packaging/firewall")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(firewall), "allow in on $TAILNET_INTERFACE") {
+		t.Fatal("the tailnet firewall rule is not scoped to the interface; " +
+			"a source range would admit the carrier's other subscribers")
+	}
+	if !strings.Contains(string(firewall), "PRIVILEGED_PORTS=\"445\"") {
+		t.Fatal("445 is not in the privileged allowlist, so opening it is refused " +
+			"and the failure is discarded")
+	}
+}
+
+// The port the file server needs is below 1024, which the helper refuses by
+// default. It was refused, silently, and the screen said sharing was on.
+func TestTheFirewallHelperAcceptsTheFileSharingPort(t *testing.T) {
+	script, err := os.ReadFile("../../packaging/firewall")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(script)
+	// Still refuses the rest of the system's ports.
+	if !strings.Contains(body, `[ "$port" -lt 1024 ] && [ "$privileged_ok" = no ]`) {
+		t.Fatal("the allowlist replaced the restriction instead of narrowing it")
+	}
+}
+
+// The tunnel is reported as an ordinary interface on a machine where it is up,
+// so appending it unconditionally listed it twice — and smbd refuses a
+// configuration that names an interface twice.
+func TestTheTunnelIsNotListedTwice(t *testing.T) {
+	seen := map[string]int{}
+	for _, name := range localInterfaces() {
+		seen[name]++
+	}
+	for name, count := range seen {
+		if count > 1 {
+			t.Fatalf("%s appears %d times in the interface list", name, count)
+		}
 	}
 }
