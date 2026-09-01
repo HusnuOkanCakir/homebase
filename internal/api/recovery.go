@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/HusnuOkanCakir/homebase/internal/auth"
 )
@@ -76,11 +78,25 @@ func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 	s.log.Warn("password reset with a recovery code",
 		"user", user.Username, "from", clientKey(r))
 
+	// The same password opens folders from another computer.
+	//
+	// Done here rather than in the background, unlike a sign-in: this is a
+	// password *change*, so the old file-sharing password is now wrong and the
+	// person is standing in front of the screen that could tell them if the new
+	// one could not be set. It is also the moment somebody joining this server
+	// chooses their first password, which is where the whole arrangement earns
+	// its keep — they type one password, once, and Windows accepts it.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	note := s.syncFileSharingPassword(ctx, user.Username, body.NewPassword, false)
+
 	// The replacement code travels with the response and is never stored in a
 	// form that can produce it again. If the user closes the page without
 	// writing it down, a signed-in administrator can issue another.
 	s.issueSessionWithExtra(w, r, user, http.StatusOK, map[string]any{
 		"recovery_code": replacement,
+		"message": "This is also the password for opening folders from another " +
+			"computer." + note,
 	})
 }
 

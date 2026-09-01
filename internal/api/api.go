@@ -319,6 +319,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One password, caught up. Somebody who joined before file sharing was
+	// switched on has a password Homebase can only check, not read; this is the
+	// one moment it holds the plaintext again. Does nothing if they already
+	// have a file-sharing account, and nothing at all on a server without a
+	// file server.
+	s.catchUpFileSharing(user.Username, body.Password)
+
 	s.issueSession(w, r, user, http.StatusOK)
 }
 

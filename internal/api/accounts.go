@@ -160,6 +160,20 @@ func (s *Server) handleRemoveAccount(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 
+	// And their file-sharing account, which is the half that would otherwise
+	// have been missed: an account removed from Homebase whose SMB login still
+	// works is somebody who cannot sign in to the dashboard and can still map
+	// the drive. Before the folder is moved, so that a failure here leaves
+	// somebody with access to a folder that is still in the ordinary place
+	// rather than one that has just been renamed under them.
+	if _, err := s.host.RemoveShareUser(ctx, target.Username); err != nil {
+		// Ordinary when they never had one: everybody gets a file-sharing
+		// account at their first sign-in, and somebody who never signed in has
+		// none to remove.
+		s.log.Info("no file-sharing account to remove",
+			"username", target.Username, "reason", err)
+	}
+
 	// Their private folder is moved aside, not deleted. Doing it here rather
 	// than leaving it means the next person to have this name gets an empty
 	// folder instead of the last one's files — which is the kind of thing
