@@ -123,6 +123,16 @@ ReadWritePaths=-/etc/netplan
 # line below this block is worth more than the indirection costs.
 ReadWritePaths=-/etc/wireguard -/etc/sysctl.d
 
+# Discovery. hostd restricts avahi to this machine's real network cards on every
+# boot, because a card's name is where the kernel found it that time and this
+# hardware has enumerated the same card under two of them.
+#
+# Found the same way as the netplan line above: the code was right and the
+# sandbox was not, so it worked in tests and reported "read-only file system"
+# on the machine. The leading dash keeps a server without avahi from failing to
+# start over a directory it does not have.
+ReadWritePaths=-/etc/avahi
+
 # File sharing. hostd owns smb.conf outright rather than adding to it, because
 # partial ownership means two sources of truth for what is on the network, and
 # the failure that produces is a folder still being shared after Homebase was

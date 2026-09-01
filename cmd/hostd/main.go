@@ -184,6 +184,14 @@ func run(log *slog.Logger, registry *hostd.Registry, apps *hostd.Catalogue,
 	// interface and leave a server unreachable. See internal/hostd/wol.go.
 	hostd.ApplyWakeOnLAN(log)
 
+	// avahi publishes the machine's name on every interface it can see, which on
+	// a server running applications means a dozen Docker bridges whose addresses
+	// nothing outside the machine can reach. Restricted here, on every boot,
+	// rather than written once at install: a card's name is where the kernel
+	// found it this time, and this hardware has enumerated the same wired card
+	// under two different names across reboots. See internal/hostd/publishing.go.
+	hostd.PublishOnRealInterfacesOnly(context.Background(), log)
+
 	// A configuration written before the forwarding rules existed reaches this
 	// server and nothing else on the network. Repaired here rather than left for
 	// whoever next adds a device, because a machine with devices already paired
