@@ -230,18 +230,49 @@ func (s *Service) NeedsSetup(ctx context.Context) (bool, error) {
 }
 
 // CreateAdministrator performs first-run setup. It succeeds exactly once.
+//
+// Exactly once means atomically, and it did not used to. The check and the
+// insert were separate, with a comment saying the username's unique constraint
+// caught the race — which is only true when both callers pick the same name.
+// Two callers picking different ones both saw an empty table and both inserted,
+// and a server on an unclaimed network has more than one person looking at that
+// screen: the failure is a stranger with an administrator account on somebody's
+// new server, and nothing anywhere saying a second one was made.
+//
+// One statement, rather than a transaction around two. SQLite runs a single
+// INSERT ... WHERE NOT EXISTS atomically, so the emptiness of the table is
+// decided at the moment of the write and not before it. A transaction would
+// work too and would depend on the driver taking its write lock early enough,
+// which is a thing to get wrong quietly.
 func (s *Service) CreateAdministrator(ctx context.Context, username, password string) (*User, error) {
-	needs, err := s.NeedsSetup(ctx)
+	user, hash, encodedPerms, err := prepareUser(username, password, AdministratorPermissions)
 	if err != nil {
 		return nil, err
 	}
-	if !needs {
-		// The check and the insert are not atomic, but the username unique
-		// constraint catches the race and the second caller gets this error
-		// either way.
+
+	result, err := s.db.ExecContext(ctx, `
+		INSERT INTO users (id, username, password_hash, permissions, created_at)
+		SELECT ?, ?, ?, ?, ?
+		WHERE NOT EXISTS (SELECT 1 FROM users)`,
+		user.ID, user.Username, hash, encodedPerms,
+		user.CreatedAt.Format(time.RFC3339Nano))
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			return nil, ErrAlreadySetUp
+		}
+		return nil, err
+	}
+
+	// Nothing inserted means the table was not empty: somebody claimed this
+	// server between the screen being drawn and the button being pressed.
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
 		return nil, ErrAlreadySetUp
 	}
-	return s.createUser(ctx, username, password, AdministratorPermissions)
+	return user, nil
 }
 
 // CreateUser creates an account with exactly the permissions given.
@@ -255,36 +286,44 @@ func (s *Service) CreateUser(ctx context.Context, username, password string, per
 	return s.createUser(ctx, username, password, permissions)
 }
 
-func (s *Service) createUser(ctx context.Context, username, password string, permissions []string) (*User, error) {
+// prepareUser does everything a new account needs before it is written, so that
+// the two callers that write one can each choose how.
+func prepareUser(username, password string, permissions []string) (*User, string, string, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
-		return nil, fmt.Errorf("username is required")
+		return nil, "", "", fmt.Errorf("username is required")
 	}
 	if len([]rune(password)) < MinPasswordLen {
-		return nil, ErrWeakPassword
+		return nil, "", "", ErrWeakPassword
 	}
 
 	hash, err := HashPassword(password)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
-
 	encodedPerms, err := json.Marshal(permissions)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
 
-	user := &User{
+	return &User{
 		ID:          newID("usr"),
 		Username:    username,
 		Permissions: permissions,
 		CreatedAt:   time.Now().UTC(),
+	}, hash, string(encodedPerms), nil
+}
+
+func (s *Service) createUser(ctx context.Context, username, password string, permissions []string) (*User, error) {
+	user, hash, encodedPerms, err := prepareUser(username, password, permissions)
+	if err != nil {
+		return nil, err
 	}
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO users (id, username, password_hash, permissions, created_at)
 		VALUES (?, ?, ?, ?, ?)`,
-		user.ID, user.Username, hash, string(encodedPerms),
+		user.ID, user.Username, hash, encodedPerms,
 		user.CreatedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {

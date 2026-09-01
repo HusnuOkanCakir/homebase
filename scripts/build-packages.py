@@ -89,6 +89,20 @@ if ! getent group homebase >/dev/null; then
     addgroup --system --quiet homebase
 fi
 
+# And a second group, for the file-sharing accounts, which must not be in the
+# first one.
+#
+# Samba needs a group to name in `valid users`, and that used to be `homebase` —
+# which meant every household member's file-sharing account was a member of the
+# group that owns the hostd socket. hostd checks the peer's user id and refuses
+# anyone but core, so nothing was reachable through it; but one of the layers
+# that is supposed to make that check unnecessary had been quietly removed, and
+# the account it was removed for is now created automatically for everybody who
+# signs in.
+if ! getent group homebase-files >/dev/null; then
+    addgroup --system --quiet homebase-files
+fi
+
 if [ "$1" = "configure" ]; then
     # The directories hostd itself needs, created here rather than relying on
     # homebase-core's script. hostd runs under ProtectSystem=strict, so a
