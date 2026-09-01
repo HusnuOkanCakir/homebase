@@ -2,6 +2,7 @@ package hostd
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -29,7 +30,6 @@ func TestTheShareConfigurationRefusesTheDangerousDefaults(t *testing.T) {
 		"server min protocol = SMB2_10": "SMB1, the protocol with the wormable bugs",
 		"client min protocol = SMB2_10": "SMB1 when talking outward",
 		"hosts deny = 0.0.0.0/0":        "reachable from anywhere",
-		"bind interfaces only = yes":    "listening on every interface there is",
 		"valid users = @homebase":       "anybody who can authenticate at all",
 	}
 	for line, otherwise := range required {
@@ -47,6 +47,43 @@ func TestTheShareConfigurationRefusesTheDangerousDefaults(t *testing.T) {
 	}
 	if strings.Contains(config, "hosts allow = 0.0.0.0/0") {
 		t.Error("the share is offered to the whole internet")
+	}
+}
+
+// `bind interfaces only` used to be what kept the applications off the file
+// server, and it had to be turned off: smbd will not bind the Tailscale tunnel,
+// so with it on, everybody away from home was refused by every folder.
+//
+// Turning it off moves the boundary rather than removing it. This test is here
+// so that the move stays deliberate — if the firewall rule ever stops being
+// scoped to interfaces, nine containers can read every shared folder and
+// nothing else in the code will say so.
+func TestTheApplicationsAreKeptOffTheFileServerByTheFirewall(t *testing.T) {
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "backup", Location: "internal"},
+		Path:  "/srv/homebase/storage/internal/shares/backup",
+	}})
+	if !strings.Contains(config, "bind interfaces only = no") {
+		t.Fatal("smbd is binding selected interfaces again; if that is deliberate, " +
+			"check first that it binds the tunnel, because it did not before")
+	}
+
+	// 172.16.0.0/12 is where Docker puts its bridges. Trusting it as a source
+	// range is the mistake this whole arrangement exists to avoid.
+	for _, network := range privateNetworks {
+		if network == "172.16.0.0/12" {
+			t.Fatal("172.16.0.0/12 is trusted as a source, which admits every container")
+		}
+	}
+	if strings.Contains(config, "hosts allow = 127.0.0.1 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12") {
+		t.Fatal("the container bridges are admitted by smbd itself")
+	}
+
+	// And the cards the port is opened on are the real ones, never a bridge.
+	for _, name := range shareInterfaces() {
+		if strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "br-") {
+			t.Fatalf("445 would be opened on %s, which is a container bridge", name)
+		}
 	}
 }
 
@@ -164,10 +201,12 @@ func TestTheConfigurationAdmitsTheTailscaleTunnel(t *testing.T) {
 	// The real render, with the tunnel present and absent, is decided by
 	// tailnetPresent() reading /sys/class/net — so this asserts the two shapes
 	// the renderer produces rather than reaching into the machine.
-	withTunnel := "   hosts allow = 127.0.0.1 " + strings.Join(privateNetworks, " ") +
-		" " + tailnetNetwork
-	if !strings.Contains(withTunnel, "100.64.0.0/10") {
-		t.Fatal("the tailnet range is not what the renderer would add")
+	allowed := sambaHostsAllow()
+	if allowed[0] != "127.0.0.1" {
+		t.Fatalf("the machine itself is not first in %v", allowed)
+	}
+	if tailnetPresent() && !slices.Contains(allowed, tailnetNetwork) {
+		t.Fatalf("the tunnel is up and %v does not admit it", allowed)
 	}
 
 	// The range alone must never be the control. It is also what a carrier
@@ -178,9 +217,12 @@ func TestTheConfigurationAdmitsTheTailscaleTunnel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(firewall), "allow in on $TAILNET_INTERFACE") {
-		t.Fatal("the tailnet firewall rule is not scoped to the interface; " +
+	if !strings.Contains(string(firewall), "allow in on $card") {
+		t.Fatal("the firewall rule is not scoped to the interface; " +
 			"a source range would admit the carrier's other subscribers")
+	}
+	if !strings.Contains(string(firewall), "interfaces) sources=\"\"") {
+		t.Fatal("the interface scope no longer exists, so 445 is opened by address range")
 	}
 	if !strings.Contains(string(firewall), "PRIVILEGED_PORTS=\"445\"") {
 		t.Fatal("445 is not in the privileged allowlist, so opening it is refused " +
