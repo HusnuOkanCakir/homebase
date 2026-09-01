@@ -304,3 +304,45 @@ func TestAFolderSomebodyCannotOpenIsNotListedToThem(t *testing.T) {
 		t.Fatal("restricted folders are listed to people who cannot open them")
 	}
 }
+
+// --- The applications, and the tunnel -------------------------------------------
+
+// ufw could not see this traffic at all, and nothing in the product knew.
+//
+// A published container port is never delivered to the host: Docker rewrites
+// the destination in the nat table and the packet is forwarded, so it misses
+// the chain every ufw rule lives in. On this project's own machine `ufw status`
+// listed no rule for File Browser's port and another computer on the network
+// reached it anyway — nine applications on every interface, the tunnel
+// included, with Homebase believing it decided this.
+func TestTheApplicationsAreKeptOffTheTunnel(t *testing.T) {
+	script, err := os.ReadFile("../../packaging/firewall")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(script)
+
+	// DOCKER-USER is the chain Docker provides for this. FORWARD jumps to it
+	// first and Docker never flushes it. Anywhere else is a rule Docker's own
+	// accept rules reach before ours.
+	if !strings.Contains(body, "-I DOCKER-USER 1 -i \"$TAILNET_INTERFACE\"") {
+		t.Fatal("the rule is not first in DOCKER-USER, so Docker's accept rules " +
+			"are consulted before it")
+	}
+	if !strings.Contains(body, "-j DROP") {
+		t.Fatal("the rule does not drop")
+	}
+
+	// Created rather than skipped when absent: hostd can start before Docker,
+	// and skipping would leave every application on the tunnel until something
+	// restarted hostd.
+	if !strings.Contains(body, "-N DOCKER-USER") {
+		t.Fatal("a boot where hostd starts before Docker leaves the applications " +
+			"reachable through the tunnel")
+	}
+
+	// Removed before it is added, because this runs at every start.
+	if !strings.Contains(body, "while \"$command\" -D DOCKER-USER") {
+		t.Fatal("repeated runs would stack identical rules")
+	}
+}

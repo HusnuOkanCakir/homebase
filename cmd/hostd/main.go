@@ -127,6 +127,14 @@ func main() {
 	// can ask about it.
 	shares.Reapply(context.Background(), log)
 
+	// And the applications back onto the house's own network.
+	//
+	// Here rather than in the installer because iptables rules do not survive a
+	// reboot: this has to run every time the machine starts, and hostd starting
+	// is the only thing that reliably does.
+	hostd.IsolateContainersFromTheTunnel(context.Background())
+	log.Info("applications are reachable on the local network only")
+
 	if err := run(log, registry, apps, storage, *socketPath, *auditPath, *peerUser); err != nil {
 		log.Error("hostd failed", "error", err)
 		os.Exit(1)

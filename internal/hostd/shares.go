@@ -602,6 +602,23 @@ func closePort(ctx context.Context, port int, proto, scope, label string, interf
 	setFirewall(ctx, "close", port, proto, scope, label, interfaces...)
 }
 
+// IsolateContainersFromTheTunnel keeps the applications on the house's own
+// network, where their manifests say they are.
+//
+// Applied at start and after every application change, because iptables rules
+// do not survive a reboot and Docker recreates its chains when the daemon
+// restarts. Idempotent: the helper removes its own rule before adding it.
+//
+// This is not the same job as opening a port, and the reason is worth knowing:
+// a published container port is never delivered to the host. Docker rewrites
+// the destination in the nat table and the packet is forwarded, so it never
+// passes through the chain every ufw rule lives in. `ufw status` on this
+// project's own machine listed no rule for File Browser's port and another
+// computer on the network reached it anyway. See the helper.
+func IsolateContainersFromTheTunnel(ctx context.Context) {
+	setFirewall(ctx, "isolate_containers", 0, "tcp", "interfaces", shareLabel)
+}
+
 // openSharePort and closeSharePort open 445 to the cards the house is on and
 // to the tunnel, and to nothing else.
 //

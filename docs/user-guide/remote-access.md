@@ -172,6 +172,10 @@ the Remote access page shows.
 
 Use the address, not the name. The name works and has failed on iOS and on Windows here twice.
 
+**What the tunnel carries:** the dashboard, and file sharing. Not the applications — see
+[Applications](applications.md#from-outside-the-house) for why, and it is deliberate rather
+than a limitation.
+
 ## Giving somebody else access, without giving them your account
 
 Everybody in the house needs their own way in. Nobody should be signing in as you.
@@ -202,12 +206,17 @@ To take it back, the same menu on [login.tailscale.com](https://login.tailscale.
 the share, and **Remove** in **People** removes the Homebase account. Either one alone is
 enough to lock somebody out; do both when somebody leaves.
 
-!!! note "Their machine is on the same footing as yours"
+!!! note "What a shared machine reaches"
 
-    A shared machine is reachable on every port the server has open to the tunnel — the
-    dashboard and file sharing both. What they may *do* is decided by their Homebase account
-    and their role, not by Tailscale. Give somebody the Limited role if all they should have
-    is files.
+    The dashboard and file sharing, both of which have real accounts. What they may *do* is
+    decided by their Homebase account and their role, not by Tailscale — give somebody the
+    Limited role if all they should have is files.
+
+    **Applications are not on the tunnel.** Jellyfin, AdGuard, qBittorrent and the rest
+    answer on your home network and nowhere else, so sharing your server does not hand
+    somebody nine web interfaces each protected by a login of its own. That applies to you as
+    well as to them: you reach the dashboard and your files from away, and the applications
+    when you are home.
 
 ## One thing worth knowing
 

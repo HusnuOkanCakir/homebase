@@ -29,6 +29,12 @@ REQUEST=/etc/homebase/firewall
 # versions wrote.
 LOCAL_NETWORKS="192.168.0.0/16 10.0.0.0/8 172.16.0.0/12"
 
+# The tunnel Tailscale creates.
+#
+# A fixed name chosen by tailscaled rather than one assigned in probe order, so
+# unlike a network card it is safe to write down.
+TAILNET_INTERFACE=tailscale0
+
 # Ports below 1024 that Homebase is nonetheless responsible for.
 #
 # The rule below exists because the system's own ports are not Homebase's to
@@ -45,6 +51,78 @@ proto=$(sed -n  's/^proto=//p'   "$REQUEST" | head -1)
 scope=$(sed -n  's/^scope=//p'   "$REQUEST" | head -1)
 label=$(sed -n  's/^comment=//p' "$REQUEST" | head -1)
 cards=$(sed -n  's/^interfaces=//p' "$REQUEST" | head -1)
+
+# Keeping the applications off the tunnel.
+#
+# This is a different job from every other rule in this file, and it needs a
+# different chain, because ufw cannot see this traffic at all.
+#
+# A published container port is not delivered to the host. Docker writes a DNAT
+# rule in the nat table that rewrites the destination to the container, and the
+# packet is then *forwarded* rather than delivered locally — so it never reaches
+# the INPUT chain where every ufw rule lives. The consequence, on this project's
+# own machine: `ufw status` listed no rule for port 8080 and File Browser
+# answered a request from another computer on the network anyway. Nine
+# applications were reachable on every interface, including the Tailscale
+# tunnel, and Homebase believed it was deciding this.
+#
+# DOCKER-USER is the chain Docker provides for exactly this. It is the first
+# thing FORWARD jumps to, Docker never flushes it, and it is consulted before
+# any of Docker's own accept rules. It was empty.
+#
+# The rule is `-i tailscale0 -j DROP`: applications answer on the house's own
+# network, which is what their manifests claim, and the tunnel carries the two
+# things that have real accounts — the dashboard and file sharing. Somebody
+# given a shared machine gets the server, governed by their Homebase account,
+# rather than nine web interfaces each protected by a login of its own.
+#
+# Not narrowed to container address ranges on purpose. This drops *all*
+# forwarded traffic off the tunnel, which is correct while Homebase advertises
+# no subnet routes — and if that ever changes, this rule is the thing to revisit
+# first. It fails shut, which is the direction to fail in.
+CONTAINER_RULE_COMMENT="Homebase: applications are not on the tunnel"
+
+if [ "$action" = "isolate_containers" ]; then
+    if ! command -v iptables >/dev/null 2>&1; then
+        echo "firewall: no iptables on this machine, nothing to do" >&2
+        exit 0
+    fi
+    if ! ip link show "$TAILNET_INTERFACE" >/dev/null 2>&1; then
+        echo "firewall: no $TAILNET_INTERFACE on this machine, nothing to do" >&2
+        exit 0
+    fi
+
+    for command in iptables ip6tables; do
+        command -v "$command" >/dev/null 2>&1 || continue
+        # Created if it is not there yet, rather than skipped.
+        #
+        # Docker normally makes this chain, and hostd can start before Docker
+        # does — on a boot where it did, skipping would leave every application
+        # reachable from the tunnel until something restarted hostd, which is
+        # the kind of gap that only appears on somebody else's machine. Making
+        # the chain ourselves is safe and removes the ordering question: the
+        # rule sits in it either way, and Docker adds the jump from FORWARD when
+        # it starts.
+        "$command" -n -L DOCKER-USER >/dev/null 2>&1 ||
+            "$command" -N DOCKER-USER 2>/dev/null ||
+            continue
+
+        # Removed first, and in a loop, so that repeated runs leave one rule
+        # rather than a stack of identical ones — this is applied at every
+        # start and after every application change.
+        while "$command" -D DOCKER-USER -i "$TAILNET_INTERFACE" \
+            -m comment --comment "$CONTAINER_RULE_COMMENT" -j DROP 2>/dev/null; do
+            :
+        done
+        # First in the chain: anything Docker or another tool has put here
+        # already is consulted after this, never instead of it.
+        "$command" -I DOCKER-USER 1 -i "$TAILNET_INTERFACE" \
+            -m comment --comment "$CONTAINER_RULE_COMMENT" -j DROP
+    done
+
+    echo "firewall: applications are reachable on the local network only" >&2
+    exit 0
+fi
 
 # Ports below 1024 are the system's own and are not Homebase's to hand out; the
 # four it needs are opened by the installer, where they are visible in one file.
