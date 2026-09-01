@@ -1453,7 +1453,8 @@ select:focus-visible {
   line-height: 1.5;
 }
 
-.role-choice input[type="radio"] {
+.role-choice input[type="radio"],
+.role-choice input[type="checkbox"] {
   width: auto;
   margin: 0 0.2rem 0 0;
 }

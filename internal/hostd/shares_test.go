@@ -258,3 +258,49 @@ func TestTheTunnelIsNotListedTwice(t *testing.T) {
 		}
 	}
 }
+
+// --- Who may open a folder ------------------------------------------------------
+
+// Every share was open to everybody before this field existed, and a share
+// written by an older version has no field at all. It must not become
+// restricted-to-nobody on upgrade.
+func TestAShareWithNoAccessListIsOpenToEverybody(t *testing.T) {
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "backup", Location: "internal"},
+		Path:  "/srv/homebase/storage/internal/shares/backup",
+	}}, "")
+	if !strings.Contains(config, "valid users = @homebase") {
+		t.Fatal("a share with no access list is not open to everybody, so an " +
+			"upgrade would take away folders that worked yesterday")
+	}
+}
+
+// A restricted folder names the file-sharing accounts, not the Homebase ones.
+// They differ by a prefix, and getting it wrong is a folder that refuses
+// everybody with no explanation.
+func TestARestrictedShareNamesTheFileSharingAccounts(t *testing.T) {
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "papers", Location: "internal", Access: []string{"alice", "bob"}},
+		Path:  "/srv/homebase/storage/internal/shares/papers",
+	}}, "")
+
+	if !strings.Contains(config, "valid users = hbshare-alice hbshare-bob") {
+		t.Fatalf("the access list is not written as file-sharing accounts:\n%s", config)
+	}
+	if strings.Contains(config, "valid users = @homebase") {
+		t.Fatal("the restricted folder is also open to everybody")
+	}
+}
+
+// A folder somebody cannot open should not be listed to them. Without this it
+// appears in Explorer for the whole house, refuses on being clicked — which
+// reads as a broken server — and tells everybody its name.
+func TestAFolderSomebodyCannotOpenIsNotListedToThem(t *testing.T) {
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "papers", Location: "internal", Access: []string{"alice"}},
+		Path:  "/srv/homebase/storage/internal/shares/papers",
+	}}, "")
+	if !strings.Contains(config, "access based share enum = yes") {
+		t.Fatal("restricted folders are listed to people who cannot open them")
+	}
+}

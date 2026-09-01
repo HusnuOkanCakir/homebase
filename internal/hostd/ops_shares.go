@@ -2,6 +2,7 @@ package hostd
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 )
@@ -69,6 +70,21 @@ func RegisterShareOperations(r *Registry, services *ShareServices) {
 		// and saved there, so it is exactly the kind that is never changed.
 		Secret:  []string{"password"},
 		Handler: Typed(services.setPassword),
+	})
+
+	r.MustRegister(Operation{
+		Name: "share.set_access",
+		Summary: "Choose who may open a shared folder: everybody with an " +
+			"account, or named people.",
+		// High, and the same risk as sharing it in the first place. Widening
+		// this puts somebody's files in front of the whole house, and it does
+		// so without moving a file or changing anything visible on the disk.
+		Risk:        RiskHigh,
+		Permissions: []string{"storage.modify", "network.modify"},
+		Confirm:     ConfirmRequired,
+		Timeout:     2 * time.Minute,
+		Rollback:    "share.set_access, with the previous list",
+		Handler:     Typed(services.setAccess),
 	})
 
 	r.MustRegister(Operation{
@@ -406,5 +422,76 @@ func (s *ShareServices) retirePersonalFolderOp(ctx context.Context, params Perso
 		// entitled to assume it took the files with it, and it did not.
 		"message": "The files that were in " + username + "'s folder are still on " +
 			"the server, at " + retired + ".",
+	}, nil
+}
+
+// --- Who may open a folder --------------------------------------------------------
+
+type ShareAccessParams struct {
+	Name string `json:"name"`
+
+	// Access is the accounts that may open it. Empty means everybody with an
+	// account, which is what every share is until somebody says otherwise.
+	Access []string `json:"access"`
+}
+
+func (s *ShareServices) setAccess(ctx context.Context, params ShareAccessParams) (any, error) {
+	shares, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	share, index, found := findShare(shares, params.Name)
+	if !found {
+		return nil, unknownShare(params.Name)
+	}
+
+	// Cleaned rather than trusted. These names are written into smb.conf as a
+	// `valid users` line, and a malformed one does not produce a share with a
+	// broken rule: it produces a file server that refuses to start, taking
+	// every other folder with it.
+	people := make([]string, 0, len(params.Access))
+	for _, name := range params.Access {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			continue
+		}
+		if !validShareName.MatchString(name) {
+			return nil, &Error{
+				Code:        "share.invalid_username",
+				Message:     "That is not a name Homebase can give access to.",
+				Detail:      name + " must match " + shareNamePattern,
+				Recoverable: true,
+				Recovery:    "Use lowercase letters, numbers and hyphens.",
+				Status:      400,
+			}
+		}
+		if !slices.Contains(people, name) {
+			people = append(people, name)
+		}
+	}
+
+	share.Access = people
+	shares[index] = share
+	if err := s.save(shares); err != nil {
+		return nil, err
+	}
+	if err := s.apply(ctx, shares); err != nil {
+		return nil, err
+	}
+
+	if len(people) == 0 {
+		return map[string]any{
+			"name":     share.Name,
+			"access":   []string{},
+			"everyone": true,
+			"message":  share.Name + " can be opened by everybody with an account.",
+		}, nil
+	}
+	return map[string]any{
+		"name":     share.Name,
+		"access":   people,
+		"everyone": false,
+		"message": share.Name + " can now be opened by " +
+			strings.Join(people, ", ") + " and nobody else.",
 	}, nil
 }

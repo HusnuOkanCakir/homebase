@@ -332,6 +332,10 @@ export interface SharedFolder {
   available: boolean;
   /** What to type on Windows, composed by the server: \\name\share. */
   address: string;
+  /** Who may open it, by Homebase username. Absent or empty means everybody
+   *  with an account, which is what every folder is until somebody says
+   *  otherwise. There is deliberately no way to say "nobody". */
+  access?: string[];
 }
 
 export interface ShareStatus {
@@ -1161,6 +1165,14 @@ export const api = {
 
   removeShareUser: (username: string) =>
     post<ShareStatus>("/shares/users/remove", { username }, 60_000),
+
+  /** Who may open a folder. An empty list means everybody with an account. */
+  setShareAccess: (name: string, access: string[]) =>
+    post<{ name: string; access: string[]; everyone: boolean; message: string }>(
+      "/shares/access",
+      { name, access },
+      120_000,
+    ),
 
   // --- Remote access ------------------------------------------------------------
 

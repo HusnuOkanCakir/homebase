@@ -78,7 +78,30 @@ type Share struct {
 	// ReadOnly publishes it without allowing writes.
 	ReadOnly bool `json:"read_only"`
 
+	// Access is who may open it, by Homebase username.
+	//
+	// Empty means everybody with an account, which is what every share was
+	// before this field existed and what a share written by an older version
+	// loads as. There is deliberately no way to express "nobody": a folder
+	// nobody can open is not a state anybody wants and is one a typo could
+	// produce.
+	//
+	// Names are kept even after somebody is removed from the server. A stale
+	// name is a door that stays shut — Samba refuses an account that does not
+	// exist — whereas tidying it away could empty the list, and an empty list
+	// means everybody. The safe direction for a mistake here is closed.
+	Access []string `json:"access,omitempty"`
+
 	AddedAt string `json:"added_at"`
+}
+
+// RestrictedTo reports the accounts a share is limited to, or nil for a share
+// everybody may open.
+func (s Share) RestrictedTo() []string {
+	if len(s.Access) == 0 {
+		return nil
+	}
+	return s.Access
 }
 
 // ShareState is a share plus what is currently true about it.
@@ -327,6 +350,12 @@ func renderSambaConfig(server string, shares []ShareState, peopleDir string) str
 	out.WriteString("   interfaces = lo " + strings.Join(localInterfaces(), " ") + "\n")
 	out.WriteString("   hosts allow = " + strings.Join(sambaHostsAllow(), " ") + "\n")
 	out.WriteString("   hosts deny = 0.0.0.0/0\n")
+	// A folder somebody cannot open is not listed to them.
+	//
+	// Without this, a restricted share appears in Explorer for the whole house
+	// and refuses on being clicked, which reads as a broken server rather than
+	// as somebody else's folder — and tells everybody the name of it.
+	out.WriteString("   access based share enum = yes\n")
 	out.WriteString("   log level = 1\n")
 	out.WriteString("   disable netbios = yes\n")
 	out.WriteString("   smb ports = 445\n")
@@ -340,7 +369,15 @@ func renderSambaConfig(server string, shares []ShareState, peopleDir string) str
 		} else {
 			out.WriteString("   read only = no\n")
 		}
-		out.WriteString("   valid users = @" + serviceAccount + "\n")
+		if people := share.RestrictedTo(); people != nil {
+			accounts := make([]string, 0, len(people))
+			for _, person := range people {
+				accounts = append(accounts, shareUserPrefix+person)
+			}
+			out.WriteString("   valid users = " + strings.Join(accounts, " ") + "\n")
+		} else {
+			out.WriteString("   valid users = @" + serviceAccount + "\n")
+		}
 		// Everything lands owned by the service account's group, so that files
 		// written from a Windows laptop are readable by an application on the
 		// server and by the backup, rather than by whichever account happened

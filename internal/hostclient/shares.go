@@ -15,6 +15,10 @@ type Share struct {
 	ReadOnly bool   `json:"read_only"`
 	AddedAt  string `json:"added_at"`
 
+	// Access is who may open it, by Homebase username. Empty means everybody
+	// with an account.
+	Access []string `json:"access,omitempty"`
+
 	Path string `json:"path"`
 
 	// Available is whether the disk holding it is connected. A share whose disk
@@ -125,6 +129,23 @@ func (c *Client) RetirePersonalFolder(ctx context.Context, username string) (map
 		struct {
 			Username string `json:"username"`
 		}{username}, true, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// SetShareAccess chooses who may open a folder. An empty list means everybody
+// with an account.
+func (c *Client) SetShareAccess(ctx context.Context, name string, access []string) (map[string]any, error) {
+	if access == nil {
+		access = []string{}
+	}
+	var result map[string]any
+	if err := c.Call(ctx, "share.set_access",
+		struct {
+			Name   string   `json:"name"`
+			Access []string `json:"access"`
+		}{name, access}, true, &result); err != nil {
 		return nil, err
 	}
 	return result, nil

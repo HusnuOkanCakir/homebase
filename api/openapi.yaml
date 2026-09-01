@@ -2174,6 +2174,65 @@ paths:
         "503":
           $ref: "#/components/responses/HostUnavailable"
 
+  /shares/access:
+    post:
+      tags: [shares]
+      summary: Choose who may open a shared folder
+      description: |
+        Requires `accounts.manage` — this is a question about people rather than about the
+        network, and it is the one share operation that can put somebody's files in front of
+        the whole house without touching a disk.
+
+        An empty or absent `access` list means everybody with an account, which is what every
+        share is until somebody says otherwise. **There is no way to say "nobody"**: a folder
+        nobody can open is not a state anybody wants and is one a typo could produce.
+
+        Every name must belong to an existing account. A name that belongs to nobody would be
+        written into Samba's `valid users` and simply never match, leaving a folder that is
+        restricted to nobody and looks restricted to somebody.
+
+        Names are kept when somebody is removed from the server. A stale name is a door that
+        stays shut, whereas tidying it away could empty the list — and an empty list means
+        everybody.
+      operationId: setShareAccess
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+                access:
+                  type: array
+                  description: Homebase usernames. Empty means everybody with an account.
+                  items:
+                    type: string
+                    pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+      responses:
+        "200":
+          description: Who may open the folder was changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  access:
+                    type: array
+                    items: { type: string }
+                  everyone: { type: boolean }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: A name that belongs to nobody on this server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /shares/users:
     post:
       tags: [shares]
