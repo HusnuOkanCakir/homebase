@@ -27,20 +27,19 @@ const ROLES: { id: Role; label: string; description: string }[] = [
     // Said plainly. Somebody making their brother an administrator so he can
     // install something should know what else it carries.
     description:
-      "Can change anything about this server — and can read every file on it, " +
-      "including other people's private folders.",
+      "Can change anything about this server, and can reach every file on it.",
   },
   {
     id: "member",
     label: "Member",
     description:
-      "Has their own files and can see how the server is doing. Cannot install " +
-      "things, change disks, or add people.",
+      "Can use the shared folders and see how the server is doing. Cannot " +
+      "install things, change disks, or add people.",
   },
   {
     id: "limited",
     label: "Limited",
-    description: "Has their own files and the folders shared with them. Nothing else.",
+    description: "Can use the shared folders. Nothing else.",
   },
 ];
 
@@ -111,7 +110,16 @@ export function People({ me }: { me: string }) {
     <section className="card">
       <h2>People</h2>
       <p className="muted">
-        Everybody who uses this server has their own account and their own files.
+        Everybody who uses this server signs in as themselves.
+      </p>
+      {/* Said plainly rather than implied by three role names. Private folders
+          per person are the next piece of work, and until they exist a role
+          decides what somebody can change about the server — not which files
+          they can open. Promising otherwise here would be the screen lying
+          about the product. */}
+      <p className="hint">
+        Folders shared on this server are open to everyone with an account.
+        Private folders for each person are not built yet.
       </p>
 
       {error && <Message tone="error" {...error} />}
