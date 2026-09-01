@@ -459,3 +459,50 @@ func multipartFile(t *testing.T, area, where, name, content string) (*bytes.Buff
 	}
 	return &body, form.FormDataContentType()
 }
+
+// Every account made before private folders existed has none — which is every
+// account on every server that has been running for more than a few weeks,
+// including the administrator made at first-run setup. Without this the person
+// who owns the machine opens Files and finds nothing.
+func TestSigningInGivesAnOlderAccountThePrivateFolderItNeverHad(t *testing.T) {
+	h, fake := newAppHarness(t)
+	root := t.TempDir()
+
+	fake.responses["share.status"] = map[string]any{
+		"installed": false, "running": false, "users": []any{},
+		"server_name": "homebase", "people_path": filepath.Join(root, "people"),
+		"shares": []any{},
+	}
+	fake.responses["share.make_personal_folder"] = map[string]any{
+		"username": "alex", "created": true,
+	}
+
+	h.signedIn(t)
+	h.do(http.MethodPost, "/api/v1/auth/login",
+		`{"username":"alex","password":"`+goodPassword+`"}`, nil)
+
+	waitForCall(t, fake, "share.make_personal_folder", 1)
+	if calls := fake.callsTo("share.make_personal_folder"); calls[0].Body["username"] != "alex" {
+		t.Fatalf("a folder was asked for on behalf of %v", calls[0].Body["username"])
+	}
+}
+
+// A folder that is not there must not be offered. The person clicks it and gets
+// an error about a folder they were just told they had.
+func TestAPrivateFolderThatIsNotThereIsNotOffered(t *testing.T) {
+	h, fake := newAppHarness(t)
+	root := t.TempDir()
+
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "people_path": filepath.Join(root, "people"),
+		"shares": []any{},
+	}
+	fake.responses["share.make_personal_folder"] = map[string]any{"username": "alex"}
+
+	headers := h.signedIn(t)
+	rec := h.do(http.MethodGet, "/api/v1/files/areas", "", headers)
+	if strings.Contains(rec.Body.String(), areaPersonal) {
+		t.Fatalf("a folder that does not exist is offered: %s", rec.Body)
+	}
+}

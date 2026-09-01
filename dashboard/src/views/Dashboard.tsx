@@ -13,6 +13,7 @@ import { Repair } from "./Repair";
 import { FirstSteps } from "./FirstSteps";
 import { Leaving } from "./Leaving";
 import { Shares } from "./Shares";
+import { FileBrowser } from "./FileBrowser";
 import { Assistant } from "./Assistant";
 
 /**
@@ -243,11 +244,17 @@ export function Dashboard({ user, onSignOut }: Props) {
         ) : current === "assistant" ? (
           <Assistant />
         ) : current === "files" ? (
-          <Shares
-            canManage={user.permissions.includes("network.modify")}
-            canSetAccess={user.permissions.includes("accounts.manage")}
-            serverName={system?.hostname ?? ""}
-          />
+          <>
+            {/* The files first, then how to reach them from another computer.
+                Most visits are somebody wanting a file, not somebody
+                configuring a file server. */}
+            <FileBrowser />
+            <Shares
+              canManage={user.permissions.includes("network.modify")}
+              canSetAccess={user.permissions.includes("accounts.manage")}
+              serverName={system?.hostname ?? ""}
+            />
+          </>
         ) : current === "storage" ? (
           <>
             {/* Disks and backups on one screen, because a backup *is* a disk

@@ -67,22 +67,33 @@ func (s *Server) syncFileSharingPassword(ctx context.Context, username, password
 	return ""
 }
 
-// catchUpFileSharing gives somebody a file-sharing account if they do not have
-// one, without making them wait for it.
+// catchUpFileSharing gives somebody what an account created today would have
+// come with, without making them wait for it.
 //
-// In the background because it is a convenience rather than part of signing in:
-// it runs a user-account helper and two smbpasswd commands, and none of that
-// should stand between a person and their dashboard. It matters for the
-// ordinary case where sharing was switched on after somebody had already
-// joined — at that moment their password exists only as a hash, and their next
-// sign-in is the one chance to give the file server the same one.
+// Two things: a private folder, and a file-sharing account. Both are ordinary
+// for an account created since this feature existed and missing for every
+// account created before it — which is every account on every server that has
+// been running for more than a few weeks, including the administrator made at
+// first-run setup. Without this they would never acquire either, and the Files
+// screen would be empty for the person who owns the machine.
 //
-// Its own context, because the request's is cancelled the moment the response
-// is written.
+// Signing in is the moment because it is the only moment: Homebase cannot read
+// a password back, so the plaintext exists here and nowhere else.
+//
+// In the background because none of it should stand between a person and their
+// dashboard — it runs a user-account helper and two smbpasswd commands — and in
+// its own context, because the request's is cancelled the moment the response
+// is written. Everything it does converges, so a failure means the next sign-in
+// tries again rather than something being left half-made.
 func (s *Server) catchUpFileSharing(username, password string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
+
+		if _, err := s.host.MakePersonalFolder(ctx, username); err != nil {
+			s.log.Warn("could not create a private folder at sign-in",
+				"username", username, "error", err)
+		}
 		s.syncFileSharingPassword(ctx, username, password, true)
 	}()
 }

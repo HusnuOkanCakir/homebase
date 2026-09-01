@@ -410,12 +410,22 @@ function People({
           });
         }}
       >
+        {/* Not the ordinary way in any more, and it says so. Everybody who
+            signs in to Homebase gets a file-sharing account with the same
+            password, so this form is the fallback for the cases that leaves:
+            somebody who has not signed in since sharing was switched on, and a
+            name Homebase itself does not know. Removing it would take away the
+            only way out of both. */}
+        <p className="hint">
+          Everybody with a Homebase account can already open these folders,
+          using the same name and password they sign in with. This is for
+          setting one by hand.
+        </p>
         <label htmlFor="share-user">
           Add somebody, or change a password
           <span className="muted">
             {" "}
-            — a name they will type on the other computer. Using the same one as
-            here is fine; the password is separate either way.
+            — the name they type on the other computer.
           </span>
         </label>
         <input

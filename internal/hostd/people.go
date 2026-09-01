@@ -160,6 +160,16 @@ func personalFolderRoot(mountPoint, username string) string {
 	return filepath.Join(mountPoint, peopleDirName, username)
 }
 
+// personalFolderExists says whether somebody already has one.
+func (s *ShareServices) personalFolderExists(location, username string) bool {
+	mountPoint, ok := s.storage.ResolveLocation(location)
+	if !ok || !validShareName.MatchString(username) {
+		return false
+	}
+	_, err := os.Stat(personalFolderRoot(mountPoint, username))
+	return err == nil
+}
+
 // makePersonalFolder creates somebody's private folder.
 //
 // Converging rather than refusing when it is already there: this runs when an
@@ -207,9 +217,12 @@ func (s *ShareServices) makePersonalFolder(location, username string) (string, e
 		}
 	}
 
-	path, err := makePersonalFolderAt(mountPoint, username)
+	path, created, err := makePersonalFolderAt(mountPoint, username)
 	if err != nil {
 		return "", err
+	}
+	if !created {
+		return path, nil
 	}
 	if err := giveToServiceAccount(path); err != nil {
 		return "", err
@@ -225,26 +238,33 @@ func (s *ShareServices) makePersonalFolder(location, username string) (string, e
 // makePersonalFolderAt is the filesystem half, separated so it can be tested
 // without being root and without a `homebase` account on the machine running
 // the tests.
-func makePersonalFolderAt(mountPoint, username string) (string, error) {
+func makePersonalFolderAt(mountPoint, username string) (string, bool, error) {
 	// The parent is created readable and the folder inside it is not. Anybody
 	// may see that `people` exists; only its owner may see what is in one.
 	parent := filepath.Join(mountPoint, peopleDirName)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return "", internalError("creating " + parent + ": " + err.Error())
+		return "", false, internalError("creating " + parent + ": " + err.Error())
 	}
 	if err := os.Chmod(parent, 0o755); err != nil {
-		return "", internalError("setting permissions on " + parent + ": " + err.Error())
+		return "", false, internalError("setting permissions on " + parent + ": " + err.Error())
 	}
 
+	// Whether it was already there is reported rather than ignored, because the
+	// caller runs this on every sign-in to catch up accounts made before
+	// private folders existed. Rewriting the file server's configuration for
+	// each of those would be a Samba restart every time somebody signs in.
 	path := personalFolderRoot(mountPoint, username)
+	if _, err := os.Stat(path); err == nil {
+		return path, false, nil
+	}
 	if err := os.MkdirAll(path, 0o700); err != nil {
-		return "", internalError("creating " + path + ": " + err.Error())
+		return "", false, internalError("creating " + path + ": " + err.Error())
 	}
 	// MkdirAll applies the umask, so the mode asked for is not the mode made.
 	if err := os.Chmod(path, 0o700); err != nil {
-		return "", internalError("setting permissions on " + path + ": " + err.Error())
+		return "", false, internalError("setting permissions on " + path + ": " + err.Error())
 	}
-	return path, nil
+	return path, true, nil
 }
 
 // retirePersonalFolder moves somebody's folder out of the way of the next person

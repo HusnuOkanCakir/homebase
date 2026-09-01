@@ -75,7 +75,14 @@ async function request<T>(
     response = await fetch(BASE + path, {
       ...init,
       headers: {
-        "Content-Type": "application/json",
+        // Not for an upload. A multipart body carries a boundary string that
+        // separates its parts, and the browser writes the header naming it;
+        // setting Content-Type here — to anything, including an empty string —
+        // replaces that with one naming a boundary that does not exist, and the
+        // server answers "that request did not carry a file".
+        ...(init.body instanceof FormData
+          ? {}
+          : { "Content-Type": "application/json" }),
         ...(init.headers ?? {}),
       },
       // The session is a cookie; it has to travel.
@@ -129,6 +136,24 @@ const post = <T>(path: string, body?: unknown, timeoutMs?: number) =>
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
     timeoutMs,
+  );
+
+/**
+ * A multipart upload.
+ *
+ * Separate from `post` for its timeout. The Content-Type is left to the browser
+ * — see `request`.
+ *
+ * Six hours, because this is a file crossing a home connection. A holiday's
+ * photographs over a slow upstream link is not an unusual thing to ask of a
+ * home server, and a request that times out at fifteen seconds is one that can
+ * never carry them.
+ */
+const upload = <T>(path: string, form: FormData) =>
+  request<T>(
+    path,
+    { method: "POST", body: form },
+    6 * 60 * 60 * 1000,
   );
 
 // --- Types -------------------------------------------------------------------
@@ -336,6 +361,31 @@ export interface SharedFolder {
    *  with an account, which is what every folder is until somebody says
    *  otherwise. There is deliberately no way to say "nobody". */
   access?: string[];
+}
+
+/** One place a person may browse: a shared folder, or their own. */
+export interface FileArea {
+  /** A share name, or `me`. Never a path — a path in a response is a path
+   *  somebody sends back. */
+  id: string;
+  name: string;
+  kind: "personal" | "shared";
+  read_only: boolean;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  directory: boolean;
+  size: number;
+  modified: string;
+}
+
+export interface FileListing {
+  path: string;
+  entries: FileEntry[];
+  /** True when the folder holds more than the server will list at once. */
+  truncated: boolean;
 }
 
 export interface ShareStatus {
@@ -1165,6 +1215,47 @@ export const api = {
 
   removeShareUser: (username: string) =>
     post<ShareStatus>("/shares/users/remove", { username }, 60_000),
+
+  // --- Files ----------------------------------------------------------------
+
+  /** The folders this person may browse: shared ones, and `me`. */
+  fileAreas: () => get<{ areas: FileArea[] }>("/files/areas"),
+
+  files: (area: string, path: string) =>
+    get<FileListing>(
+      `/files?area=${encodeURIComponent(area)}&path=${encodeURIComponent(path)}`,
+    ),
+
+  /** The address a download link points at.
+   *
+   *  A link rather than a fetch, deliberately. The browser then does the
+   *  downloading: a progress indicator it already has, a `Range` request when
+   *  the connection drops, and no film held in a JavaScript variable on the way
+   *  past. The session is a cookie, so the link carries it. */
+  fileContentUrl: (area: string, path: string) =>
+    `${BASE}/files/content?area=${encodeURIComponent(area)}&path=${encodeURIComponent(path)}`,
+
+  /** Long: this is a file crossing a home connection, not a request. */
+  uploadFiles: (area: string, path: string, files: File[]) => {
+    const form = new FormData();
+    // Before the file, always. The server has to know where it is going before
+    // a byte of it is written anywhere, and refuses if it does not.
+    form.append("area", area);
+    form.append("path", path);
+    for (const file of files) form.append("file", file, file.name);
+    return upload<{ saved: string[] }>("/files/upload", form);
+  },
+
+  createFolder: (area: string, path: string, name: string) =>
+    post<{ path: string }>("/files/folder", { area, path, name }),
+
+  renameFile: (area: string, path: string, name: string) =>
+    post<{ path: string }>("/files/rename", { area, path, name }),
+
+  /** `confirm` is the folder's own name, and is needed only for a folder with
+   *  something in it. There is no wastebasket. */
+  removeFile: (area: string, path: string, confirm?: string) =>
+    post<{ removed: string }>("/files/remove", { area, path, confirm }, 300_000),
 
   /** Who may open a folder. An empty list means everybody with an account. */
   setShareAccess: (name: string, access: string[]) =>

@@ -31,7 +31,7 @@ func TestPrivateFoldersAreRefusedOnDisksThatCannotOwnAFile(t *testing.T) {
 // are the folders they must not be able to read.
 func TestAPrivateFolderIsNotReadableByTheApplications(t *testing.T) {
 	root := t.TempDir()
-	path, err := makePersonalFolderAt(root, "alice")
+	path, _, err := makePersonalFolderAt(root, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestAPrivateFolderIsNotReadableByTheApplications(t *testing.T) {
 // refuses.
 func TestMakingAPrivateFolderTwiceIsNotAnError(t *testing.T) {
 	root := t.TempDir()
-	first, err := makePersonalFolderAt(root, "alice")
+	first, _, err := makePersonalFolderAt(root, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,12 +70,16 @@ func TestMakingAPrivateFolderTwiceIsNotAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, err := makePersonalFolderAt(root, "alice")
+	second, created, err := makePersonalFolderAt(root, "alice")
 	if err != nil {
 		t.Fatalf("the second attempt failed: %v", err)
 	}
 	if second != first {
 		t.Fatalf("the second attempt made %s rather than %s", second, first)
+	}
+	if created {
+		t.Error("the second attempt reported making a folder that was already there, " +
+			"which reconfigures the file server on every sign-in")
 	}
 	if _, err := os.Stat(filepath.Join(first, "notes.txt")); err != nil {
 		t.Fatal("converging on an existing folder emptied it")
@@ -86,7 +90,7 @@ func TestMakingAPrivateFolderTwiceIsNotAnError(t *testing.T) {
 // private folder full of the last one's files — and neither of them is told.
 func TestANewAccountDoesNotInheritTheLastPersonsFiles(t *testing.T) {
 	root := t.TempDir()
-	path, err := makePersonalFolderAt(root, "sam")
+	path, _, err := makePersonalFolderAt(root, "sam")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +115,7 @@ func TestANewAccountDoesNotInheritTheLastPersonsFiles(t *testing.T) {
 		t.Errorf("%s does not say whose it was", retired)
 	}
 
-	fresh, err := makePersonalFolderAt(root, "sam")
+	fresh, _, err := makePersonalFolderAt(root, "sam")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +135,7 @@ func TestTwoFoldersRetiredInTheSameSecondDoNotLandOnEachOther(t *testing.T) {
 	root := t.TempDir()
 	var retired []string
 	for range 2 {
-		if _, err := makePersonalFolderAt(root, "sam"); err != nil {
+		if _, _, err := makePersonalFolderAt(root, "sam"); err != nil {
 			t.Fatal(err)
 		}
 		path, err := retirePersonalFolderAt(root, "sam")
@@ -154,7 +158,7 @@ func TestTwoFoldersRetiredInTheSameSecondDoNotLandOnEachOther(t *testing.T) {
 // would be written for a server where every account has been removed.
 func TestARetiredFolderDoesNotCountAsSomebodyHavingOne(t *testing.T) {
 	root := t.TempDir()
-	if _, err := makePersonalFolderAt(root, "sam"); err != nil {
+	if _, _, err := makePersonalFolderAt(root, "sam"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := retirePersonalFolderAt(root, "sam"); err != nil {

@@ -99,12 +99,20 @@ func (s *Server) areasFor(ctx context.Context, user *auth.User) ([]area, error) 
 
 	var areas []area
 	if status.PeoplePath != "" {
-		areas = append(areas, area{
-			ID:   areaPersonal,
-			Name: "Your folder",
-			Kind: "personal",
-			path: path.Join(status.PeoplePath, user.Username),
-		})
+		// Offered only if it is actually there. A folder is made when an
+		// account is created and again at every sign-in, so a missing one means
+		// the disk was unavailable at both moments — and an area that cannot be
+		// opened is worse than one that is not listed, because the person
+		// clicks it and gets an error about a folder they were told they had.
+		mine := path.Join(status.PeoplePath, user.Username)
+		if info, err := os.Stat(mine); err == nil && info.IsDir() {
+			areas = append(areas, area{
+				ID:   areaPersonal,
+				Name: "Your folder",
+				Kind: "personal",
+				path: mine,
+			})
+		}
 	}
 
 	for _, share := range status.Shares {

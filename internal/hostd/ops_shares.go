@@ -360,6 +360,13 @@ type PersonalFolderParams struct {
 
 func (s *ShareServices) makePersonalFolderOp(ctx context.Context, params PersonalFolderParams) (any, error) {
 	username := strings.ToLower(strings.TrimSpace(params.Username))
+
+	// Whether the folder was already there decides whether Samba is
+	// reconfigured below, so it is worked out before rather than assumed. This
+	// operation runs on every sign-in, to catch up accounts made before private
+	// folders existed, and most of those calls have nothing to do.
+	existing := s.personalFolderExists(PeopleLocation, username)
+
 	path, err := s.makePersonalFolder(PeopleLocation, username)
 	if err != nil {
 		return nil, err
@@ -373,7 +380,7 @@ func (s *ShareServices) makePersonalFolderOp(ctx context.Context, params Persona
 	// Only if there is a file server at all. A Homebase where nobody has shared
 	// anything still gives people their folders; the Files screen serves them
 	// either way, and Samba is what a Windows drive letter needs.
-	if sambaInstalled() {
+	if !existing && sambaInstalled() {
 		shares, err := s.load()
 		if err != nil {
 			return nil, err
@@ -386,6 +393,7 @@ func (s *ShareServices) makePersonalFolderOp(ctx context.Context, params Persona
 	return map[string]any{
 		"username": username,
 		"path":     path,
+		"created":  !existing,
 		"message":  username + " has a private folder on this server.",
 	}, nil
 }

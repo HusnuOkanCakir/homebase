@@ -49,8 +49,9 @@ test("adding somebody, and the code that is shown once", async ({ page }) => {
   // Roles are chosen by reading a sentence about each, not by decoding a word.
   await expect(page.getByText(/can reach every file on it/i)).toBeVisible();
 
-  // The screen must not promise per-person files before they exist.
-  await expect(page.getByText(/not built yet/i)).toBeVisible();
+  // The screen says what a role does not decide, which is the thing people
+  // assume it does.
+  await expect(page.getByText(/folder of their own/i)).toBeVisible();
 
   await page.getByRole("button", { name: /add them/i }).click();
 
