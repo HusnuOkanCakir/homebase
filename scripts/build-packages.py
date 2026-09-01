@@ -244,24 +244,19 @@ if [ "$1" = "configure" ]; then
     # group-writable because that is what they are for.
     install -d -o homebase -g homebase -m 0755 /srv/homebase
 
-    # Do not publish the container bridge.
+    # avahi's interfaces are hostd's business, not the installer's.
     #
-    # avahi answers for <hostname>.local on every interface it can see, and
-    # once Docker is installed that includes docker0 at 172.17.0.1. A laptop
-    # asking for the server's name then gets an address that is either
-    # unroutable or — if it runs Docker too — its own bridge, and the server
-    # becomes intermittently unreachable by name with nothing to point at.
-    if [ -f /etc/avahi/avahi-daemon.conf ] &&
-       ! grep -q "^deny-interfaces=" /etc/avahi/avahi-daemon.conf; then
-        # Bracket expressions rather than backslash escapes, and `a` rather than
-        # a substitution containing a newline. This text is a Python string inside
-        # a Python script, so an escape here is consumed before sed ever sees it —
-        # which is how the first attempt shipped an unterminated `s` command and
-        # failed the whole install on a machine that was working.
-        sed -i '/^[[]server[]]$/a deny-interfaces=docker0,br-' \\
-            /etc/avahi/avahi-daemon.conf
-        systemctl restart avahi-daemon >/dev/null 2>&1 || true
-    fi
+    # This used to write `deny-interfaces=docker0,br-`, which never worked:
+    # avahi matches whole interface names, so `br-` excluded nothing and every
+    # application made of more than one container added another unreachable
+    # address for <hostname>.local.
+    #
+    # Naming the real card here instead would be wrong in a subtler way. A
+    # card's name is where the kernel found it that boot, and this hardware has
+    # enumerated the same wired card as both enp4s0 and enp5s0 — so a name
+    # written once at install is a name that eventually matches nothing, and the
+    # symptom is a server that has apparently left the network. hostd works it
+    # out on every boot instead. See internal/hostd/publishing.go.
 
     systemctl daemon-reload >/dev/null 2>&1 || true
     if [ -d /run/systemd/system ]; then

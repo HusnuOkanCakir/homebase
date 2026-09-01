@@ -47,8 +47,14 @@ func readWakeOnLANConfig() []string {
 func writeWakeOnLANConfig(interfaces []string) error {
 	sort.Strings(interfaces)
 	return writeRootFile(wakeOnLANFile, fmt.Sprintf(
-		"# Written by Homebase. Interfaces that may start this machine when a\n"+
-			"# magic packet arrives — see `homebasectl network wake-on-lan`.\n"+
+		"# Written by Homebase. Cards that may start this machine when a magic\n"+
+			"# packet arrives — see `homebasectl network wake-on-lan`.\n"+
+			"#\n"+
+			"# Recorded by hardware address, not by name. A card's name describes\n"+
+			"# where the kernel found it this boot and it moves: this machine has\n"+
+			"# enumerated the same wired card as both enp4s0 and enp5s0, which left\n"+
+			"# wake-on-LAN configured for a card that no longer had that name and no\n"+
+			"# way to notice but a line in the journal.\n"+
 			"interfaces=%s\n", strings.Join(interfaces, ",")), 0o644)
 }
 
@@ -61,13 +67,19 @@ func writeWakeOnLANConfig(interfaces []string) error {
 // because a network card is missing would take the diagnostic tool away at
 // exactly the moment somebody needs it.
 func ApplyWakeOnLAN(log *slog.Logger) {
-	for _, name := range readWakeOnLANConfig() {
-		if err := setWakeOnLANMagic(name, true); err != nil {
-			log.Warn("could not switch wake-on-LAN back on",
-				"interface", name, "error", err)
+	for _, configured := range readWakeOnLANConfig() {
+		name, found := resolveInterface(configured, sysClassNet)
+		if !found {
+			log.Warn("a card configured to wake this machine is not present",
+				"configured", configured)
 			continue
 		}
-		log.Info("wake-on-LAN is on", "interface", name)
+		if err := setWakeOnLANMagic(name, true); err != nil {
+			log.Warn("could not switch wake-on-LAN back on",
+				"interface", name, "configured", configured, "error", err)
+			continue
+		}
+		log.Info("wake-on-LAN is on", "interface", name, "configured", configured)
 	}
 }
 
@@ -113,15 +125,32 @@ func configureWakeOnLAN(name string, on bool) error {
 		}
 	}
 
+	// Recorded by hardware address, so the setting survives the card being
+	// renamed. Falls back to the name only if the address cannot be read, which
+	// would mean the card vanished between being changed and being saved.
+	identifier := name
+	if address, err := hardwareAddress(name, sysClassNet); err == nil && address != "" {
+		identifier = address
+	}
+
 	wanted := readWakeOnLANConfig()
 	kept := wanted[:0:0]
 	for _, existing := range wanted {
-		if existing != name {
-			kept = append(kept, existing)
+		// Dropped if it names this card by either spelling, so turning it off
+		// clears an entry written by an older version — and so an entry for a
+		// card that no longer exists can be removed at all, which it could not
+		// before: `wake-on-lan <gone> off` refused, leaving a stale name warning
+		// on every boot with no supported way to clear it.
+		if existing == identifier || existing == name {
+			continue
 		}
+		if resolved, found := resolveInterface(existing, sysClassNet); found && resolved == name {
+			continue
+		}
+		kept = append(kept, existing)
 	}
 	if on {
-		kept = append(kept, name)
+		kept = append(kept, identifier)
 	}
 	if err := writeWakeOnLANConfig(kept); err != nil {
 		// The card has already been changed, so this is not a failed operation —
