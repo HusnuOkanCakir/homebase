@@ -37,6 +37,9 @@ const REFRESH_MS = 5000;
  * Seven now, each a word rather than a phrase, on one line at any width worth
  * designing for. "Home" is where somebody lands and where they press the thing
  * they came to press; everything rarer is behind a word they would think of.
+ *
+ * Eight on a machine with a local model, which is the one addition since — and
+ * it is only shown where there is one, so most installations still see seven.
  */
 type Tab =
   | "home"

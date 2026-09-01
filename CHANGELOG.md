@@ -22,7 +22,68 @@ Each release records the minimum version it can upgrade from. See
 
 ## [Unreleased]
 
-Milestone 0 — contracts and project machinery. No product code.
+Everything below Milestone 0 has shipped since; this section had not been kept up
+with it and is now written from what is actually on `main`.
+
+### Added — the appliance
+
+- **Installer.** A USB stick that turns an ordinary laptop into a server,
+  including one running Windows. Refuses to wipe a disk it is not certain about.
+- **Applications.** Install, run and remove them without losing their data,
+  including applications made of more than one container. Storage slots, declared
+  device access, and an elevation reason shown to whoever installs them.
+- **Storage.** Attach a disk, give it to an application, unplug it safely.
+- **Backups.** Back up the whole server and restore it onto a different machine.
+  Written as plain files, so a backup is readable without Homebase.
+- **Recovery.** A forgotten password no longer means a lost server: a recovery
+  code, shown once, stored the way a password is.
+- **File sharing.** Folders published on the local network over SMB, with the two
+  addresses a person actually needs — one for Windows, one for everything else.
+- **Network.** Wi-Fi, wake-on-LAN over netlink, and encrypted name resolution.
+- **Updates**, **Secure Boot**, and the whole product from a terminal via
+  `homebasectl`.
+
+### Added — remote access
+
+- **Wireguard remote access** with dynamic DNS, split-tunnel client configuration
+  generated from the machine's real network cards, and a QR code for a phone.
+- **Tailscale is reported** when a machine has it. Homebase does not manage it —
+  it reports it, because on a connection behind carrier-grade NAT the Wireguard
+  half cannot work however correctly it is configured, and a screen naming only
+  the part Homebase controls is accurate about itself and misleading about the
+  machine.
+- **A certificate browsers already trust**, when something on the machine can
+  obtain one. Re-read per handshake so a renewal is picked up; a broken one falls
+  back to the self-signed certificate rather than refusing connections, because a
+  browser warning somebody can click through beats a dashboard that will not open.
+
+### Added — the assistant
+
+- **An Assistant tab**, backed by a language model running on the machine. Off
+  unless configured, and hidden entirely on a machine without one. Answers stream,
+  because the hardware writes a few tokens a second and a buffered reply is
+  indistinguishable from a server that has hung.
+- **Model selection**, including a contained model whose refusal behaviour a third
+  party removed. Such a model requires `assistant.unrestricted`, which is not
+  granted by setting up the machine, not granted by being an administrator, and
+  cannot be granted through the API — an endpoint that grants a permission is an
+  endpoint a stolen session can call. Homebase can use such a model and has no way
+  to start one.
+
+### Fixed
+
+- The dashboard was reduced from nine tabs to a single row of words.
+- `Message` rendered prose as if it were a stack trace; the slots now behave the
+  way their names read.
+- A VPN client configuration listed Docker bridges among the routes to send down
+  the tunnel, which could break the network a phone was actually sitting on.
+- The vulnerability scan pinned a version of `govulncheck` too old to parse the
+  toolchain, failing intermittently — which read as flakiness and was cleared by
+  re-running it, twice.
+
+## Milestone 0 — contracts and project machinery
+
+No product code.
 
 ### Added
 

@@ -311,6 +311,15 @@ place a reboot is a reboot:
   ([ADR-0012](docs/decisions/0012-hostd-owns-the-catalogue.md)).
 - **Recoverable by design.** Every meaningful change is a job that can be previewed,
   verified and rolled back. Backups and restore are core features, not add-ons.
+- **Reachable from away, privately.** Wireguard with dynamic DNS, and a split-tunnel
+  configuration built from the machine's real network cards so a phone routes your house
+  and nothing else. On a connection behind carrier-grade NAT no port can be forwarded at
+  all; Homebase says so rather than sending you back to the router, and reports Tailscale
+  when a machine has it.
+- **An assistant that runs on the machine.** Optional, off unless configured, and hidden
+  entirely on a server without a model. Nothing typed into it leaves the network: the
+  model is a file on the disk answered by a process on loopback, with no account and no
+  upstream. It is slow, and the interface is built around admitting that.
 
 ## What it is not
 

@@ -959,6 +959,20 @@ for it — the first principle in the README — and that it can be tested witho
 on anybody's service. The ADR will record what would make us revisit it, which is CGNAT
 becoming common enough to matter.
 
+**That condition arrived, on the first real machine.** The development server's ISP puts it
+behind carrier-grade NAT: the router's WAN address is inside `100.64.0.0/10` and the public
+address is shared with other subscribers, so no port forward can reach it — and none of that
+is visible from the router's port-forwarding page, which accepts the rule and reports
+success. An afternoon went into checking a rule that was correct and could never work.
+
+The resolution is not to replace Wireguard. It stays, unchanged, for the majority of
+connections where it works and where nobody can switch it off. What changed is that Homebase
+now **reports** Tailscale when a machine has it, and names carrier-grade NAT as a possible
+cause when nothing has ever connected. Homebase does not install, configure, start or stop
+Tailscale: taking ownership would mean owning its upgrades, its login state and its
+failures, for something that manages itself. The dependency the README warns about is real,
+and it is the user's to take on knowingly rather than Homebase's to adopt on their behalf.
+
 **Dynamic DNS is the one outside dependency**, and it is small and replaceable: a name that
 points at a changing address. The design keeps the provider a setting rather than a
 hard-coded assumption.
