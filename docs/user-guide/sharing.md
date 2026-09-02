@@ -139,6 +139,41 @@ one would not actually be private, and Homebase refuses rather than pretending.
 that the next person with the same name starts with an empty one instead of inheriting the
 last one's files.
 
+## A disk you plug into the server
+
+A disk lives in a drawer. Somebody who is away needs a file off it. The way to do that is
+to **plug it into the server**, and there is nothing else to do.
+
+1. Plug the disk into any USB socket on the server.
+2. Wait a few seconds.
+3. It is in **Files**, named after whatever is printed on it — `kingston`, `seagate`,
+   whatever the disk calls itself.
+
+Anybody with an account can now read it, from anywhere the dashboard reaches. Nobody has to
+share anything, set a password, or leave a computer switched on.
+
+!!! note "Read-only, always"
+
+    Homebase only ever reads these disks. Nothing on this server can change or delete
+    anything on one — not the Files screen, not somebody signed in, not a server that has
+    been broken into. The disk belongs to whoever carried it in.
+
+    This also means Windows disks work without any fuss: NTFS and exFAT are read perfectly
+    well, and none of the awkwardness of *writing* to them applies.
+
+**Before pulling the disk out**, press **Finish with it** on the Files page. That makes sure
+nothing is half-read. If somebody is downloading a large file at that moment it will say so;
+wait a few seconds and press it again.
+
+If the disk is unplugged without that, nothing is damaged — Homebase was only reading — but
+whoever was mid-download gets a broken file.
+
+!!! warning "One thing that is worth knowing"
+
+    Disks Homebase already manages under **Storage** do not appear here, and should not:
+    they are the server's own disks, with their own folders, already shared. This is only
+    for disks that arrive in a pocket and leave again.
+
 ## Read-only folders
 
 Tick **Read only** when sharing, and other computers can open and copy from the folder but

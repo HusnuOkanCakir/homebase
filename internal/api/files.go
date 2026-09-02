@@ -58,6 +58,13 @@ import (
 // cannot collide with one.
 const areaPersonal = "me"
 
+// pluggedAreaPrefix namespaces the disks people plug in.
+//
+// Without it a disk labelled "documents" would collide with the shared folder
+// of that name, and whichever came second would be unreachable — silently,
+// because an area is found by matching the first one that answers to the name.
+const pluggedAreaPrefix = "disk:"
+
 // maxListing is how many entries one directory listing returns.
 //
 // A downloads folder with forty thousand files in it should produce a slow
@@ -111,6 +118,30 @@ func (s *Server) areasFor(ctx context.Context, user *auth.User) ([]area, error) 
 				Name: "Your folder",
 				Kind: "personal",
 				path: mine,
+			})
+		}
+	}
+
+	// Disks somebody has plugged into the server.
+	//
+	// This is the shortest path there is between a disk in a drawer and a person
+	// in another country: somebody walks to the server, plugs it in, and it is
+	// here. No account on anybody's computer, no sharing dialog, no name to
+	// resolve, nothing that has to stay awake.
+	//
+	// Read-only, and not as a matter of policy — the mount itself is. The disk
+	// belongs to whoever carried it in and is standing in another room.
+	if disks, err := s.host.PluggedDisks(ctx); err == nil {
+		for _, disk := range disks {
+			if !disk.Connected || disk.Path == "" {
+				continue
+			}
+			areas = append(areas, area{
+				ID:       pluggedAreaPrefix + disk.Name,
+				Name:     disk.Name,
+				Kind:     "plugged",
+				ReadOnly: true,
+				path:     disk.Path,
 			})
 		}
 	}

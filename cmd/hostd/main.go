@@ -63,6 +63,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "hostd: "+err.Error())
 		os.Exit(1)
 	}
+	// Made here rather than further down: --describe prints the registry and
+	// returns before anything else runs, so a service that needs a logger has
+	// to be able to register above that point or its operations are missing
+	// from the catalogue. That is exactly how the first version of the
+	// plugged-in disks went unnoticed — built, working, and absent from
+	// `hostd --describe`.
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
 	storage := hostd.NewStorageServices(*storageDir, *stateDir)
 	hostd.RegisterStorageOperations(registry, storage)
 	network := hostd.NewNetworkServices()
@@ -92,6 +100,17 @@ func main() {
 	shares := hostd.NewShareServices(storage, *stateDir)
 	hostd.RegisterShareOperations(registry, shares)
 
+	// Disks people plug in.
+	//
+	// The whole point of this one is that nobody presses anything. Somebody
+	// walks to the server with a disk in their hand, plugs it in, and it is
+	// readable from another country a few seconds later — which is the sentence
+	// this feature was finally asked for in, after the alternative asked a
+	// person at the far end to find a Windows share name, a Windows account and
+	// a password Windows would not tell them.
+	plugged := hostd.NewPluggedServices(storage, log)
+	hostd.RegisterPluggedOperations(registry, plugged)
+
 	hostd.RegisterBackupOperations(registry, hostd.NewBackupServices(
 		storage, appServices, *databasePath, *configDir, *stateDir, buildVersion()))
 
@@ -114,7 +133,10 @@ func main() {
 		return
 	}
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	// Watching for disks starts once everything is registered and the machine's
+	// own state has been put back. Before the socket opens, so a disk left
+	// plugged in across a restart is already readable by the time anything asks.
+	go plugged.Watch(context.Background())
 
 	// smb.conf is otherwise written only when somebody adds or removes a share,
 	// so everything it derives from the machine — the interfaces smbd binds

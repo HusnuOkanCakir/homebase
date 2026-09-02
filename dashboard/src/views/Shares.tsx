@@ -7,6 +7,7 @@ import {
   type SharedFolder,
   type StorageLocation,
 } from "../api";
+import { PluggedDisks } from "./PluggedDisks";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
 
@@ -132,6 +133,10 @@ export function Shares({
           recovery="The file server is not running, so none of these folders can be opened from another computer. Restarting the server usually starts it again; if it does not, this is worth reporting."
         />
       ) : null}
+
+      {/* Above the sharing configuration, because a disk somebody has just
+          plugged in is the thing they are standing there waiting for. */}
+      <PluggedDisks />
 
       {status.shares.length === 0 ? (
         <Nothing />
