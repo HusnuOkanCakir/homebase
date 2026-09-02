@@ -67,6 +67,42 @@ func (s *Server) syncFileSharingPassword(ctx context.Context, username, password
 	return ""
 }
 
+// EnsureEveryoneHasAFolder gives a private folder to every account that has
+// none, once, when core starts.
+//
+// The sign-in catch-up was not enough, and the person it failed for was the
+// owner. Folders are made when an account is created and again when somebody
+// signs in — but a session lasts a fortnight, so anybody still holding one from
+// before this feature existed never signs in and never gets a folder. The
+// administrator, who set the server up first and has been signed in ever since,
+// is the likeliest person in the house to be in that state.
+//
+// What that looked like: `people` opened for everybody except him, and Samba
+// said `canonicalize_connect_path failed for service people, path
+// .../people/okan` in a log he had no reason to read. On the dashboard the
+// folder appeared to exist, because the Files screen offers the area from the
+// people directory rather than from his own folder in it.
+//
+// In the background, because it is a few filesystem checks and nothing should
+// wait for them, and idempotent: hostd reports whether it actually made
+// anything, so a server that is already correct does no work and reconfigures
+// nothing.
+func (s *Server) EnsureEveryoneHasAFolder(ctx context.Context) {
+	go func() {
+		accounts, err := s.auth.Accounts(ctx)
+		if err != nil {
+			s.log.Warn("could not check who needs a private folder", "error", err)
+			return
+		}
+		for _, account := range accounts {
+			if _, err := s.host.MakePersonalFolder(ctx, account.Username); err != nil {
+				s.log.Warn("could not create a private folder",
+					"username", account.Username, "error", err)
+			}
+		}
+	}()
+}
+
 // catchUpFileSharing gives somebody what an account created today would have
 // come with, without making them wait for it.
 //

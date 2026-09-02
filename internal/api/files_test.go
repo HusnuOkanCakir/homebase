@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -677,5 +678,39 @@ func TestWindowsHousekeepingIsNotListedAsSomebodysFiles(t *testing.T) {
 	}
 	if !strings.Contains(body, "System backups") {
 		t.Fatal("a folder somebody made was hidden for looking systemish")
+	}
+}
+
+// The person this failed for was the administrator, and it failed for the
+// reason he was least likely to find: folders are made when an account is
+// created and again at sign-in, a session lasts a fortnight, and the man who
+// set the server up had not signed in since. `people` opened for everybody in
+// the household except him.
+func TestEverybodyGetsAFolderWithoutHavingToSignInAgain(t *testing.T) {
+	h, fake := newAppHarness(t)
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["share.make_personal_folder"] = map[string]any{"created": true}
+
+	token := h.signIn(t)
+	inviteAccount(t, h, token, "father")
+	inviteAccount(t, h, token, "brother")
+
+	// Nobody signs in. This is the sweep core runs when it starts.
+	h.server.EnsureEveryoneHasAFolder(context.Background())
+	waitForCall(t, fake, "share.make_personal_folder", 3)
+
+	asked := map[string]bool{}
+	for _, call := range fake.callsTo("share.make_personal_folder") {
+		if name, ok := call.Body["username"].(string); ok {
+			asked[name] = true
+		}
+	}
+	for _, who := range []string{"alex", "father", "brother"} {
+		if !asked[who] {
+			t.Errorf("%s would still have no folder, and `people` would refuse them", who)
+		}
 	}
 }

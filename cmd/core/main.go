@@ -223,6 +223,19 @@ func run(log *slog.Logger, opts runOptions) error {
 
 	server := api.NewServer(authService, jobManager, host, eventRecorder, log, version)
 
+	// Everybody who has an account gets the private folder an account created
+	// today comes with.
+	//
+	// Folders are made when an account is created and again when somebody signs
+	// in, and neither reached the administrator: a session lasts a fortnight, so
+	// the person who set the server up and never signed out never signed in
+	// either. `people` opened for the rest of the household and refused him,
+	// with the reason in a Samba log he had no reason to read.
+	//
+	// In the background and idempotent, so a server that is already correct
+	// does nothing.
+	server.EnsureEveryoneHasAFolder(context.Background())
+
 	// A local model, if this machine has one. Nothing is verified here: whether
 	// it answers is a question for the moment somebody asks it something, not
 	// for startup, and core must not refuse to boot because a model is down.
