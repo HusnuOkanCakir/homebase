@@ -630,3 +630,52 @@ func TestAMemberCanReadAndEjectAPluggedDisk(t *testing.T) {
 		t.Fatalf("a member could not finish with a disk: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// Windows hides its own plumbing with a file attribute rather than a leading
+// dot, and Linux knows nothing about that attribute. On the first real disk
+// plugged into this server, `System Volume Information` was two of the three
+// things on the screen and the file the household wanted was underneath.
+func TestWindowsHousekeepingIsNotListedAsSomebodysFiles(t *testing.T) {
+	h, fake := newAppHarness(t)
+	root := t.TempDir()
+
+	disk := filepath.Join(root, "plugged", "kingston")
+	for _, name := range []string{"System Volume Information", "$RECYCLE.BIN"} {
+		if err := os.MkdirAll(filepath.Join(disk, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(disk, "holiday.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A folder somebody made that merely looks systemish is still theirs.
+	if err := os.MkdirAll(filepath.Join(disk, "System backups"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["plugged.status"] = map[string]any{
+		"disks": []any{map[string]any{
+			"name": "kingston", "path": disk, "connected": true,
+		}},
+	}
+
+	headers := h.signedIn(t)
+	rec := h.do(http.MethodGet, "/api/v1/files?area=disk:kingston&path=", "", headers)
+	body := rec.Body.String()
+
+	for _, hidden := range []string{"System Volume Information", "RECYCLE"} {
+		if strings.Contains(body, hidden) {
+			t.Errorf("%q is listed as one of somebody's files", hidden)
+		}
+	}
+	if !strings.Contains(body, "holiday.jpg") {
+		t.Fatalf("the file they wanted is missing: %s", body)
+	}
+	if !strings.Contains(body, "System backups") {
+		t.Fatal("a folder somebody made was hidden for looking systemish")
+	}
+}

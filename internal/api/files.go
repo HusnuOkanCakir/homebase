@@ -288,7 +288,7 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, user *a
 		// retired person's folder is `.removed-sam-…` — and the operating
 		// system's everywhere else. Neither is what somebody opened this to
 		// find.
-		if strings.HasPrefix(name, ".") {
+		if strings.HasPrefix(name, ".") || windowsHousekeeping(name) {
 			continue
 		}
 		child := path.Join(where, name)
@@ -313,6 +313,27 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, user *a
 		"entries":   entries,
 		"truncated": truncated,
 	})
+}
+
+// windowsHousekeeping reports whether a name is Windows' own plumbing.
+//
+// Windows hides these with a file attribute rather than a leading dot, and
+// Linux has no idea about that attribute, so a disk formatted on Windows lists
+// `System Volume Information` as its first entry. On the first real disk
+// plugged into this server that was two of the three things on the screen, and
+// the one file the household actually wanted was underneath them.
+//
+// Exact names only. Anything cleverer — hiding what looks like a system name,
+// or reading the hidden attribute where a driver exposes it — risks hiding a
+// folder somebody made, which is a far worse failure than showing one they did
+// not.
+func windowsHousekeeping(name string) bool {
+	switch name {
+	case "System Volume Information", "$RECYCLE.BIN", "RECYCLER",
+		"$Recycle.Bin", "found.000", "MSOCache", "Recovery":
+		return true
+	}
+	return false
 }
 
 // --- Download ----------------------------------------------------------------------
