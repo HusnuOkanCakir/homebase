@@ -30,17 +30,28 @@ func (s *Server) registerRemoteRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/remote-folders",
 		s.require(auth.PermFilesRead, s.handleRemoteFolders))
 
-	// storage.modify to connect one, which is a deliberately higher bar than
-	// using it. Connecting hands this server a credential for a computer it
-	// does not administer and puts the contents of somebody's disk in front of
-	// the household; that is an administrator's decision even though the disk
-	// belongs to whoever plugged it in.
+	// files.write to connect one, and this was storage.modify — which only an
+	// administrator has, and which made the feature unusable for the situation
+	// it was built for.
+	//
+	// The person who plugs the disk in is the person at home. In this household
+	// that is not the administrator; the administrator is the one abroad asking
+	// for the file. Requiring their permission meant the man holding the disk
+	// had to telephone the man in another country to press a button, which is
+	// the exact problem this was meant to remove.
+	//
+	// What is actually being granted: a household member can make the server
+	// hold a credential for their own computer, open an SMB connection to a
+	// host on the local network, and offer that folder read-only to the people
+	// they choose. The credential is theirs and for their machine, nothing of
+	// the server's is exposed by it, and the mount cannot write. That is
+	// contributing a folder, not administering the server.
 	mux.Handle("POST /api/v1/remote-folders",
-		s.require(auth.PermStorageModify, s.handleConnectRemoteFolder))
+		s.require(auth.PermFilesWrite, s.handleConnectRemoteFolder))
 	mux.Handle("POST /api/v1/remote-folders/remove",
-		s.require(auth.PermStorageModify, s.handleDisconnectRemoteFolder))
+		s.require(auth.PermFilesWrite, s.handleDisconnectRemoteFolder))
 	mux.Handle("POST /api/v1/remote-folders/reconnect",
-		s.require(auth.PermStorageModify, s.handleReconnectRemoteFolder))
+		s.require(auth.PermFilesWrite, s.handleReconnectRemoteFolder))
 }
 
 func (s *Server) handleRemoteFolders(w http.ResponseWriter, r *http.Request, user *auth.User) {

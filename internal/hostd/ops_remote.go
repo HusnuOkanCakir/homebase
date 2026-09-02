@@ -68,8 +68,14 @@ func RegisterRemoteOperations(r *Registry, services *RemoteServices) {
 		// High. It hands this server a credential for somebody else's computer
 		// and puts the contents of a disk in front of the household. Nothing is
 		// destroyed, and that is not the measure.
+		//
+		// files.write rather than storage.modify, which is what this said first
+		// and what made the feature useless: only administrators hold
+		// storage.modify, and the person who plugs a disk in is whoever is at
+		// home — not, in the household this was built for, the administrator.
+		// See registerRemoteRoutes in core, which is where it is enforced.
 		Risk:        RiskHigh,
-		Permissions: []string{"storage.modify"},
+		Permissions: []string{"files.write"},
 		Confirm:     ConfirmRequired,
 		// Installing cifs-utils on a domestic connection.
 		Timeout:  10 * time.Minute,
@@ -87,7 +93,7 @@ func RegisterRemoteOperations(r *Registry, services *RemoteServices) {
 		// Medium: it takes something away, which is recoverable by connecting it
 		// again, and it deliberately cannot alter the other computer.
 		Risk:        RiskMedium,
-		Permissions: []string{"storage.modify"},
+		Permissions: []string{"files.write"},
 		Confirm:     ConfirmRequired,
 		Timeout:     2 * time.Minute,
 		Rollback:    "remote.connect, with the same details",
@@ -101,7 +107,7 @@ func RegisterRemoteOperations(r *Registry, services *RemoteServices) {
 		// Low: it retries something already agreed to, with credentials already
 		// held. The common case is a laptop that went to sleep.
 		Risk:        RiskLow,
-		Permissions: []string{"storage.modify"},
+		Permissions: []string{"files.write"},
 		Confirm:     ConfirmNone,
 		Timeout:     2 * time.Minute,
 		Handler:     Typed(services.reconnect),

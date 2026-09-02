@@ -18,7 +18,7 @@ import { Message } from "../components/Message";
  * folder then appears in Files like any other, reachable over Tailscale from
  * anywhere.
  */
-export function OtherComputers({ canManage }: { canManage: boolean }) {
+export function OtherComputers({ canConnect }: { canConnect: boolean }) {
   const [folders, setFolders] = useState<RemoteFolder[] | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [busy, setBusy] = useState(false);
@@ -57,12 +57,12 @@ export function OtherComputers({ canManage }: { canManage: boolean }) {
   }, [reload]);
 
   useEffect(() => {
-    if (!canManage) return;
+    if (!canConnect) return;
     void api
       .accounts()
       .then((result) => setAccounts(result.accounts))
       .catch(() => setAccounts([]));
-  }, [canManage]);
+  }, [canConnect]);
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -79,7 +79,7 @@ export function OtherComputers({ canManage }: { canManage: boolean }) {
 
   // Nothing connected and nothing to connect it with: a card explaining a
   // feature nobody is using is a card in the way.
-  if (folders !== null && folders.length === 0 && !canManage) return null;
+  if (folders !== null && folders.length === 0 && !canConnect) return null;
 
   return (
     <section className="card">
@@ -112,7 +112,7 @@ export function OtherComputers({ canManage }: { canManage: boolean }) {
                   </div>
                 </div>
                 <div className="row">
-                  {!folder.connected && canManage ? (
+                  {!folder.connected && canConnect ? (
                     <button
                       className="quiet"
                       disabled={busy}
@@ -121,7 +121,7 @@ export function OtherComputers({ canManage }: { canManage: boolean }) {
                       Try again
                     </button>
                   ) : null}
-                  {canManage ? (
+                  {canConnect ? (
                     <button
                       className="quiet"
                       disabled={busy}
@@ -165,7 +165,7 @@ export function OtherComputers({ canManage }: { canManage: boolean }) {
         </ul>
       )}
 
-      {canManage ? (
+      {canConnect ? (
         <details className="details" open={adding} onToggle={(e) => setAdding(e.currentTarget.open)}>
           <summary>Open a folder from another computer</summary>
 

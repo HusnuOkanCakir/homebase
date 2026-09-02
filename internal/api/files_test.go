@@ -630,3 +630,60 @@ func TestARestrictedRemoteFolderIsNotListedToEverybody(t *testing.T) {
 		t.Fatalf("a folder kept for somebody else is browsable: %s", rec.Body)
 	}
 }
+
+// The person who plugs a disk in is whoever is at home, and in a household with
+// one administrator that is not the administrator. Requiring storage.modify
+// meant the man holding the disk had to telephone the man in another country to
+// press a button — the exact problem this feature removes.
+func TestAMemberCanConnectAFolderFromTheirOwnComputer(t *testing.T) {
+	h, fake := newAppHarness(t)
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["remote.status"] = map[string]any{"installed": true, "folders": []any{}}
+	fake.responses["remote.connect"] = map[string]any{
+		"name": "dads-disk", "connected": true, "message": "open",
+	}
+	fake.responses["share.make_personal_folder"] = map[string]any{"username": "father"}
+
+	token := h.signIn(t)
+	code := inviteAccount(t, h, token, "father")
+	h.do(http.MethodPost, "/api/v1/auth/claim",
+		`{"username":"father","joining_code":"`+code+`","new_password":"a-password-of-their-own"}`, nil)
+
+	rec := h.do(http.MethodPost, "/api/v1/auth/login",
+		`{"username":"father","password":"a-password-of-their-own"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("the member could not sign in: %d %s", rec.Code, rec.Body)
+	}
+	var session struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &session)
+	member := map[string]string{}
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == SessionCookie {
+			member["Authorization"] = "Bearer " + cookie.Value
+		}
+	}
+
+	// They can see the section at all, which they could not before.
+	if rec := h.do(http.MethodGet, "/api/v1/remote-folders", "", member); rec.Code != http.StatusOK {
+		t.Fatalf("a member cannot see what is connected: %d %s", rec.Code, rec.Body)
+	}
+
+	rec = h.do(http.MethodPost, "/api/v1/remote-folders",
+		`{"name":"dads-disk","host":"dads-laptop","share":"sandisk",`+
+			`"username":"dad","password":"his-windows-password"}`, member)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a member could not connect their own disk: %d %s", rec.Code, rec.Body)
+	}
+
+	// And it is recorded against them, because whose credential the server is
+	// holding is worth being able to answer.
+	calls := fake.callsTo("remote.connect")
+	if len(calls) != 1 || calls[0].Body["added_by"] != "father" {
+		t.Fatalf("the connection was not recorded as theirs: %v", calls)
+	}
+}

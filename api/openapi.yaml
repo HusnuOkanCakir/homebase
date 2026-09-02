@@ -2537,9 +2537,18 @@ paths:
       tags: [remote]
       summary: Open a folder another computer on this network is sharing
       description: |
-        Requires `storage.modify` — a deliberately higher bar than using one. Connecting
-        hands this server a credential for a computer it does not administer and puts the
-        contents of somebody's disk in front of the household.
+        Requires `files.write`, so any household member can connect a folder from their own
+        computer — not only an administrator.
+
+        This asked for `storage.modify` first, which made the feature useless for the
+        situation it exists for: the person who plugs the disk in is whoever is at home, and
+        in a household with one administrator that is not the administrator. The man holding
+        the disk had to telephone the man in another country to press a button.
+
+        What is granted: a member can make the server hold a credential for their own
+        computer, open an SMB connection to a host on the local network, and offer that
+        folder read-only. The credential is theirs, for their machine; nothing of the
+        server's is exposed by it, and the mount cannot write.
 
         **Read-only, always.** The mount itself is read-only, so nothing on this server can
         alter a disk belonging to somebody standing next to it — not this API, not a
@@ -2615,7 +2624,7 @@ paths:
       tags: [remote]
       summary: Stop offering a folder from another computer
       description: |
-        Requires `storage.modify`, and the folder's name typed back as confirmation.
+        Requires `files.write`, and the folder's name typed back as confirmation.
 
         Nothing on the other computer is touched, and that is not a promise about intent —
         the mount is read-only, so it could not be even if something here tried.
@@ -2655,7 +2664,7 @@ paths:
       tags: [remote]
       summary: Try a folder on another computer again
       description: |
-        Requires `storage.modify`. The common case is a laptop that went to sleep, or a
+        Requires `files.write`. The common case is a laptop that went to sleep, or a
         server that has been restarted — remote folders are deliberately not mounted at
         boot, because the computer they live on is expected to be absent most of the time
         and a boot that waited for it would be a boot that hung.

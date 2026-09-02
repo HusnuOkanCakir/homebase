@@ -252,6 +252,7 @@ export function Dashboard({ user, onSignOut }: Props) {
             <Shares
               canManage={user.permissions.includes("network.modify")}
               canSetAccess={user.permissions.includes("accounts.manage")}
+              canConnect={user.permissions.includes("files.write")}
               serverName={system?.hostname ?? ""}
             />
           </>

@@ -35,12 +35,16 @@ import { Message } from "../components/Message";
 export function Shares({
   canManage,
   canSetAccess,
+  canConnect,
   serverName,
 }: {
   canManage: boolean;
   /** Whether this person may choose who opens a folder. It is an accounts
    *  question, not a network one, so it is a separate permission. */
   canSetAccess: boolean;
+  /** Whether this person may connect a folder from a computer of their own.
+   *  Deliberately not an administrator's right: see registerRemoteRoutes. */
+  canConnect: boolean;
   serverName: string;
 }) {
   const [status, setStatus] = useState<ShareStatus | null>(null);
@@ -140,10 +144,17 @@ export function Shares({
         <Reaching shares={status.shares} users={status.users} host={host} />
       )}
 
+      {/* Outside the administrator block, and that was the bug.
+          Connecting a disk is done by whoever is at home holding it, who in a
+          household with one administrator is not the administrator. Nested in
+          here, the section was invisible to exactly the person it exists for —
+          he opened Files, found nothing called anything like it, and had to ask
+          the person abroad whether the server was broken. */}
+      <OtherComputers canConnect={canConnect} />
+
       {canManage ? (
         <>
           <People users={status.users} busy={busy} run={run} />
-          <OtherComputers canManage={canSetAccess} />
           <Folders
             shares={status.shares}
             locations={locations}
@@ -155,9 +166,14 @@ export function Shares({
         </>
       ) : (
         <section className="card">
+          {/* Narrowed, because it stopped being true. It used to sit under a
+              screen where somebody without network.modify could do nothing at
+              all; they can now connect a folder from their own computer, and a
+              flat "you cannot change anything" directly under the button that
+              does is the screen contradicting itself. */}
           <p className="muted">
-            You can see what is shared but not change it. Ask whoever set up this
-            server.
+            Choosing what the server itself shares is done by whoever set it up.
+            You can still open a folder from a computer of your own, above.
           </p>
         </section>
       )}
