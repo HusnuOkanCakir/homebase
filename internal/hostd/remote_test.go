@@ -1,6 +1,8 @@
 package hostd
 
 import (
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,5 +68,65 @@ func TestAFolderOnAnotherComputerIsMountedReadOnly(t *testing.T) {
 	// or fill the journal with failures nobody can act on.
 	if strings.Contains(unit, "[Install]") {
 		t.Error("this would be mounted at boot, when the other computer is off")
+	}
+}
+
+// The first household hit this on their first attempt. They typed the computer
+// name their own PC reports — `whoami` says `ozan\fozan` — and got "Homebase
+// could not open that folder", with a recovery line about checking the password.
+// The journal said `could not resolve address for ozan`. Nothing about the
+// password was wrong.
+func TestWhatMountSaidBecomesSomethingToActOn(t *testing.T) {
+	folder := RemoteFolder{Name: "dads-disk", Host: "ozan", Share: "slayer"}
+
+	cases := []struct {
+		said     string
+		reason   mountFailure
+		mentions string
+	}{
+		{"mount error: could not resolve address for ozan: Unknown error",
+			mountUnresolved, "could not find a computer called ozan"},
+		{"mount error(13): Permission denied", mountRefused, "refused that name and password"},
+		{"mount error(2): No such file or directory", mountNoSuchShare, "nothing shared called slayer"},
+		{"mount error(112): Host is down", mountUnreachable, "did not answer"},
+		{"something nobody has seen before", mountUnknown, "switched on and awake"},
+	}
+	for _, c := range cases {
+		if got := classifyMountFailure(c.said); got != c.reason {
+			t.Errorf("%q was read as %v, not %v", c.said, got, c.reason)
+		}
+		problem := c.reason.asError(folder, c.said)
+		var typed *Error
+		if !errors.As(problem, &typed) {
+			t.Fatalf("%q did not produce a typed error", c.said)
+		}
+		whole := typed.Message + " " + typed.Recovery
+		if !strings.Contains(whole, c.mentions) {
+			t.Errorf("%q produced %q, which does not mention %q", c.said, whole, c.mentions)
+		}
+		// What mount actually said is kept, so somebody who does read logs can
+		// see it without going to the journal.
+		if typed.Detail != c.said {
+			t.Errorf("the underlying message was lost: %q", typed.Detail)
+		}
+	}
+}
+
+// Only a bare name is worth retrying as mDNS. An address that does not answer
+// is not going to answer as `192.168.1.42.local`, and a name that already has a
+// dot in it has been spelled out on purpose.
+func TestOnlyABareNameIsWorthRetryingAsMDNS(t *testing.T) {
+	worthIt := func(host string) bool {
+		return !strings.Contains(host, ".") && net.ParseIP(host) == nil
+	}
+	for _, host := range []string{"ozan", "dads-laptop", "OZAN"} {
+		if !worthIt(host) {
+			t.Errorf("%q would not be retried as an mDNS name", host)
+		}
+	}
+	for _, host := range []string{"192.168.1.42", "ozan.local", "nas.home.arpa", "::1"} {
+		if worthIt(host) {
+			t.Errorf("%q would be retried as %s.local, which is nonsense", host, host)
+		}
 	}
 }

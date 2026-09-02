@@ -3,6 +3,7 @@ package hostd
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -158,45 +159,193 @@ TimeoutSec=15
 		remoteCredentialsPath(folder.Name), uid, gid)
 }
 
-// mountRemoteFolder writes the unit and starts it.
-func mountRemoteFolder(ctx context.Context, root string, folder RemoteFolder) error {
+// mountRemoteFolder writes the unit and starts it, and returns the host that
+// actually worked.
+//
+// That return value is the interesting part. See below: a bare Windows computer
+// name usually cannot be resolved here and `<name>.local` usually can, so the
+// name that succeeds is not always the name that was typed.
+func mountRemoteFolder(ctx context.Context, root string, folder RemoteFolder) (string, error) {
 	mountPoint := remoteMountPoint(root, folder.Name)
 	if err := underStorageRoot(root, mountPoint); err != nil {
-		return internalError(err.Error())
+		return "", internalError(err.Error())
 	}
 	if err := os.MkdirAll(mountPoint, 0o755); err != nil {
-		return internalError("creating " + mountPoint + ": " + err.Error())
+		return "", internalError("creating " + mountPoint + ": " + err.Error())
 	}
 
 	account, err := user.Lookup(serviceAccount)
 	if err != nil {
-		return internalError("looking up the " + serviceAccount + " account: " + err.Error())
+		return "", internalError("looking up the " + serviceAccount + " account: " + err.Error())
 	}
 	uid, _ := strconv.Atoi(account.Uid)
 	gid, _ := strconv.Atoi(account.Gid)
 
+	reason, err := attemptMount(ctx, folder, mountPoint, uid, gid)
+	if err == nil {
+		return folder.Host, nil
+	}
+
+	// A name that would not resolve, tried again as an mDNS name.
+	//
+	// This is the failure the first household hit, and it looked like nothing
+	// they had done wrong: they typed the computer name their own PC reports —
+	// `whoami` says `ozan\fozan` — and got "Homebase could not open that
+	// folder". The journal said `could not resolve address for ozan`.
+	//
+	// hostd cannot resolve anything itself; RestrictAddressFamilies leaves it
+	// AF_UNIX and AF_NETLINK. The lookup happens inside mount.cifs, which
+	// systemd starts unrestricted. On that network Windows answered to
+	// `ozan.local` over mDNS and to nothing else: NetBIOS was silent and DNS
+	// had never heard of it. So rather than sending somebody to find an
+	// address, try the name that works.
+	if reason == mountUnresolved && !strings.Contains(folder.Host, ".") &&
+		net.ParseIP(folder.Host) == nil {
+		withMDNS := folder
+		withMDNS.Host += ".local"
+		retryReason, retryErr := attemptMount(ctx, withMDNS, mountPoint, uid, gid)
+		if retryErr == nil {
+			return withMDNS.Host, nil
+		}
+		// The retry's answer wins whenever it got further, and it usually does.
+		// Reporting the first attempt's "no computer called ozan" after the
+		// second one reached that computer and was told the password was wrong
+		// sends somebody to check their network while the actual problem is on
+		// the account screen.
+		if retryReason != mountUnresolved {
+			return "", retryErr
+		}
+	}
+	return "", err
+}
+
+// attemptMount writes the unit for one host and starts it, reporting why it
+// failed in a form the caller can act on.
+func attemptMount(ctx context.Context, folder RemoteFolder, mountPoint string,
+	uid, gid int) (mountFailure, error) {
 	body := remoteMountUnit(folder, mountPoint, uid, gid)
 	if err := writeRootFile(unitPath(mountPoint), body, 0o644); err != nil {
-		return err
+		return mountUnknown, err
 	}
 	if err := runSystemctl(ctx, "daemon-reload"); err != nil {
-		return internalError("reloading systemd: " + err.Error())
+		return mountUnknown, internalError("reloading systemd: " + err.Error())
 	}
 
 	unit := mountUnitName(mountPoint)
 	if err := runSystemctl(ctx, "start", unit); err != nil {
-		return &Error{
-			Code:        "remote.could_not_connect",
-			Message:     "Homebase could not open that folder.",
-			Detail:      strings.TrimSpace(err.Error()),
-			Recoverable: true,
-			Recovery: "Check that the computer is switched on and awake, that the " +
-				"folder is still shared on it, and that the name and password are " +
-				"the ones it expects.",
-			Status: 502,
+		// systemctl says "Job failed. See journalctl -xe", which is true and
+		// useless to somebody standing at a laptop with a disk in their hand.
+		// The reason is one line in the journal and it is the whole answer, so
+		// it is fetched and turned into something they can act on.
+		said := mountErrorFromJournal(ctx, unit)
+		reason := classifyMountFailure(said)
+		return reason, reason.asError(folder, said)
+	}
+	return mountUnknown, nil
+}
+
+// mountErrorFromJournal digs out what mount.cifs actually said.
+func mountErrorFromJournal(ctx context.Context, unit string) string {
+	journalctl, err := exec.LookPath("journalctl")
+	if err != nil {
+		return ""
+	}
+	cmd := exec.CommandContext(ctx, journalctl, "-u", unit, "-n", "25",
+		"--no-pager", "-o", "cat")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	// The last line that came from mount rather than from systemd. systemd's
+	// lines describe the job; mount's line describes the problem.
+	said := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "mount error") || strings.Contains(line, "CIFS:") {
+			said = line
 		}
 	}
-	return nil
+	return said
+}
+
+// mountFailure is why a mount would not happen, in terms somebody can do
+// something about.
+type mountFailure int
+
+const (
+	mountUnknown mountFailure = iota
+	mountUnresolved
+	mountRefused
+	mountNoSuchShare
+	mountUnreachable
+)
+
+// classifyMountFailure reads what mount.cifs said.
+//
+// Matching on text, which is ordinarily a thing to avoid. The alternative here
+// is showing somebody "Job failed" and letting them guess between a sleeping
+// laptop, a wrong password, a wrong share name and a name that does not
+// resolve — four different evenings. A phrase that changes in a future release
+// costs the specific message and falls back to the general one, which is
+// exactly what they had before.
+func classifyMountFailure(said string) mountFailure {
+	lower := strings.ToLower(said)
+	switch {
+	case strings.Contains(lower, "could not resolve address"),
+		strings.Contains(lower, "name or service not known"):
+		return mountUnresolved
+	case strings.Contains(lower, "permission denied"),
+		strings.Contains(lower, "logon_failure"),
+		strings.Contains(lower, "access_denied"):
+		return mountRefused
+	case strings.Contains(lower, "bad_network_name"),
+		strings.Contains(lower, "no such file or directory"):
+		return mountNoSuchShare
+	case strings.Contains(lower, "host is down"),
+		strings.Contains(lower, "no route to host"),
+		strings.Contains(lower, "connection timed out"),
+		strings.Contains(lower, "unreachable"):
+		return mountUnreachable
+	}
+	return mountUnknown
+}
+
+// asError turns a reason into the sentence somebody reads.
+func (f mountFailure) asError(folder RemoteFolder, said string) error {
+	problem := &Error{
+		Code:        "remote.could_not_connect",
+		Message:     "Homebase could not open that folder.",
+		Detail:      said,
+		Recoverable: true,
+		Status:      502,
+	}
+	switch f {
+	case mountUnresolved:
+		problem.Message = "Homebase could not find a computer called " + folder.Host +
+			" on this network."
+		problem.Recovery = "Use that computer's address instead of its name. On it, " +
+			"press Windows+R, type cmd, then type ipconfig — the address is the line " +
+			"marked IPv4 and looks like 192.168.1.42."
+	case mountRefused:
+		problem.Message = folder.Host + " refused that name and password."
+		problem.Recovery = "Use an account that exists on that computer, not the name " +
+			"you sign in with here. If that computer signs in with an email address, " +
+			"sharing will not accept it — make a local account on it and use that."
+	case mountNoSuchShare:
+		problem.Message = folder.Host + " has nothing shared called " + folder.Share + "."
+		problem.Recovery = "On that computer, right-click the disk, Properties, " +
+			"Sharing — the name to use is the share name, which is not the drive " +
+			"letter and is often not the folder's name either."
+	case mountUnreachable:
+		problem.Message = folder.Host + " did not answer."
+		problem.Recovery = "Check that computer is switched on and awake, and on the " +
+			"same network as this server."
+	default:
+		problem.Recovery = "Check that the computer is switched on and awake, that the " +
+			"folder is still shared on it, and that the name and password are the " +
+			"ones it expects."
+	}
+	return problem
 }
 
 // unmountRemoteFolder stops the mount and removes everything Homebase wrote.

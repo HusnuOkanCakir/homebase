@@ -282,13 +282,19 @@ func (s *RemoteServices) connect(ctx context.Context, params ConnectRemoteParams
 	if err := writeRemoteCredentials(name, folder.Username, params.Password); err != nil {
 		return nil, err
 	}
-	if err := mountRemoteFolder(ctx, s.storage.root, folder); err != nil {
+	// The host that worked, which is not always the host that was typed: a bare
+	// Windows computer name is usually unresolvable from here and the same name
+	// with `.local` on the end usually is not. Recording what worked means the
+	// next reconnect does not repeat the failed attempt.
+	working, err := mountRemoteFolder(ctx, s.storage.root, folder)
+	if err != nil {
 		// Nothing is recorded and nothing is left behind. A folder that could
 		// not be opened is not a folder somebody has to remember to remove, and
 		// a credentials file for it would be a password kept for nothing.
 		unmountRemoteFolder(ctx, s.storage.root, name)
 		return nil, err
 	}
+	folder.Host = working
 
 	folders = append(folders, folder)
 	if err := s.save(folders); err != nil {
@@ -296,13 +302,21 @@ func (s *RemoteServices) connect(ctx context.Context, params ConnectRemoteParams
 		return nil, err
 	}
 
+	found := ""
+	if folder.Host != host {
+		// Said out loud rather than quietly recorded. Somebody who typed `ozan`
+		// and sees `ozan.local` afterwards should know why, and that the name
+		// they typed was not wrong so much as not findable.
+		found = " Homebase found it as " + folder.Host + "."
+	}
 	return map[string]any{
 		"name":      name,
-		"host":      host,
+		"host":      folder.Host,
 		"share":     share,
 		"connected": true,
-		"message": name + " is now open on this server, from " + host +
-			". It is read-only: nothing here can change what is on that computer.",
+		"message": name + " is now open on this server, from " + folder.Host +
+			"." + found + " It is read-only: nothing here can change what is on " +
+			"that computer.",
 	}, nil
 }
 
@@ -378,11 +392,23 @@ func (s *RemoteServices) reconnect(ctx context.Context, params RemoteFolderRef) 
 	// reconnect happens hours or days later, and whatever is on disk from last
 	// time may have been written by a version of Homebase that is no longer
 	// running.
-	if err := mountRemoteFolder(ctx, root, folder); err != nil {
+	working, err := mountRemoteFolder(ctx, root, folder)
+	if err != nil {
 		return nil, err
+	}
+	// A computer can change how it is reachable between one day and the next —
+	// the name that resolved last week may not today, and the other way round.
+	// Whatever worked this time is what is kept.
+	if working != folder.Host {
+		folder.Host = working
+		if _, index, found := findRemoteFolder(folders, name); found {
+			folders[index] = folder
+			_ = s.save(folders)
+		}
 	}
 	return map[string]any{
 		"name":      name,
+		"host":      folder.Host,
 		"connected": true,
 		"message":   name + " is open again.",
 	}, nil
