@@ -7,6 +7,7 @@ import {
   type SharedFolder,
   type StorageLocation,
 } from "../api";
+import { OtherComputers } from "./OtherComputers";
 import { describeError } from "../App";
 import { Message } from "../components/Message";
 
@@ -142,6 +143,7 @@ export function Shares({
       {canManage ? (
         <>
           <People users={status.users} busy={busy} run={run} />
+          <OtherComputers canManage={canSetAccess} />
           <Folders
             shares={status.shares}
             locations={locations}

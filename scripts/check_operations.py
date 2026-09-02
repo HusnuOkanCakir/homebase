@@ -179,6 +179,13 @@ def main() -> int:
         # so a copy of it sitting in an append-only log is a copy that outlives
         # every reason it was ever written down.
         "share.set_password": ["password"],
+        # The password for an account on somebody else's computer, so that this
+        # server can open a folder they are sharing. Worse than the others to
+        # keep: it is a credential for a machine Homebase does not administer
+        # and cannot rotate, belonging to a person who is not the one running
+        # this server. It reaches mount.cifs through a root-only file and must
+        # never reach the log.
+        "remote.connect": ["password"],
     }
     for name, fields in TAKES_A_SECRET.items():
         operation = declared.get(name)

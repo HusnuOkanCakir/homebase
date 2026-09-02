@@ -380,6 +380,8 @@ def build_hostd(version: str, binaries: Path) -> Path:
     # Homebase nobody asked to share anything has no SMB server on it at all.
     install_file(REPO_ROOT / "packaging/install-samba",
                  root / "usr/libexec/homebase/install-samba", 0o755)
+    install_file(REPO_ROOT / "packaging/install-cifs",
+                 root / "usr/libexec/homebase/install-cifs", 0o755)
 
     # Creating the account somebody opens a shared folder with. Separate from
     # hostd because hostd may not write /etc/passwd — see the unit file.
@@ -400,6 +402,7 @@ def build_hostd(version: str, binaries: Path) -> Path:
                  "homebase-update-check.timer", "homebase-repair.service",
                  "homebase-ddns.service", "homebase-ddns.timer",
                  "homebase-install-samba.service",
+                 "homebase-install-cifs.service",
                  "homebase-share-account.service",
                  "homebase-firewall.service",
                  "homebase-dns-resolver.service"):

@@ -91,6 +91,7 @@ func main() {
 	// a share is a folder on a disk storage already knows about.
 	shares := hostd.NewShareServices(storage, *stateDir)
 	hostd.RegisterShareOperations(registry, shares)
+	hostd.RegisterRemoteOperations(registry, hostd.NewRemoteServices(storage, *stateDir))
 
 	hostd.RegisterBackupOperations(registry, hostd.NewBackupServices(
 		storage, appServices, *databasePath, *configDir, *stateDir, buildVersion()))

@@ -2,7 +2,6 @@ package hostd
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"time"
 )
@@ -457,25 +456,9 @@ func (s *ShareServices) setAccess(ctx context.Context, params ShareAccessParams)
 	// `valid users` line, and a malformed one does not produce a share with a
 	// broken rule: it produces a file server that refuses to start, taking
 	// every other folder with it.
-	people := make([]string, 0, len(params.Access))
-	for _, name := range params.Access {
-		name = strings.ToLower(strings.TrimSpace(name))
-		if name == "" {
-			continue
-		}
-		if !validShareName.MatchString(name) {
-			return nil, &Error{
-				Code:        "share.invalid_username",
-				Message:     "That is not a name Homebase can give access to.",
-				Detail:      name + " must match " + shareNamePattern,
-				Recoverable: true,
-				Recovery:    "Use lowercase letters, numbers and hyphens.",
-				Status:      400,
-			}
-		}
-		if !slices.Contains(people, name) {
-			people = append(people, name)
-		}
+	people, err := validatedAccessList(params.Access)
+	if err != nil {
+		return nil, err
 	}
 
 	share.Access = people

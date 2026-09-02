@@ -506,3 +506,127 @@ func TestAPrivateFolderThatIsNotThereIsNotOffered(t *testing.T) {
 		t.Fatalf("a folder that does not exist is offered: %s", rec.Body)
 	}
 }
+
+// --- Folders on other people's computers -------------------------------------------
+
+// The scenario this whole feature is for: a disk in somebody's laptop at home,
+// reached from a browser in another country. The point of writing the file API
+// around an *area* rather than a path is that this needed no new shape.
+func TestAFolderOnAnotherComputerIsBrowsedLikeAnyOther(t *testing.T) {
+	h, fake := newAppHarness(t)
+	root := t.TempDir()
+
+	// Stands in for the mount point: as far as core is concerned a remote
+	// folder is a directory hostd reported, and everything below this is the
+	// same code path a shared folder takes.
+	disk := filepath.Join(root, "remote", "dads-disk")
+	if err := os.MkdirAll(disk, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(disk, "tax-2019.pdf"),
+		[]byte("the papers"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["remote.status"] = map[string]any{
+		"installed": true,
+		"folders": []any{map[string]any{
+			"name": "dads-disk", "host": "dads-laptop", "share": "sandisk",
+			"username": "dad", "path": disk, "connected": true,
+			"added_at": "2026-09-02T10:00:00Z",
+		}},
+	}
+
+	headers := h.signedIn(t)
+
+	rec := h.do(http.MethodGet, "/api/v1/files/areas", "", headers)
+	if !strings.Contains(rec.Body.String(), "on:dads-disk") {
+		t.Fatalf("the folder on the other computer is not offered: %s", rec.Body)
+	}
+	// Read-only, and not as a matter of policy that could be relaxed: the mount
+	// itself is read-only, so nothing here can reach into a disk that belongs
+	// to somebody standing next to it.
+	if !strings.Contains(rec.Body.String(), `"read_only":true`) {
+		t.Fatalf("it is offered as writable: %s", rec.Body)
+	}
+
+	rec = h.do(http.MethodGet, "/api/v1/files?area=on:dads-disk&path=", "", headers)
+	if !strings.Contains(rec.Body.String(), "tax-2019.pdf") {
+		t.Fatalf("listing it returned %d: %s", rec.Code, rec.Body)
+	}
+
+	rec = h.do(http.MethodGet,
+		"/api/v1/files/content?area=on:dads-disk&path=tax-2019.pdf", "", headers)
+	if rec.Code != http.StatusOK || rec.Body.String() != "the papers" {
+		t.Fatalf("downloading returned %d: %s", rec.Code, rec.Body)
+	}
+
+	// And it cannot be written to through the file API either, whatever the
+	// mount would allow.
+	rec = h.do(http.MethodPost, "/api/v1/files/remove",
+		`{"area":"on:dads-disk","path":"tax-2019.pdf"}`, headers)
+	if rec.Code == http.StatusOK {
+		t.Fatal("a file on somebody else's disk was deleted from here")
+	}
+	if _, err := os.Stat(filepath.Join(disk, "tax-2019.pdf")); err != nil {
+		t.Fatal("the file on the other computer is gone")
+	}
+}
+
+// A laptop that has gone to sleep leaves a folder that is configured, listed
+// and empty — which looks exactly like one whose files have been deleted.
+func TestASleepingComputersFolderIsNotOffered(t *testing.T) {
+	h, fake := newAppHarness(t)
+
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["remote.status"] = map[string]any{
+		"installed": true,
+		"folders": []any{map[string]any{
+			"name": "dads-disk", "host": "dads-laptop", "share": "sandisk",
+			"path": "/srv/homebase/storage/remote/dads-disk", "connected": false,
+			"added_at": "2026-09-02T10:00:00Z",
+		}},
+	}
+
+	headers := h.signedIn(t)
+	rec := h.do(http.MethodGet, "/api/v1/files/areas", "", headers)
+	if strings.Contains(rec.Body.String(), "dads-disk") {
+		t.Fatalf("a folder on a sleeping computer is offered as browsable: %s", rec.Body)
+	}
+}
+
+// A folder connected for one person is not listed to the rest of the house,
+// with its name on it.
+func TestARestrictedRemoteFolderIsNotListedToEverybody(t *testing.T) {
+	h, fake := newAppHarness(t)
+
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["remote.status"] = map[string]any{
+		"installed": true,
+		"folders": []any{map[string]any{
+			"name": "dads-disk", "host": "dads-laptop", "share": "sandisk",
+			"path": "/tmp", "connected": true, "access": []any{"someone-else"},
+			"added_at": "2026-09-02T10:00:00Z",
+		}},
+	}
+
+	headers := h.signedIn(t)
+	if rec := h.do(http.MethodGet, "/api/v1/remote-folders", "", headers); strings.Contains(
+		rec.Body.String(), "dads-disk") {
+		t.Fatalf("a folder kept for somebody else is listed: %s", rec.Body)
+	}
+	if rec := h.do(http.MethodGet, "/api/v1/files/areas", "", headers); strings.Contains(
+		rec.Body.String(), "dads-disk") {
+		t.Fatalf("a folder kept for somebody else is browsable: %s", rec.Body)
+	}
+}

@@ -171,6 +171,51 @@ is unreliable over the tunnel on iOS and on Windows, which has cost this project
 
 Turn Tailscale off when you get home. You are already on the network it connects you to.
 
+## A disk that is plugged into somebody's own computer
+
+The situation this is for: a disk lives in a drawer, somebody at home plugs it into **their
+own** computer, and somebody who is away needs a file off it. The server does not have that
+disk, and copying it across first only works if you already know which files are wanted.
+
+Nothing gets installed on the computer with the disk. Windows has shared folders built in;
+Homebase just opens one.
+
+**On the computer with the disk**
+
+1. Plug the disk in.
+2. Right-click the drive or the folder → **Properties** → **Sharing** → **Advanced Sharing**
+   → tick **Share this folder**.
+3. Note the **share name** it gives you. That is not the drive letter — a disk that appears
+   as `G:` is usually shared as something like `sandisk`. Rename it here if it has a space
+   in it.
+4. Under **Permissions**, make sure the account you are going to use can read it.
+5. Stop that computer going to sleep while somebody is reading from it. Sleep is the most
+   common reason this appears to stop working.
+
+**On Homebase**, under **Files** → **Folders on other computers** → *Open a folder from
+another computer*: what to call it here, the computer's name on the network, the share name,
+and an account on **that** computer with its password.
+
+It then appears in **Files** like any other folder, which means somebody away from home
+reaches it in a browser over [Tailscale](remote-access.md) — nothing installed at their end
+either.
+
+!!! note "Read-only, and not as a matter of policy"
+
+    Homebase opens these folders read-only. Nothing on this server can change or delete
+    anything on that computer — not the Files screen, not somebody signed in here, not a
+    server that has been broken into. The disk belongs to whoever plugged it in.
+
+**When that computer goes to sleep or is unplugged**, the folder stays listed and says it is
+not answering, with a **Try again** button. It is not mounted at boot on purpose: a laptop in
+the next room is switched off most of the time, and a server that waited for one at startup
+would be a server that hung.
+
+**The password is kept on the server**, so the folder can be opened again after a restart. It
+is stored where only the server itself can read it and is never displayed again — but it is a
+password for somebody else's computer. Use an account on that machine with no more access
+than this needs, rather than the one it is administered with.
+
 ## When it does not work
 
 **"Cannot find the server", or nothing at all.** Check the Files page. If it says the file
@@ -186,6 +231,13 @@ never heard of.
 **The disk is not connected.** A share on a disk that has been unplugged is still configured
 and still listed; it just has nothing behind it. The Files page says which. Plug the disk
 back in and it works again with no further setting up.
+
+**A folder on another computer says that computer is not answering.** In order of how often
+it is the cause: the computer went to sleep, the disk was unplugged, the folder stopped being
+shared, or that computer's name changed on the network. Wake it and press **Try again**. If
+it still refuses, check the share is still there under Properties → Sharing, and that the
+account and password are the ones it expects — Windows will not tell Homebase which of those
+is wrong, and neither can Homebase.
 
 ## From a terminal
 

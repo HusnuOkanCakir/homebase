@@ -120,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerNetworkRoutes(mux)
 	s.registerShareRoutes(mux)
 	s.registerFileRoutes(mux)
+	s.registerRemoteRoutes(mux)
 	s.registerUpdateRoutes(mux)
 	s.registerRecoveryToolRoutes(mux)
 	s.registerEventRoutes(mux)

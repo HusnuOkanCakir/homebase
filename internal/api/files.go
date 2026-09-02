@@ -58,6 +58,14 @@ import (
 // cannot collide with one.
 const areaPersonal = "me"
 
+// remoteAreaPrefix namespaces the folders that live on other computers.
+//
+// Without it a folder somebody connects called "documents" would collide with
+// the shared folder of that name, and whichever came second in the list would
+// be unreachable — silently, because an area is looked up by matching the first
+// one that answers to the name.
+const remoteAreaPrefix = "on:"
+
 // maxListing is how many entries one directory listing returns.
 //
 // A downloads folder with forty thousand files in it should produce a slow
@@ -111,6 +119,35 @@ func (s *Server) areasFor(ctx context.Context, user *auth.User) ([]area, error) 
 				Name: "Your folder",
 				Kind: "personal",
 				path: mine,
+			})
+		}
+	}
+
+	// Folders on other people's computers, which are areas like any other.
+	//
+	// This is the whole reason the file API was written around an *area* rather
+	// than a path: a disk in somebody's laptop in the next room reaches a
+	// browser in another country without a single line of this file changing
+	// shape. Only the connected ones — a laptop that has gone to sleep leaves a
+	// folder that lists as empty, which looks exactly like one whose files have
+	// been deleted.
+	if remote, err := s.host.RemoteFolders(ctx); err == nil {
+		for _, folder := range remote.Folders {
+			if !folder.Connected || folder.Path == "" {
+				continue
+			}
+			if !mayOpenShare(folder.Access, user.Username) {
+				continue
+			}
+			areas = append(areas, area{
+				ID:   remoteAreaPrefix + folder.Name,
+				Name: folder.Name,
+				Kind: "remote",
+				// Read-only here because it is read-only at the mount: nothing
+				// on this server can write to a disk that belongs to somebody
+				// standing next to it.
+				ReadOnly: true,
+				path:     folder.Path,
 			})
 		}
 	}

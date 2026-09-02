@@ -1,0 +1,26 @@
+#!/bin/sh
+#
+# Install the client that lets this server open a folder on another computer.
+#
+# The counterpart of install-samba, and the opposite direction: that one makes
+# this machine a file server, this one makes it a client of somebody else's. It
+# is what allows a disk plugged into a laptop in the next room to be reachable
+# from a phone in another country, without anybody installing Homebase software
+# on that laptop.
+#
+# Separate from install-samba because they are separate intentions with separate
+# reasons to be refused. A household that shares folders from the server has no
+# need of a CIFS client, and a package that is not installed is one that cannot
+# have a vulnerability that matters here.
+#
+# There is no argument. The package list is written here, in a file the package
+# installs, and nothing a caller sends reaches this script at all.
+
+set -eu
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y --no-install-recommends cifs-utils
+
+echo "install-cifs: cifs-utils is installed" >&2

@@ -370,6 +370,14 @@ export function FileBrowser() {
         </p>
       ) : null}
 
+      {area?.kind === "remote" ? (
+        <p className="hint">
+          This is on another computer, not on the server. It is open for as long as
+          that computer is awake with the disk plugged in, and Homebase can only
+          read it — nothing here can change what is on it.
+        </p>
+      ) : null}
+
       {area?.kind === "personal" ? (
         <p className="hint">
           This folder is yours. The other people on this server cannot open it,

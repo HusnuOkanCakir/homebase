@@ -62,6 +62,8 @@ tags:
     description: The people who use this server
   - name: files
     description: Browsing, fetching and changing files, over HTTPS rather than SMB
+  - name: remote
+    description: Folders that live on other computers on the home network
 
 security:
   - sessionCookie: []
@@ -2484,6 +2486,206 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
           description: A folder that is not empty, with no confirmation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /remote-folders:
+    get:
+      tags: [remote]
+      summary: The folders on other computers this server can open
+      description: |
+        Requires `files.read`, and lists only the ones this person may open — a folder
+        connected for one member of the household is not listed to everybody with its name
+        on it.
+
+        `connected` is the field that matters. A laptop that has gone to sleep leaves a
+        folder that is configured, listed and empty, which looks exactly like one whose
+        files have been deleted.
+      operationId: listRemoteFolders
+      responses:
+        "200":
+          description: What is connected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  installed:
+                    type: boolean
+                    description: |
+                      Whether this machine can open a folder on another one at all. The
+                      client is not part of the base installation; it is fetched the first
+                      time somebody connects a folder.
+                  folders:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        host: { type: string }
+                        share: { type: string }
+                        username: { type: string }
+                        added_by: { type: string }
+                        access:
+                          type: array
+                          items: { type: string }
+                        added_at: { type: string, format: date-time }
+                        connected: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [remote]
+      summary: Open a folder another computer on this network is sharing
+      description: |
+        Requires `storage.modify` — a deliberately higher bar than using one. Connecting
+        hands this server a credential for a computer it does not administer and puts the
+        contents of somebody's disk in front of the household.
+
+        **Read-only, always.** The mount itself is read-only, so nothing on this server can
+        alter a disk belonging to somebody standing next to it — not this API, not a
+        compromised core, not a mistake.
+
+        The password reaches `mount.cifs` through a root-only credentials file. It is never
+        a mount option, because those are readable by every account on the machine in
+        `/proc/mounts`; the operation declares it a secret, so the audit log records that a
+        folder was connected and never what the password was; and no operation returns it.
+
+        The first connection on a machine fetches the CIFS client, which is why this may
+        take minutes rather than seconds.
+      operationId: connectRemoteFolder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, host, share]
+              properties:
+                name:
+                  type: string
+                  pattern: "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+                  description: What the household calls it here.
+                host:
+                  type: string
+                  description: |
+                    The other computer's name on the network, or its address. Held to a
+                    hostname or IPv4 shape because it becomes part of a systemd unit, where
+                    there is no escaping to get right.
+                share:
+                  type: string
+                  description: |
+                    The name the folder is shared under on that computer — not the drive
+                    letter. Spaces are refused for the same unit-file reason; Windows lets a
+                    share be renamed under the folder's Properties, Sharing.
+                username: { type: string, description: "An account on *that* computer." }
+                password: { type: string }
+                access:
+                  type: array
+                  description: Homebase usernames. Empty means everybody with an account.
+                  items: { type: string }
+      responses:
+        "200":
+          description: The folder is open on this server
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  host: { type: string }
+                  share: { type: string }
+                  connected: { type: boolean }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: A folder from another computer is already called that
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: |
+            The other computer did not answer. It is asleep, switched off, no longer
+            sharing that folder, or the name and password are not the ones it expects.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /remote-folders/remove:
+    post:
+      tags: [remote]
+      summary: Stop offering a folder from another computer
+      description: |
+        Requires `storage.modify`, and the folder's name typed back as confirmation.
+
+        Nothing on the other computer is touched, and that is not a promise about intent —
+        the mount is read-only, so it could not be even if something here tried.
+      operationId: disconnectRemoteFolder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, confirm]
+              properties:
+                name: { type: string }
+                confirm:
+                  type: string
+                  description: The folder's own name, typed.
+      responses:
+        "200":
+          description: It is no longer open here
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  disconnected: { type: boolean }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: There is no folder from another computer by that name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /remote-folders/reconnect:
+    post:
+      tags: [remote]
+      summary: Try a folder on another computer again
+      description: |
+        Requires `storage.modify`. The common case is a laptop that went to sleep, or a
+        server that has been restarted — remote folders are deliberately not mounted at
+        boot, because the computer they live on is expected to be absent most of the time
+        and a boot that waited for it would be a boot that hung.
+
+        Uses the credentials already held; nothing new is asked for.
+      operationId: reconnectRemoteFolder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: It is open again, or was already
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  connected: { type: boolean }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502":
+          description: The other computer still did not answer
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

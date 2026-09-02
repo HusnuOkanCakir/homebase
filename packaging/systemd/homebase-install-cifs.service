@@ -1,0 +1,24 @@
+[Unit]
+Description=Homebase — install the client for folders on other computers
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+
+# A fixed command with a literal argument, for the same reason as the update
+# units: homebase-hostd.service sets RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# and therefore cannot reach an apt mirror. hostd chooses *which* unit to start
+# and nothing else — no part of a request becomes part of a command line here.
+ExecStart=/usr/libexec/homebase/install-cifs
+
+# Deliberately unsandboxed, and worth stating rather than copying hardening from
+# the other units: this installs system packages, which cannot be done from
+# inside a sandbox. What bounds it is that it is a fixed command in a
+# package-installed file, reachable only through hostd's typed operations.
+User=root
+
+# cifs-utils is small, but apt-get update on a domestic connection is not.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

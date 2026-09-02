@@ -370,12 +370,37 @@ export interface SharedFolder {
 }
 
 /** One place a person may browse: a shared folder, or their own. */
+/** A folder that lives on another computer on the home network. */
+export interface RemoteFolder {
+  name: string;
+  /** The other computer, as typed: a name on the network or an address. */
+  host: string;
+  /** What the folder is shared under on that computer — not the drive letter. */
+  share: string;
+  /** An account on *that* computer. The password is never returned. */
+  username: string;
+  added_by?: string;
+  access?: string[];
+  added_at: string;
+  /** Whether that computer is answering. A laptop that has gone to sleep leaves
+   *  a folder that is configured, listed and empty — which looks exactly like
+   *  one whose files have been deleted. */
+  connected: boolean;
+}
+
+export interface RemoteFolderStatus {
+  /** Whether this server can open a folder on another computer at all. The
+   *  client is fetched the first time somebody connects one. */
+  installed: boolean;
+  folders: RemoteFolder[];
+}
+
 export interface FileArea {
   /** A share name, or `me`. Never a path — a path in a response is a path
    *  somebody sends back. */
   id: string;
   name: string;
-  kind: "personal" | "shared";
+  kind: "personal" | "shared" | "remote";
   read_only: boolean;
 }
 
@@ -1236,6 +1261,40 @@ export const api = {
       joining_code: joiningCode,
       new_password: newPassword,
     }),
+
+  // --- Folders on other computers -------------------------------------------
+
+  remoteFolders: () => get<RemoteFolderStatus>("/remote-folders"),
+
+  /** Long: the first one fetches the client that opens a folder on another
+   *  computer, which is a download on a domestic connection. */
+  connectRemoteFolder: (folder: {
+    name: string;
+    host: string;
+    share: string;
+    username: string;
+    password: string;
+    access: string[];
+  }) => post<{ name: string; connected: boolean; message: string }>(
+    "/remote-folders",
+    folder,
+    600_000,
+  ),
+
+  disconnectRemoteFolder: (name: string) =>
+    post<{ name: string; message: string }>(
+      "/remote-folders/remove",
+      { name, confirm: name },
+      120_000,
+    ),
+
+  /** After the other computer has been woken up. */
+  reconnectRemoteFolder: (name: string) =>
+    post<{ name: string; connected: boolean; message: string }>(
+      "/remote-folders/reconnect",
+      { name },
+      120_000,
+    ),
 
   // --- Files ----------------------------------------------------------------
 
