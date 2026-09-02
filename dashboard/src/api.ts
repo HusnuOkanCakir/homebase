@@ -370,12 +370,28 @@ export interface SharedFolder {
 }
 
 /** One place a person may browse: a shared folder, or their own. */
+/**
+ * A disk somebody has plugged into the server.
+ *
+ * Nobody connects one: hostd notices it and mounts it read-only, and it appears
+ * in Files. The only button is the one for finishing with it.
+ */
+export interface PluggedDisk {
+  name: string;
+  label?: string;
+  filesystem?: string;
+  size_bytes: number;
+  /** Whether it is still there. A disk pulled out without warning leaves a
+   *  folder that lists as empty, which looks like deleted files. */
+  connected: boolean;
+}
+
 export interface FileArea {
   /** A share name, or `me`. Never a path — a path in a response is a path
    *  somebody sends back. */
   id: string;
   name: string;
-  kind: "personal" | "shared";
+  kind: "personal" | "shared" | "plugged";
   read_only: boolean;
 }
 
@@ -1236,6 +1252,14 @@ export const api = {
       joining_code: joiningCode,
       new_password: newPassword,
     }),
+
+  // --- Disks plugged into the server -----------------------------------------
+
+  pluggedDisks: () => get<{ disks: PluggedDisk[] }>("/plugged-disks"),
+
+  /** Finish with a disk so it can be unplugged without losing anything. */
+  ejectPluggedDisk: (name: string) =>
+    post<{ name: string; message: string }>("/plugged-disks/eject", { name }, 60_000),
 
   // --- Files ----------------------------------------------------------------
 

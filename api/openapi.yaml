@@ -62,6 +62,8 @@ tags:
     description: The people who use this server
   - name: files
     description: Browsing, fetching and changing files, over HTTPS rather than SMB
+  - name: disks
+    description: Disks somebody has plugged into the server
 
 security:
   - sessionCookie: []
@@ -2484,6 +2486,98 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
           description: A folder that is not empty, with no confirmation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /plugged-disks:
+    get:
+      tags: [disks]
+      summary: The disks somebody has plugged into this server
+      description: |
+        Requires `files.read`.
+
+        **There is no endpoint for connecting one, and that is the design.** hostd watches
+        for a disk appearing, mounts it read-only and it shows up in Files a few seconds
+        later. The person at the server plugs it in and does nothing else — no account to
+        make on any computer, no sharing dialog, no name to resolve, nothing that has to
+        stay awake.
+
+        Disks Homebase manages as storage locations are deliberately not listed here. They
+        already have folders and are already served; offering them again read-only would be
+        two answers to one question.
+
+        `connected` is the field that matters. A disk pulled out without warning leaves a
+        folder that lists as empty, which looks exactly like a disk whose files have been
+        deleted.
+      operationId: listPluggedDisks
+      responses:
+        "200":
+          description: What is plugged in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  disks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          description: |
+                            Its label if it has one, otherwise its model — what is printed
+                            on the disk, which is what somebody looks for.
+                        label: { type: string }
+                        filesystem: { type: string }
+                        size_bytes: { type: integer, format: int64 }
+                        connected: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /plugged-disks/eject:
+    post:
+      tags: [disks]
+      summary: Finish with a plugged-in disk so it can be unplugged
+      description: |
+        Requires `files.read` — the same right as opening it, deliberately. Unplugging a
+        disk safely is the polite end of reading from it rather than a privilege, and the
+        person who wants to walk away with the disk is the one standing next to the server,
+        not the administrator in another country.
+
+        Nothing on the disk is changed by this, or by anything else here: it is mounted
+        read-only, so the server could not write to it even if something tried.
+      operationId: ejectPluggedDisk
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          description: It can be unplugged now
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  ejected: { type: boolean }
+                  message: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: There is no disk here by that name
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: |
+            Somebody is reading a file from it. Waiting a moment and asking again is the
+            whole remedy.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -504,5 +505,212 @@ func TestAPrivateFolderThatIsNotThereIsNotOffered(t *testing.T) {
 	rec := h.do(http.MethodGet, "/api/v1/files/areas", "", headers)
 	if strings.Contains(rec.Body.String(), areaPersonal) {
 		t.Fatalf("a folder that does not exist is offered: %s", rec.Body)
+	}
+}
+
+// --- Disks people plug into the server ---------------------------------------------
+
+// The shortest path between a disk in a drawer and a person in another country:
+// somebody walks to the server, plugs it in, and it is there. Nobody presses
+// anything, which is the sentence this was asked for in.
+func TestADiskPluggedIntoTheServerIsBrowsedLikeAnyOther(t *testing.T) {
+	h, fake := newAppHarness(t)
+	root := t.TempDir()
+
+	// Stands in for the mount point: to core, a plugged-in disk is a directory
+	// hostd reported, and everything below is the same code path a shared
+	// folder takes.
+	disk := filepath.Join(root, "plugged", "kingston")
+	if err := os.MkdirAll(disk, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(disk, "tax-2019.pdf"),
+		[]byte("the papers"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["plugged.status"] = map[string]any{
+		"disks": []any{map[string]any{
+			"name": "kingston", "uuid": "1234-ABCD", "label": "KINGSTON",
+			"filesystem": "ntfs", "size_bytes": 64000000000,
+			"path": disk, "connected": true,
+		}},
+	}
+
+	headers := h.signedIn(t)
+
+	rec := h.do(http.MethodGet, "/api/v1/files/areas", "", headers)
+	if !strings.Contains(rec.Body.String(), "disk:kingston") {
+		t.Fatalf("the plugged-in disk is not offered: %s", rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"read_only":true`) {
+		t.Fatalf("it is offered as writable: %s", rec.Body)
+	}
+
+	rec = h.do(http.MethodGet, "/api/v1/files?area=disk:kingston&path=", "", headers)
+	if !strings.Contains(rec.Body.String(), "tax-2019.pdf") {
+		t.Fatalf("listing it returned %d: %s", rec.Code, rec.Body)
+	}
+
+	rec = h.do(http.MethodGet,
+		"/api/v1/files/content?area=disk:kingston&path=tax-2019.pdf", "", headers)
+	if rec.Code != http.StatusOK || rec.Body.String() != "the papers" {
+		t.Fatalf("downloading returned %d: %s", rec.Code, rec.Body)
+	}
+
+	// And nothing on somebody else's disk can be deleted from here.
+	rec = h.do(http.MethodPost, "/api/v1/files/remove",
+		`{"area":"disk:kingston","path":"tax-2019.pdf"}`, headers)
+	if rec.Code == http.StatusOK {
+		t.Fatal("a file on somebody's disk was deleted from the dashboard")
+	}
+	if _, err := os.Stat(filepath.Join(disk, "tax-2019.pdf")); err != nil {
+		t.Fatal("the file on the plugged-in disk is gone")
+	}
+}
+
+// A disk pulled out without warning leaves a folder that lists as empty, which
+// looks exactly like a disk whose files have been deleted.
+func TestADiskThatHasBeenPulledOutIsNotOffered(t *testing.T) {
+	h, fake := newAppHarness(t)
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["plugged.status"] = map[string]any{
+		"disks": []any{map[string]any{
+			"name": "kingston", "path": "/srv/homebase/storage/plugged/kingston",
+			"connected": false,
+		}},
+	}
+
+	headers := h.signedIn(t)
+	rec := h.do(http.MethodGet, "/api/v1/files/areas", "", headers)
+	if strings.Contains(rec.Body.String(), "kingston") {
+		t.Fatalf("a disk nobody can read is offered: %s", rec.Body)
+	}
+}
+
+// Everybody with an account can read a disk somebody plugged in — and a Member
+// can finish with it, because the person who wants to walk away with the disk
+// is the one standing next to the server, not the administrator abroad.
+func TestAMemberCanReadAndEjectAPluggedDisk(t *testing.T) {
+	h, fake := newAppHarness(t)
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["plugged.status"] = map[string]any{
+		"disks": []any{map[string]any{"name": "kingston", "path": "/tmp", "connected": true}},
+	}
+	fake.responses["plugged.eject"] = map[string]any{"name": "kingston", "ejected": true}
+	fake.responses["share.make_personal_folder"] = map[string]any{"username": "father"}
+
+	token := h.signIn(t)
+	code := inviteAccount(t, h, token, "father")
+	h.do(http.MethodPost, "/api/v1/auth/claim",
+		`{"username":"father","joining_code":"`+code+`","new_password":"a-password-of-their-own"}`, nil)
+	rec := h.do(http.MethodPost, "/api/v1/auth/login",
+		`{"username":"father","password":"a-password-of-their-own"}`, nil)
+	member := map[string]string{}
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == SessionCookie {
+			member["Authorization"] = "Bearer " + cookie.Value
+		}
+	}
+
+	if rec := h.do(http.MethodGet, "/api/v1/plugged-disks", "", member); rec.Code != http.StatusOK {
+		t.Fatalf("a member cannot see what is plugged in: %d %s", rec.Code, rec.Body)
+	}
+	rec = h.do(http.MethodPost, "/api/v1/plugged-disks/eject", `{"name":"kingston"}`, member)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a member could not finish with a disk: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// Windows hides its own plumbing with a file attribute rather than a leading
+// dot, and Linux knows nothing about that attribute. On the first real disk
+// plugged into this server, `System Volume Information` was two of the three
+// things on the screen and the file the household wanted was underneath.
+func TestWindowsHousekeepingIsNotListedAsSomebodysFiles(t *testing.T) {
+	h, fake := newAppHarness(t)
+	root := t.TempDir()
+
+	disk := filepath.Join(root, "plugged", "kingston")
+	for _, name := range []string{"System Volume Information", "$RECYCLE.BIN"} {
+		if err := os.MkdirAll(filepath.Join(disk, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(disk, "holiday.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A folder somebody made that merely looks systemish is still theirs.
+	if err := os.MkdirAll(filepath.Join(disk, "System backups"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["plugged.status"] = map[string]any{
+		"disks": []any{map[string]any{
+			"name": "kingston", "path": disk, "connected": true,
+		}},
+	}
+
+	headers := h.signedIn(t)
+	rec := h.do(http.MethodGet, "/api/v1/files?area=disk:kingston&path=", "", headers)
+	body := rec.Body.String()
+
+	for _, hidden := range []string{"System Volume Information", "RECYCLE"} {
+		if strings.Contains(body, hidden) {
+			t.Errorf("%q is listed as one of somebody's files", hidden)
+		}
+	}
+	if !strings.Contains(body, "holiday.jpg") {
+		t.Fatalf("the file they wanted is missing: %s", body)
+	}
+	if !strings.Contains(body, "System backups") {
+		t.Fatal("a folder somebody made was hidden for looking systemish")
+	}
+}
+
+// The person this failed for was the administrator, and it failed for the
+// reason he was least likely to find: folders are made when an account is
+// created and again at sign-in, a session lasts a fortnight, and the man who
+// set the server up had not signed in since. `people` opened for everybody in
+// the household except him.
+func TestEverybodyGetsAFolderWithoutHavingToSignInAgain(t *testing.T) {
+	h, fake := newAppHarness(t)
+	fake.responses["share.status"] = map[string]any{
+		"installed": true, "running": true, "users": []any{"alex"},
+		"server_name": "homebase", "shares": []any{},
+	}
+	fake.responses["share.make_personal_folder"] = map[string]any{"created": true}
+
+	token := h.signIn(t)
+	inviteAccount(t, h, token, "father")
+	inviteAccount(t, h, token, "brother")
+
+	// Nobody signs in. This is the sweep core runs when it starts.
+	h.server.EnsureEveryoneHasAFolder(context.Background())
+	waitForCall(t, fake, "share.make_personal_folder", 3)
+
+	asked := map[string]bool{}
+	for _, call := range fake.callsTo("share.make_personal_folder") {
+		if name, ok := call.Body["username"].(string); ok {
+			asked[name] = true
+		}
+	}
+	for _, who := range []string{"alex", "father", "brother"} {
+		if !asked[who] {
+			t.Errorf("%s would still have no folder, and `people` would refuse them", who)
+		}
 	}
 }

@@ -58,7 +58,7 @@ listed:
 
 | | |
 |---|---|
-| **Windows** | `\\homebase\backup` — into the address bar of File Explorer |
+| **Windows** | `\\homebase.local\backup` — into the address bar of File Explorer |
 | **macOS** | `smb://homebase.local/backup` — Finder, Go menu, "Connect to Server" |
 | **Linux** | `smb://homebase.local/backup` — Files, "Other Locations" |
 
@@ -70,6 +70,17 @@ To keep it on Windows, right-click **This PC** and choose **Map network drive**.
 drag it into the Finder sidebar.
 
 Leave any "domain" or "workgroup" box empty.
+
+!!! warning "On Windows, use the `.local` name and not the plain one"
+
+    `\\homebase\backup` looks right and fails with *"Windows cannot access
+    \\homebase\backup"*. A bare name like that is resolved by NetBIOS, which Homebase
+    switches off deliberately — it is SMB1-era and nothing current needs it.
+
+    `\\homebase.local\backup` works. Windows has understood `.local` names since Windows
+    10, and it is the same name macOS and Linux already use. The server's address works too,
+    and the Files page always shows whichever is right for your network — if the two ever
+    disagree, believe the page.
 
 ## Joining a server somebody else set up
 
@@ -117,8 +128,12 @@ another computer. Everybody connects to the same name and sees their own.
 
 | | |
 |---|---|
-| **Windows** | `\\homebase\people` |
+| **Windows** | `\\homebase.local\people` |
 | **macOS, Linux** | `smb://homebase.local/people` |
+
+The share is called **people** and not "your folder", which catches everybody out once:
+open it and you are already inside your own, because the server serves each person a
+different folder from the same name.
 
 It is created with the account, on the server's own disk. It cannot be put on a disk
 formatted for Windows or a camera: those record no owner for a file, so a private folder on
@@ -138,6 +153,46 @@ one would not actually be private, and Homebase refuses rather than pretending.
 **Removing somebody does not delete their files.** Their folder is moved aside and kept, so
 that the next person with the same name starts with an empty one instead of inheriting the
 last one's files.
+
+## A disk you plug into the server
+
+A disk lives in a drawer. Somebody who is away needs a file off it. The way to do that is
+to **plug it into the server**, and there is nothing else to do.
+
+1. Plug the disk into any USB socket on the server.
+2. Wait a few seconds.
+3. It is in **Files**, named after whatever is printed on it — `kingston`, `seagate`,
+   whatever the disk calls itself.
+
+Anybody with an account can now read it, from anywhere the dashboard reaches. Nobody has to
+share anything, set a password, or leave a computer switched on.
+
+!!! note "Read-only, always"
+
+    Homebase only ever reads these disks. Nothing on this server can change or delete
+    anything on one — not the Files screen, not somebody signed in, not a server that has
+    been broken into. The disk belongs to whoever carried it in.
+
+    This also means Windows disks work without any fuss: NTFS and exFAT are read perfectly
+    well, and none of the awkwardness of *writing* to them applies.
+
+It also appears as a folder on the network, so it can be opened from Windows like anything
+else — <code>\\homebase.local\kingston</code>, using the disk's own name. That is the way
+to copy a whole folder off it: dragging a folder in Explorer is easier than clicking through
+forty files in a browser. It is read-only there as well.
+
+**Before pulling the disk out**, press **Finish with it** on the Files page. That makes sure
+nothing is half-read. If somebody is downloading a large file at that moment it will say so;
+wait a few seconds and press it again.
+
+If the disk is unplugged without that, nothing is damaged — Homebase was only reading — but
+whoever was mid-download gets a broken file.
+
+!!! warning "One thing that is worth knowing"
+
+    Disks Homebase already manages under **Storage** do not appear here, and should not:
+    they are the server's own disks, with their own folders, already shared. This is only
+    for disks that arrive in a pocket and leave again.
 
 ## Read-only folders
 
@@ -177,6 +232,43 @@ Turn Tailscale off when you get home. You are already on the network it connects
 server is not running, that is the answer — nothing is reachable and the page will say so at
 the top, because from the other end that state looks identical to a folder that was never
 shared.
+
+**Windows never asks who you are, and you end up as somebody else.** Windows saves the first
+name and password you give a server and reuses them silently from then on — so a laptop that
+once connected as `okan` stays `okan`, whoever is sitting at it. The symptom is confusing
+rather than alarming: your own folder looks empty, because you are looking into somebody
+else's.
+
+To be asked again, in a Command Prompt:
+
+```
+cmdkey /list
+```
+
+Look for the entry whose `User:` is the wrong person. It is usually stored under the
+server's plain name, whatever address you actually typed:
+
+```
+Target: Domain:target=homebase
+Type:   Domain Password
+User:   okan
+```
+
+Delete it by exactly the name after `target=`:
+
+```
+cmdkey /delete:homebase
+```
+
+Then open the folder again and sign in as yourself.
+
+`net use * /delete` is not enough on its own and usually answers "there are no entries in
+the list" — that command removes mapped drive letters, and the saved password is a separate
+thing. If Windows still connects silently after deleting the credential, sign out of Windows
+and back in: the authenticated session lasts as long as the login session does.
+
+The same entry can be removed by hand under Control Panel → Credential Manager → Windows
+Credentials.
 
 **Windows asks for a password over and over.** It is sending the wrong name. Type it as
 `homebase\yourname` — with your server's name, a backslash, then the account — rather than

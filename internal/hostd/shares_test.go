@@ -22,7 +22,7 @@ func TestTheShareConfigurationRefusesTheDangerousDefaults(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "backup", Location: "internal"},
 		Path:  "/srv/homebase/storage/internal/shares/backup",
-	}}, "")
+	}}, "", nil)
 
 	required := map[string]string{
 		"security = user":               "a share anybody on the network can open",
@@ -63,7 +63,7 @@ func TestTheApplicationsAreKeptOffTheFileServerByTheFirewall(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "backup", Location: "internal"},
 		Path:  "/srv/homebase/storage/internal/shares/backup",
-	}}, "")
+	}}, "", nil)
 	if !strings.Contains(config, "bind interfaces only = no") {
 		t.Fatal("smbd is binding selected interfaces again; if that is deliberate, " +
 			"check first that it binds the tunnel, because it did not before")
@@ -114,7 +114,7 @@ func TestAShareWhoseDiskIsGoneIsNotServedFromTheSystemDisk(t *testing.T) {
 	}
 
 	// And it must not reach the configuration at all.
-	config := renderSambaConfig("homebase", nil, "")
+	config := renderSambaConfig("homebase", nil, "", nil)
 	if strings.Contains(config, "[films]") {
 		t.Error("the share was written into smb.conf with no disk behind it")
 	}
@@ -269,7 +269,7 @@ func TestAShareWithNoAccessListIsOpenToEverybody(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "backup", Location: "internal"},
 		Path:  "/srv/homebase/storage/internal/shares/backup",
-	}}, "")
+	}}, "", nil)
 	if !strings.Contains(config, "valid users = @homebase-files") {
 		t.Fatal("a share with no access list is not open to everybody, so an " +
 			"upgrade would take away folders that worked yesterday")
@@ -283,7 +283,7 @@ func TestARestrictedShareNamesTheFileSharingAccounts(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "papers", Location: "internal", Access: []string{"alice", "bob"}},
 		Path:  "/srv/homebase/storage/internal/shares/papers",
-	}}, "")
+	}}, "", nil)
 
 	if !strings.Contains(config, "valid users = hbshare-alice hbshare-bob") {
 		t.Fatalf("the access list is not written as file-sharing accounts:\n%s", config)
@@ -300,7 +300,7 @@ func TestAFolderSomebodyCannotOpenIsNotListedToThem(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "papers", Location: "internal", Access: []string{"alice"}},
 		Path:  "/srv/homebase/storage/internal/shares/papers",
-	}}, "")
+	}}, "", nil)
 	if !strings.Contains(config, "access based share enum = yes") {
 		t.Fatal("restricted folders are listed to people who cannot open them")
 	}
@@ -364,7 +364,7 @@ func TestTheFileSharingGroupIsNotTheGroupThatOwnsTheSocket(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "backup", Location: "internal"},
 		Path:  "/srv/homebase/storage/internal/shares/backup",
-	}}, "/srv/homebase/storage/internal/people")
+	}}, "/srv/homebase/storage/internal/people", nil)
 
 	if strings.Contains(config, "valid users = @"+serviceAccount+"\n") {
 		t.Fatal("a share is opened by membership of the socket-owning group")
@@ -387,5 +387,59 @@ func TestTheFileSharingGroupIsNotTheGroupThatOwnsTheSocket(t *testing.T) {
 	// account made by an earlier version out of the socket-owning group.
 	if !strings.Contains(string(helper), `usermod --groups "$FILES_GROUP"`) {
 		t.Fatal("an account made by an earlier version never leaves the old group")
+	}
+}
+
+// --- Disks plugged into the server, over Windows sharing ---------------------------
+
+// The Files screen reaches a plugged-in disk over HTTPS, which needs nothing
+// installed. A drive letter is the other half of the same question: somebody
+// copying a folder of photographs off a stick wants to drag it, not click forty
+// files one at a time.
+func TestAPluggedDiskIsOfferedOverWindowsSharingReadOnly(t *testing.T) {
+	config := renderSambaConfig("homebase", []ShareState{{
+		Share: Share{Name: "backup", Location: "internal"},
+		Path:  "/srv/homebase/storage/internal/shares/backup",
+	}}, "", []PluggedShare{{
+		Name: "kingston", Path: "/srv/homebase/storage/plugged/kingston",
+	}})
+
+	if !strings.Contains(config, "[kingston]") {
+		t.Fatalf("the disk is not offered at all:\n%s", config)
+	}
+
+	stanza := config[strings.Index(config, "[kingston]"):]
+	// Read-only on top of a mount that is already read-only. The mount is what
+	// holds if this line is ever wrong; this line is what holds if a future
+	// version mounts something writable by mistake.
+	if !strings.Contains(stanza, "read only = yes") {
+		t.Error("somebody could write to a disk that was lent to the household")
+	}
+	// force user, for the same reason the personal folders need it: the disk is
+	// mounted owned by the service account, and smbd impersonating
+	// hbshare-alice could not read a byte of it.
+	if !strings.Contains(stanza, "force user = "+serviceAccount) {
+		t.Error("the share would be unreadable to everybody who opened it")
+	}
+	if !strings.Contains(stanza, "valid users = @"+shareGroup) {
+		t.Error("it is not restricted to the household's file-sharing accounts")
+	}
+}
+
+// smbd refuses a configuration with a duplicated share name. Without this, a
+// memory stick labelled BACKUP takes every folder in the house off the network
+// — including the ones somebody is using at the time.
+func TestAPluggedDiskCannotCollideWithAShareName(t *testing.T) {
+	taken := []string{"people", "backup", "films"}
+
+	if got := pluggedName(Volume{Label: "BACKUP"}, Disk{}, taken); got == "backup" {
+		t.Fatal("a disk labelled BACKUP would produce a second [backup] stanza")
+	}
+	if got := pluggedName(Volume{Label: "people"}, Disk{}, taken); got == "people" {
+		t.Fatal("a disk labelled people would collide with the personal folders")
+	}
+	// And a name nobody has taken is left alone.
+	if got := pluggedName(Volume{Label: "KINGSTON"}, Disk{}, taken); got != "kingston" {
+		t.Fatalf("an uncontested name became %q", got)
 	}
 }

@@ -202,13 +202,13 @@ func TestThePeopleShareIsAbsentUntilSomebodyHasAFolder(t *testing.T) {
 	config := renderSambaConfig("homebase", []ShareState{{
 		Share: Share{Name: "backup", Location: "internal"},
 		Path:  "/srv/homebase/storage/internal/shares/backup",
-	}}, "")
+	}}, "", nil)
 	if strings.Contains(config, "[people]") {
 		t.Fatal("the people share is written when nobody has a folder")
 	}
 
 	withPeople := renderSambaConfig("homebase", nil,
-		"/srv/homebase/storage/internal/people")
+		"/srv/homebase/storage/internal/people", nil)
 	if !strings.Contains(withPeople, "[people]") {
 		t.Fatal("the people share is missing when somebody does")
 	}

@@ -327,7 +327,8 @@ func renderUserMap(users []string) string {
 // Written by hand rather than by editing what is there, and deliberately short.
 // Every line is either required or is a decision worth being able to see in one
 // screen — which is the point of owning the file rather than adding to it.
-func renderSambaConfig(server string, shares []ShareState, peopleDir string) string {
+func renderSambaConfig(server string, shares []ShareState, peopleDir string,
+	plugged []PluggedShare) string {
 	var out strings.Builder
 
 	out.WriteString("# Written by Homebase. Changes here are replaced.\n")
@@ -438,7 +439,88 @@ func renderSambaConfig(server string, shares []ShareState, peopleDir string) str
 	if peopleDir != "" {
 		out.WriteString(renderPeopleShare(peopleDir))
 	}
+	for _, disk := range plugged {
+		out.WriteString(renderPluggedShare(disk))
+	}
 	return out.String()
+}
+
+// PluggedShare is a disk somebody plugged in, as the file server sees it.
+type PluggedShare struct {
+	Name string
+	Path string
+}
+
+// renderPluggedShare offers a plugged-in disk to Windows as well as to the
+// browser.
+//
+// The Files screen reaches these over HTTPS, which works from anywhere and
+// needs nothing installed. A drive letter in Explorer is the other half of the
+// same question: somebody who wants to copy a folder of photographs off a stick
+// wants to drag it, not click forty files.
+//
+// `read only = yes` on top of a mount that is already read-only. Two layers
+// saying the same thing, deliberately: the mount is the one that holds if this
+// line is ever wrong, and this line is the one that holds if a future version
+// mounts something writable by mistake.
+//
+// `force user` for the same reason the personal folders need it — the disk is
+// mounted owned by the service account, and smbd impersonating `hbshare-alice`
+// could not read a byte of it otherwise.
+func renderPluggedShare(disk PluggedShare) string {
+	var out strings.Builder
+	out.WriteString("\n[" + disk.Name + "]\n")
+	out.WriteString("   comment = A disk plugged into this server\n")
+	out.WriteString("   path = " + disk.Path + "\n")
+	out.WriteString("   browseable = yes\n")
+	out.WriteString("   read only = yes\n")
+	out.WriteString("   valid users = @" + shareGroup + "\n")
+	out.WriteString("   force user = " + serviceAccount + "\n")
+	out.WriteString("   veto files = /.DS_Store/Thumbs.db/desktop.ini/\n")
+	return out.String()
+}
+
+// pluggedShares are the disks currently plugged in, read from where they are
+// mounted rather than asked of another service.
+//
+// A directory under `plugged/` that is a mount point is a disk that is there;
+// one that is not is a disk somebody pulled out. That is the whole state, it
+// cannot drift from what is actually mounted, and it means the file server
+// needs no reference to the thing that does the mounting.
+func (s *ShareServices) pluggedShares() []PluggedShare {
+	root := filepath.Join(s.storage.root, pluggedDirName)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var disks []PluggedShare
+	for _, entry := range entries {
+		if !entry.IsDir() || !validShareName.MatchString(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		if !isMountPoint(path, mountInfoPath) {
+			continue
+		}
+		disks = append(disks, PluggedShare{Name: entry.Name(), Path: path})
+	}
+	return disks
+}
+
+// Names are everything the file server already answers to.
+//
+// Used when naming a plugged-in disk, so that a stick labelled BACKUP does not
+// produce a second `[backup]` stanza — smbd refuses a configuration with a
+// duplicated share name, which would take every folder in the house off the
+// network because somebody plugged in a memory stick.
+func (s *ShareServices) Names() []string {
+	names := []string{"people"}
+	if shares, err := s.load(); err == nil {
+		for _, share := range shares {
+			names = append(names, share.Name)
+		}
+	}
+	return names
 }
 
 // renderPeopleShare is the one stanza that serves everybody a different folder.
@@ -781,7 +863,8 @@ func (s *ShareServices) apply(ctx context.Context, shares []Share) error {
 		states = append(states, state)
 	}
 
-	if err := writeSambaConfig(renderSambaConfig(server, states, s.peopleDir())); err != nil {
+	if err := writeSambaConfig(renderSambaConfig(server, states, s.peopleDir(),
+		s.pluggedShares())); err != nil {
 		return err
 	}
 	if err := writeRootFile(sambaUserMap, renderUserMap(s.shareUsers()), 0o644); err != nil {
@@ -1023,6 +1106,46 @@ func findShare(shares []Share, name string) (Share, int, bool) {
 		}
 	}
 	return Share{}, 0, false
+}
+
+// RefreshForDisks rewrites smb.conf and asks the file server to reread it.
+//
+// A reload rather than a restart, and that is the whole reason this is separate
+// from apply(). Somebody plugging a disk in while another person is halfway
+// through copying a folder off a mapped drive should not interrupt them; smbd
+// rereads its configuration on a reload and existing connections keep the share
+// they already have.
+//
+// Does nothing when the file server is not running. A household that has never
+// shared a folder still gets plugged-in disks in the Files screen; starting a
+// file server because somebody plugged in a memory stick would be Homebase
+// putting a service on the network that nobody asked for.
+func (s *ShareServices) RefreshForDisks(ctx context.Context, log *slog.Logger) {
+	if !sambaInstalled() || !unitIsActive(ctx, "smbd.service") {
+		return
+	}
+	shares, err := s.load()
+	if err != nil {
+		return
+	}
+	server := serverName()
+	states := make([]ShareState, 0, len(shares))
+	for _, share := range shares {
+		if state := s.describe(share, server); state.Available {
+			states = append(states, state)
+		}
+	}
+	if err := writeSambaConfig(renderSambaConfig(server, states, s.peopleDir(),
+		s.pluggedShares())); err != nil {
+		log.Warn("could not offer a plugged-in disk over file sharing", "error", err)
+		return
+	}
+	if err := runSystemctl(ctx, "reload", "smbd.service"); err != nil {
+		log.Warn("the file server would not reread its configuration", "error", err)
+		return
+	}
+	log.Info("file sharing now offers the disks that are plugged in",
+		"disks", len(s.pluggedShares()))
 }
 
 // Reapply rewrites smb.conf from the shares this machine already has.
