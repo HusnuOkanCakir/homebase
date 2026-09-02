@@ -62,7 +62,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request, use
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	created, code, err := s.auth.CreateInvitedAccount(ctx, body.Username, body.Role)
+	created, code, err := s.auth.CreateInvitedAccount(ctx, body.Username, body.Role, user.Username)
 	if err != nil {
 		s.writeAccountError(w, r, err)
 		return
@@ -94,13 +94,15 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request, use
 	// The code is here once and nowhere else. It is stored the way a password
 	// is, so nothing — including this server — can produce it again.
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id":           created.ID,
-		"username":     created.Username,
-		"role":         body.Role,
-		"joining_code": code,
+		"id":              created.ID,
+		"username":        created.Username,
+		"role":            body.Role,
+		"joining_code":    code,
+		"expires_in_days": int(auth.InvitationLifetime.Hours() / 24),
 		"message": "Give this code to " + created.Username +
 			". They use it to sign in for the first time and choose their own " +
-			"password. It is shown once and cannot be shown again." + folderNote,
+			"password. It is shown once and cannot be shown again, and it stops " +
+			"working after a week — issue another if they do not get to it." + folderNote,
 	})
 }
 
@@ -215,23 +217,27 @@ func (s *Server) handleReissueJoiningCode(w http.ResponseWriter, r *http.Request
 		s.writeAccountError(w, r, err)
 		return
 	}
-	code, err := s.auth.IssueRecoveryCode(ctx, target.ID)
+	// An invitation, not a recovery code, and this is the distinction the whole
+	// of invitations.go exists to make. Issuing a *recovery* code for somebody
+	// else's account would hand an administrator a way to take it over and
+	// would leave the person's own paper code silently dead. This gets them in
+	// the first time and expires.
+	code, err := s.auth.IssueInvitation(ctx, target.ID, user.Username)
 	if err != nil {
 		s.writeInternal(w, r, err)
 		return
 	}
 
-	// The same event the dashboard's own recovery screen writes, because it is
-	// the same act: somebody with access to this machine issued a way in.
-	s.events.Warn(r.Context(), "auth.recovery_code_reissued", target.Username, "administrator",
-		"A new sign-in code was issued for "+target.Username+".")
+	s.events.Warn(r.Context(), "account.invited", target.Username, "reissued",
+		"A new joining code was issued for "+target.Username+".")
 	s.log.Info("joining code reissued", "username", target.Username, "by", user.Username)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"username":     target.Username,
-		"joining_code": code,
+		"username":        target.Username,
+		"joining_code":    code,
+		"expires_in_days": int(auth.InvitationLifetime.Hours() / 24),
 		"message": "This replaces any earlier code for " + target.Username +
-			". It is shown once.",
+			". It is shown once, and stops working after a week.",
 	})
 }
 

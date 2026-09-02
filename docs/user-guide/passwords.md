@@ -7,6 +7,13 @@ is nobody who can let you back in.
 So instead you are given a **recovery code**: twenty-five characters, shown once, when you
 first set the server up. It is the spare key.
 
+!!! note "Not the same as a joining code"
+
+    If somebody has just given you an account, what you are holding is a **joining code**.
+    It looks the same and is used on a different screen — **I have a joining code**, on the
+    sign-in page — and it stops working after a week. Once you are in, you are shown a
+    recovery code of your own; that one is the spare key and does not expire.
+
 ## Where your code is
 
 You were shown it on the screen straight after choosing your password, and asked to tick a

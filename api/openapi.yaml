@@ -3350,6 +3350,69 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /auth/claim:
+    post:
+      tags: [auth]
+      summary: Somebody's first sign-in, with the code they were given
+      description: |
+        Unauthenticated and rate-limited. Exchanges a **joining code** for a password only
+        that person knows, signs them in, and returns a recovery code of their own — shown
+        once, because somebody who joins and is never given one loses the account the first
+        time they forget the password.
+
+        **Not the same thing as `/auth/recover`**, which it used to be. The two want
+        different properties from a code. A recovery code is permanent on purpose: it is
+        written on paper for a day that may be a year away, and one that expired would be
+        worthless exactly then. A joining code is read out across a kitchen table and used
+        within the hour, so it expires after a week — one still live in six months is a way
+        into the server sitting in somebody's chat history.
+
+        Sharing the mechanism also made the wrong thing happen on screen: a first sign-in
+        produced an event at error severity saying the password had been reset and every
+        session destroyed. There had never been a session.
+
+        The password chosen here is also set as the file-sharing password, so one password
+        opens the dashboard and a mapped drive.
+
+        A wrong code, an unknown name, a code already used and an expired one all answer the
+        same way. Telling them apart says which accounts exist and which are worth attacking.
+      operationId: claimAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, joining_code, new_password]
+              properties:
+                username: { type: string }
+                joining_code:
+                  type: string
+                  description: |
+                    Case, spacing and the separators are all optional — somebody is copying
+                    twenty-five characters off a message.
+                new_password:
+                  type: string
+                  minLength: 12
+      responses:
+        "200":
+          description: The account is theirs, and a recovery code is shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveredSession"
+        "401":
+          description: The code is not right, has been used, or has expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: The password is too short
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
   /auth/recover:
     post:
       tags: [auth]

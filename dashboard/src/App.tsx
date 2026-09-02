@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, NetworkError, type User } from "./api";
 import { Setup } from "./views/Setup";
 import { Login } from "./views/Login";
+import { Join } from "./views/Join";
 import { Recover } from "./views/Recover";
 import { Dashboard } from "./views/Dashboard";
 import { Message } from "./components/Message";
@@ -12,6 +13,7 @@ type Screen =
   | { kind: "setup" }
   | { kind: "login" }
   | { kind: "recover" }
+  | { kind: "join" }
   | { kind: "signed-in"; user: User };
 
 export function App() {
@@ -102,7 +104,16 @@ export function App() {
 
     case "login":
       return (
-        <Login onSignedIn={signedIn} onForgotten={() => setScreen({ kind: "recover" })} />
+        <Login
+          onSignedIn={signedIn}
+          onForgotten={() => setScreen({ kind: "recover" })}
+          onJoining={() => setScreen({ kind: "join" })}
+        />
+      );
+
+    case "join":
+      return (
+        <Join onJoined={signedIn} onCancel={() => setScreen({ kind: "login" })} />
       );
 
     case "recover":

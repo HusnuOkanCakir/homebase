@@ -99,6 +99,8 @@ export function People({ me }: { me: string }) {
     return (
       <RecoveryCode
         code={issued.joining_code}
+        kind="joining"
+        name={issued.username}
         acknowledgement={`I have written this down, or given it to ${issued.username}.`}
         onAcknowledged={() => setIssued(null)}
         busy={busy}
@@ -137,8 +139,14 @@ export function People({ me }: { me: string }) {
                 <span className="muted">
                   {roleLabel(account.role)}
                   {/* An invitation nobody has accepted is the thing an
-                      administrator most often wants to notice here. */}
-                  {!account.has_signed_in && " · has not signed in yet"}
+                      administrator most often wants to notice here — and an
+                      expired one is the case where somebody is waiting for an
+                      answer that will never come, because the code they were
+                      given stopped working without telling either of them. */}
+                  {!account.has_signed_in &&
+                    (account.invitation_expired
+                      ? " · their joining code has expired"
+                      : " · has not signed in yet")}
                 </span>
               </div>
 
@@ -170,7 +178,7 @@ export function People({ me }: { me: string }) {
                     )
                   }
                 >
-                  New sign-in code
+                  {account.invitation_expired ? "New joining code" : "New sign-in code"}
                 </button>
 
                 {account.username !== me && (

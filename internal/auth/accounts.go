@@ -83,13 +83,26 @@ type Account struct {
 	HasSignedIn bool       `json:"has_signed_in"`
 	CreatedAt   time.Time  `json:"created_at"`
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+
+	// InvitationExpiresAt is when their joining code stops working, if one is
+	// outstanding. Shown because "invited on Tuesday" and "invited on Tuesday,
+	// and the code died on Sunday" look identical otherwise, and the second is
+	// the one where somebody is waiting for an answer that will never come.
+	InvitationExpiresAt *time.Time `json:"invitation_expires_at,omitempty"`
+
+	// InvitationExpired means the code they were given no longer works and a
+	// new one has to be issued.
+	InvitationExpired bool `json:"invitation_expired"`
 }
 
 // Accounts lists everybody on this server, oldest first.
 func (s *Service) Accounts(ctx context.Context) ([]Account, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, username, permissions, created_at, last_login_at
-		   FROM users ORDER BY created_at`)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT u.id, u.username, u.permissions, u.created_at, u.last_login_at,
+		       i.expires_at, i.accepted_at
+		  FROM users u
+		  LEFT JOIN invitations i ON i.user_id = u.id
+		 ORDER BY u.created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -99,9 +112,10 @@ func (s *Service) Accounts(ctx context.Context) ([]Account, error) {
 	for rows.Next() {
 		var (
 			id, username, rawPermissions, createdAt string
-			lastLogin                               sql.NullString
+			lastLogin, invitedUntil, acceptedAt     sql.NullString
 		)
-		if err := rows.Scan(&id, &username, &rawPermissions, &createdAt, &lastLogin); err != nil {
+		if err := rows.Scan(&id, &username, &rawPermissions, &createdAt, &lastLogin,
+			&invitedUntil, &acceptedAt); err != nil {
 			return nil, err
 		}
 		var permissions []string
@@ -123,6 +137,15 @@ func (s *Service) Accounts(ctx context.Context) ([]Account, error) {
 				account.HasSignedIn = true
 			}
 		}
+		// An invitation that has been accepted is history rather than something
+		// an administrator has to act on, so only an outstanding one is
+		// reported.
+		if invitedUntil.Valid && !acceptedAt.Valid {
+			if until, err := time.Parse(time.RFC3339Nano, invitedUntil.String); err == nil {
+				account.InvitationExpiresAt = &until
+				account.InvitationExpired = time.Now().UTC().After(until)
+			}
+		}
 		accounts = append(accounts, account)
 	}
 	return accounts, rows.Err()
@@ -133,7 +156,7 @@ func (s *Service) Accounts(ctx context.Context) ([]Account, error) {
 // The code is shown once, here, and is not recoverable — it is stored the way a
 // password is. An administrator who loses it issues another; they never learn
 // the password that replaces it.
-func (s *Service) CreateInvitedAccount(ctx context.Context, username, role string) (*User, string, error) {
+func (s *Service) CreateInvitedAccount(ctx context.Context, username, role, invitedBy string) (*User, string, error) {
 	// Validated as typed, not lowercased first. "Father" and "father" are the
 	// same account to SMB and different accounts to Linux, so quietly turning
 	// one into the other is how somebody ends up with a name they did not
@@ -167,7 +190,7 @@ func (s *Service) CreateInvitedAccount(ctx context.Context, username, role strin
 		return nil, "", err
 	}
 
-	code, err := s.IssueRecoveryCode(ctx, user.ID)
+	code, err := s.IssueInvitation(ctx, user.ID, invitedBy)
 	if err != nil {
 		// The account exists and nobody can get into it. Removed rather than
 		// left as a row an administrator would have to notice and clean up.

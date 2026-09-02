@@ -41,10 +41,20 @@ test("adding somebody, and the code that is shown once", async ({ page }) => {
   // The administrator is not described as never having signed in. They set the
   // server up and are reading this screen — first-run setup issues a session
   // without going through the login path, and that used to leave the flag unset.
-  await expect(page.getByText(/has not signed in yet/)).toHaveCount(0);
+  //
+  // Their row, not the whole page. Somebody who has been invited and has not
+  // arrived yet is *correctly* described that way, and asserting across the
+  // screen made this pass on a server with one account and fail on any server
+  // that had ever been used.
+  await expect(
+    page.locator("li").filter({ hasText: ADMIN }).first(),
+  ).not.toContainText("has not signed in yet");
 
+  // A name nobody here has yet, for the same reason: these specs run against a
+  // server that keeps what previous runs put in it.
+  const invited = "father" + Math.random().toString(36).slice(2, 6).replace(/[^a-z]/g, "x");
   await page.getByText("Add somebody").click();
-  await page.getByLabel("Their name").fill("father");
+  await page.getByLabel("Their name").fill(invited);
 
   // Roles are chosen by reading a sentence about each, not by decoding a word.
   await expect(page.getByText(/can reach every file on it/i)).toBeVisible();
@@ -59,22 +69,23 @@ test("adding somebody, and the code that is shown once", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Write this down" })).toBeVisible({
     timeout: 30_000,
   });
-  const code = (await page.locator("code, .code, pre").first().innerText()).trim();
+  const code = (await page.getByTestId("recovery-code").innerText()).trim();
   expect(code.length, "no joining code was shown").toBeGreaterThan(10);
 
   // There is no way past it without saying the code has been taken down.
   await page.getByRole("checkbox").first().check();
   await page.getByRole("button", { name: /continue|done|finish/i }).first().click();
 
-  await expect(page.getByText("father", { exact: true }).first()).toBeVisible();
-  // Exactly one: the new invitation, not the administrator reading the screen.
-  await expect(page.getByText(/has not signed in yet/)).toHaveCount(1);
+  const row = page.locator("li").filter({ hasText: invited }).first();
+  await expect(row).toBeVisible();
+  // Somebody who has been invited and has not arrived is described that way.
+  await expect(row).toContainText("has not signed in yet");
 
   // Removing somebody says what it does not do.
-  await page.getByRole("button", { name: "Remove", exact: true }).first().click();
+  await row.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(page.getByText(/Their files are kept/)).toBeVisible();
-  const confirm = page.getByRole("button", { name: /^Remove father$/ });
+  const confirm = page.getByRole("button", { name: new RegExp(`^Remove ${invited}$`) });
   await expect(confirm, "removal is possible without typing the name").toBeDisabled();
-  await page.getByLabel(/Type .* to confirm/).fill("father");
+  await page.getByLabel(/Type .* to confirm/).fill(invited);
   await expect(confirm).toBeEnabled();
 });

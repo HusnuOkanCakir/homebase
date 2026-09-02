@@ -22,8 +22,8 @@ func TestJoiningSetsTheFileSharingPasswordToTheSameOne(t *testing.T) {
 	token := h.signIn(t)
 	code := inviteAccount(t, h, token, "father")
 
-	rec := h.do(http.MethodPost, "/api/v1/auth/recover",
-		`{"username":"father","recovery_code":"`+code+
+	rec := h.do(http.MethodPost, "/api/v1/auth/claim",
+		`{"username":"father","joining_code":"`+code+
 			`","new_password":"a-password-of-their-own"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("claiming the account returned %d: %s", rec.Code, rec.Body)
@@ -51,8 +51,8 @@ func TestJoiningWorksOnAServerWithNoFileSharing(t *testing.T) {
 	token := h.signIn(t)
 	code := inviteAccount(t, h, token, "father")
 
-	rec := h.do(http.MethodPost, "/api/v1/auth/recover",
-		`{"username":"father","recovery_code":"`+code+
+	rec := h.do(http.MethodPost, "/api/v1/auth/claim",
+		`{"username":"father","joining_code":"`+code+
 			`","new_password":"a-password-of-their-own"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("claiming the account returned %d: %s", rec.Code, rec.Body)

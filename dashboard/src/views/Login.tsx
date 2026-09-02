@@ -6,9 +6,10 @@ import { Message } from "../components/Message";
 interface Props {
   onSignedIn: (user: User) => void;
   onForgotten: () => void;
+  onJoining: () => void;
 }
 
-export function Login({ onSignedIn, onForgotten }: Props) {
+export function Login({ onSignedIn, onForgotten, onJoining }: Props) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<ReturnType<typeof describeError> | null>(null);
@@ -77,6 +78,15 @@ export function Login({ onSignedIn, onForgotten }: Props) {
         */}
         <button type="button" className="quiet" onClick={onForgotten} disabled={busy}>
           I have forgotten my password
+        </button>
+
+        {/* The other reason somebody is at this screen without a password:
+            they have just been given an account. Offered here because it is
+            where they will look, and because the alternative — the recovery
+            screen — greets a new arrival with a warning about being signed out
+            of everything. */}
+        <button type="button" className="quiet" onClick={onJoining} disabled={busy}>
+          I have a joining code
         </button>
       </form>
     </main>
