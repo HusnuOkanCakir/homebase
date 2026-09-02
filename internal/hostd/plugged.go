@@ -150,6 +150,17 @@ func pluggedFilesystemType(filesystem string) string {
 type PluggedServices struct {
 	storage *StorageServices
 	log     *slog.Logger
+
+	// Reserved are names the file server already answers to, so a disk labelled
+	// BACKUP does not become a second `[backup]`. smbd refuses a configuration
+	// with a duplicate share name, which would take every folder in the house
+	// off the network because somebody plugged in a memory stick.
+	Reserved func() []string
+
+	// OnChange is called when a disk appears or goes away, so the file server
+	// can offer it — or stop offering it — without waiting for somebody to
+	// change a share.
+	OnChange func()
 }
 
 func NewPluggedServices(storage *StorageServices, log *slog.Logger) *PluggedServices {
@@ -176,6 +187,9 @@ func (s *PluggedServices) candidates() []PluggedDisk {
 
 	var found []PluggedDisk
 	var taken []string
+	if s.Reserved != nil {
+		taken = append(taken, s.Reserved()...)
+	}
 	for _, disk := range disks {
 		if disk.System || !disk.Pluggable() {
 			continue
@@ -232,6 +246,7 @@ func (s *PluggedServices) Watch(ctx context.Context) {
 
 func (s *PluggedServices) scan(ctx context.Context) {
 	wanted := s.candidates()
+	changed := false
 
 	for _, disk := range wanted {
 		if isMountPoint(disk.Path, mountInfoPath) {
@@ -252,9 +267,19 @@ func (s *PluggedServices) scan(ctx context.Context) {
 		s.log.Info("a disk was plugged in and is now readable",
 			"disk", disk.Name, "filesystem", disk.Filesystem, "at", disk.Path)
 		s.clearFailure(disk.UUID)
+		changed = true
 	}
 
-	s.forgetVanished(ctx, wanted)
+	if s.forgetVanished(ctx, wanted) {
+		changed = true
+	}
+
+	// Only when something actually happened. Telling the file server to reread
+	// its configuration every five seconds would be a needless reload every
+	// five seconds, for ever, on a machine where nothing is happening.
+	if changed && s.OnChange != nil {
+		s.OnChange()
+	}
 }
 
 // forgetVanished unmounts and tidies away anything under the plugged directory
@@ -264,17 +289,18 @@ func (s *PluggedServices) scan(ctx context.Context) {
 // error: they came to fetch a file and they have gone. What is left behind is a
 // mount pointing at nothing, which reads as an empty folder — the same failure
 // mode as a sleeping laptop, and just as misleading.
-func (s *PluggedServices) forgetVanished(ctx context.Context, wanted []PluggedDisk) {
+func (s *PluggedServices) forgetVanished(ctx context.Context, wanted []PluggedDisk) bool {
 	root := filepath.Join(s.storage.root, pluggedDirName)
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return
+		return false
 	}
 
 	keep := map[string]bool{}
 	for _, disk := range wanted {
 		keep[disk.Name] = true
 	}
+	gone := false
 	for _, entry := range entries {
 		if keep[entry.Name()] {
 			continue
@@ -285,8 +311,12 @@ func (s *PluggedServices) forgetVanished(ctx context.Context, wanted []PluggedDi
 		}
 		_ = os.Remove(unitPath(path))
 		_ = os.Remove(path)
+		gone = true
 	}
-	_ = runSystemctl(ctx, "daemon-reload")
+	if gone {
+		_ = runSystemctl(ctx, "daemon-reload")
+	}
+	return gone
 }
 
 // mount makes one disk readable.

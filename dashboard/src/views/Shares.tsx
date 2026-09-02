@@ -170,7 +170,19 @@ export function Shares({
 
 /** The two names this server can be reached by, and whether each is real. */
 interface Names {
-  /** The plain name, which is what Windows resolves. */
+  /**
+   * What to type on Windows.
+   *
+   * The plain name used to go here, on the assumption that Windows resolves it.
+   * It does not, reliably, and the reason is Homebase's own: NetBIOS is what
+   * answers a bare `\\homebase`, and Homebase deliberately disables it —
+   * `disable netbios = yes`, nmbd switched off, because it is SMB1-era and
+   * nothing current needs it. The household got
+   * "Windows \\homebase\backup öğesine erişemiyor" and nothing to act on.
+   *
+   * The mDNS name works: Windows has resolved `.local` since Windows 10, and it
+   * is the same name macOS and Linux are already told to use.
+   */
   windows: string;
   /** The mDNS name or an address — whichever will actually answer. */
   unix: string;
@@ -194,7 +206,12 @@ function names(
 ): Names {
   const plain = status.server_name || network?.hostname || fallback || "homebase";
   if (network?.mdns_works && network.mdns_name) {
-    return { windows: plain, unix: network.mdns_name, byName: true, known: true };
+    return {
+      windows: network.mdns_name,
+      unix: network.mdns_name,
+      byName: true,
+      known: true,
+    };
   }
 
   // No mDNS: the `.local` name will not resolve, so the address is the only
@@ -204,7 +221,14 @@ function names(
     .filter((i) => i.kind !== "loopback" && i.kind !== "container" && i.up)
     .flatMap((i) => i.addresses ?? [])
     .find((a) => !a.includes(":"));
-  return { windows: plain, unix: address ?? plain, byName: false, known: network !== null };
+  // No mDNS either: the address is the only thing that answers on any of the
+  // three, including Windows — a bare name needs NetBIOS, which is off.
+  return {
+    windows: address ?? plain,
+    unix: address ?? plain,
+    byName: false,
+    known: network !== null,
+  };
 }
 
 function Nothing() {
@@ -290,8 +314,12 @@ function Reaching({
             <dd>
               {users.join(", ")}
               <div className="muted">
-                With the file-sharing password, which is not the password you use
-                here. Leave the domain or workgroup box empty.
+                {/* This said the file-sharing password "is not the password you
+                    use here", which was true until one password shipped and
+                    wrong afterwards — and it is the line somebody reads while
+                    standing at another computer being asked for a password. */}
+                With the same password you sign in here with. Leave the domain or
+                workgroup box empty.
               </div>
             </dd>
           </>

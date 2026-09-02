@@ -58,7 +58,7 @@ listed:
 
 | | |
 |---|---|
-| **Windows** | `\\homebase\backup` — into the address bar of File Explorer |
+| **Windows** | `\\homebase.local\backup` — into the address bar of File Explorer |
 | **macOS** | `smb://homebase.local/backup` — Finder, Go menu, "Connect to Server" |
 | **Linux** | `smb://homebase.local/backup` — Files, "Other Locations" |
 
@@ -70,6 +70,17 @@ To keep it on Windows, right-click **This PC** and choose **Map network drive**.
 drag it into the Finder sidebar.
 
 Leave any "domain" or "workgroup" box empty.
+
+!!! warning "On Windows, use the `.local` name and not the plain one"
+
+    `\\homebase\backup` looks right and fails with *"Windows cannot access
+    \\homebase\backup"*. A bare name like that is resolved by NetBIOS, which Homebase
+    switches off deliberately — it is SMB1-era and nothing current needs it.
+
+    `\\homebase.local\backup` works. Windows has understood `.local` names since Windows
+    10, and it is the same name macOS and Linux already use. The server's address works too,
+    and the Files page always shows whichever is right for your network — if the two ever
+    disagree, believe the page.
 
 ## Joining a server somebody else set up
 
@@ -117,7 +128,7 @@ another computer. Everybody connects to the same name and sees their own.
 
 | | |
 |---|---|
-| **Windows** | `\\homebase\people` |
+| **Windows** | `\\homebase.local\people` |
 | **macOS, Linux** | `smb://homebase.local/people` |
 
 It is created with the account, on the server's own disk. It cannot be put on a disk
@@ -160,6 +171,11 @@ share anything, set a password, or leave a computer switched on.
 
     This also means Windows disks work without any fuss: NTFS and exFAT are read perfectly
     well, and none of the awkwardness of *writing* to them applies.
+
+It also appears as a folder on the network, so it can be opened from Windows like anything
+else — <code>\\homebase.local\kingston</code>, using the disk's own name. That is the way
+to copy a whole folder off it: dragging a folder in Explorer is easier than clicking through
+forty files in a browser. It is read-only there as well.
 
 **Before pulling the disk out**, press **Finish with it** on the Files page. That makes sure
 nothing is half-read. If somebody is downloading a large file at that moment it will say so;

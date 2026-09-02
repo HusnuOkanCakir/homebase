@@ -109,6 +109,10 @@ func main() {
 	// person at the far end to find a Windows share name, a Windows account and
 	// a password Windows would not tell them.
 	plugged := hostd.NewPluggedServices(storage, log)
+	// So a disk labelled BACKUP does not collide with the share of that name,
+	// and so the file server offers a disk the moment it appears.
+	plugged.Reserved = shares.Names
+	plugged.OnChange = func() { shares.RefreshForDisks(context.Background(), log) }
 	hostd.RegisterPluggedOperations(registry, plugged)
 
 	hostd.RegisterBackupOperations(registry, hostd.NewBackupServices(
