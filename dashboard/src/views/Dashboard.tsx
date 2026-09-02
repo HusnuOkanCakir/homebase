@@ -253,6 +253,7 @@ export function Dashboard({ user, onSignOut }: Props) {
               canManage={user.permissions.includes("network.modify")}
               canSetAccess={user.permissions.includes("accounts.manage")}
               serverName={system?.hostname ?? ""}
+              me={user.username}
             />
           </>
         ) : current === "storage" ? (

@@ -233,6 +233,43 @@ server is not running, that is the answer — nothing is reachable and the page 
 the top, because from the other end that state looks identical to a folder that was never
 shared.
 
+**Windows never asks who you are, and you end up as somebody else.** Windows saves the first
+name and password you give a server and reuses them silently from then on — so a laptop that
+once connected as `okan` stays `okan`, whoever is sitting at it. The symptom is confusing
+rather than alarming: your own folder looks empty, because you are looking into somebody
+else's.
+
+To be asked again, in a Command Prompt:
+
+```
+cmdkey /list
+```
+
+Look for the entry whose `User:` is the wrong person. It is usually stored under the
+server's plain name, whatever address you actually typed:
+
+```
+Target: Domain:target=homebase
+Type:   Domain Password
+User:   okan
+```
+
+Delete it by exactly the name after `target=`:
+
+```
+cmdkey /delete:homebase
+```
+
+Then open the folder again and sign in as yourself.
+
+`net use * /delete` is not enough on its own and usually answers "there are no entries in
+the list" — that command removes mapped drive letters, and the saved password is a separate
+thing. If Windows still connects silently after deleting the credential, sign out of Windows
+and back in: the authenticated session lasts as long as the login session does.
+
+The same entry can be removed by hand under Control Panel → Credential Manager → Windows
+Credentials.
+
 **Windows asks for a password over and over.** It is sending the wrong name. Type it as
 `homebase\yourname` — with your server's name, a backslash, then the account — rather than
 just the account. Windows otherwise offers your Microsoft account, which the server has

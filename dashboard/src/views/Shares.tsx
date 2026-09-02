@@ -36,8 +36,12 @@ export function Shares({
   canManage,
   canSetAccess,
   serverName,
+  me,
 }: {
   canManage: boolean;
+  /** Who is reading this screen, so it can tell them their own name rather
+   *  than everybody's. */
+  me: string;
   /** Whether this person may choose who opens a folder. It is an accounts
    *  question, not a network one, so it is a separate permission. */
   canSetAccess: boolean;
@@ -141,7 +145,7 @@ export function Shares({
       {status.shares.length === 0 ? (
         <Nothing />
       ) : (
-        <Reaching shares={status.shares} users={status.users} host={host} />
+        <Reaching shares={status.shares} users={status.users} host={host} me={me} />
       )}
 
       {canManage ? (
@@ -261,10 +265,12 @@ function Reaching({
   shares,
   users,
   host,
+  me,
 }: {
   shares: SharedFolder[];
   users: string[];
   host: Names;
+  me: string;
 }) {
   // The first one whose disk is actually there. An address for a folder on an
   // unplugged disk is a correct string that produces "cannot connect", which is
@@ -312,15 +318,39 @@ function Reaching({
           <>
             <dt>Sign in as</dt>
             <dd>
-              {users.join(", ")}
-              <div className="muted">
-                {/* This said the file-sharing password "is not the password you
-                    use here", which was true until one password shipped and
-                    wrong afterwards — and it is the line somebody reads while
-                    standing at another computer being asked for a password. */}
-                With the same password you sign in here with. Leave the domain or
-                workgroup box empty.
-              </div>
+              {/* Your own name first and in bold, not a list of everybody.
+                  Listing all three invited exactly the mistake it produced: a
+                  file made from Windows landed in one person's folder while the
+                  dashboard showed another's, and both were behaving correctly.
+                  Which account you are is the whole answer to "where did my
+                  file go", so the screen says yours. */}
+              {me && users.includes(me) ? (
+                <>
+                  <strong>{me}</strong>
+                  <div className="muted">
+                    Your own name, and the same password you sign in here with.
+                    Leave the domain or workgroup box empty.
+                  </div>
+                  <div className="muted">
+                    Everybody signs in as themselves. <code>people</code> shows each
+                    person a different folder, so a file put there from Windows as
+                    one person is not in another person's — including yours on this
+                    screen, if the two are not the same account.
+                  </div>
+                </>
+              ) : (
+                <>
+                  {users.join(", ")}
+                  <div className="muted">
+                    {/* This said the file-sharing password "is not the password
+                        you use here", true until one password shipped and wrong
+                        afterwards — and it is the line somebody reads while
+                        standing at another computer being asked for one. */}
+                    With the same password you sign in here with. Leave the domain
+                    or workgroup box empty.
+                  </div>
+                </>
+              )}
             </dd>
           </>
         ) : null}
