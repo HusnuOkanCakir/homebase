@@ -131,6 +131,10 @@ another computer. Everybody connects to the same name and sees their own.
 | **Windows** | `\\homebase.local\people` |
 | **macOS, Linux** | `smb://homebase.local/people` |
 
+The share is called **people** and not "your folder", which catches everybody out once:
+open it and you are already inside your own, because the server serves each person a
+different folder from the same name.
+
 It is created with the account, on the server's own disk. It cannot be put on a disk
 formatted for Windows or a camera: those record no owner for a file, so a private folder on
 one would not actually be private, and Homebase refuses rather than pretending.

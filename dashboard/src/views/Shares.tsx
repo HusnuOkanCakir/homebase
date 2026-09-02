@@ -338,6 +338,19 @@ function Reaching({
         </p>
       ) : null}
 
+      {/* Named, all of them, including the two that are not shared folders.
+          Somebody made a folder in "Your folder" on this screen, went to
+          Explorer, and could not find it — because the thing it is called there
+          is `people`, and nothing here said so. The same was true of a disk they
+          had just plugged in. A list of what exists costs one line and answers
+          the question before it is asked. */}
+      <p className="muted">
+        <strong>Your own folder</strong> is <code>people</code> — open it and you
+        are inside yours, and nobody else can see it. A disk plugged into the
+        server appears under its own name. Both are reached the same way, with
+        the name changed at the end.
+      </p>
+
       {shares.length > 1 ? (
         <p className="muted">
           The other {shares.length - 1} shared folder
