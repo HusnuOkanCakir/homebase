@@ -14,6 +14,18 @@ import { test, expect, type Page } from "@playwright/test";
  */
 
 const ADMIN = process.env["HOMEBASE_ADMIN"] ?? "alex";
+
+/**
+ * A folder name nobody has used yet.
+ *
+ * These specs run against a server that keeps what previous runs put in it, so
+ * a fixed name passes once and then fails on the run after: the folder is
+ * already there, already has a file in it, and "this folder is empty" is a
+ * perfectly true statement about somewhere else.
+ */
+function freshFolder(): string {
+  return "Holiday " + Math.random().toString(36).slice(2, 7);
+}
 const PASSWORD = process.env["HOMEBASE_PASSWORD"] ?? "a-sufficiently-long-password";
 
 test.describe.configure({ mode: "serial" });
@@ -64,13 +76,14 @@ test("finding a file and taking it", async ({ page }) => {
   // of this screen an API test cannot reach: the browser writes the multipart
   // boundary, and getting that wrong is invisible until a real one sends a
   // real file.
-  await makeFolder(page, "Holiday photographs");
+  const folderName = freshFolder();
+  await makeFolder(page, folderName);
   await upload(page, "tax-return-2026.pdf", "the tax return");
   await upload(page, "Örnek Belge.txt", "belge");
 
   // A folder is somewhere to go; a file is something to take. The difference
   // has to be visible without clicking either.
-  const folder = page.getByRole("button", { name: /Holiday photographs/ });
+  const folder = page.getByRole("button", { name: new RegExp(folderName) });
   const file = page.getByRole("link", { name: "tax-return-2026.pdf" });
   await expect(folder).toBeVisible();
   await expect(file).toBeVisible();
@@ -115,11 +128,12 @@ test("deleting a folder asks for its name", async ({ page }) => {
   // Waited for, not asked about. isVisible() answers immediately, so asking it
   // before the listing has arrived skips a test that would have passed — which
   // is how a test quietly stops covering anything.
-  const folder = page.getByRole("button", { name: /Holiday photographs/ });
-  if (!(await folder.isVisible({ timeout: 10_000 }).catch(() => false))) {
-    await makeFolder(page, "Holiday photographs");
-  }
-  await expect(folder).toBeVisible();
+  // Its own folder, made here. Reaching for one an earlier test left behind is
+  // how a test starts depending on the order it runs in.
+  await expect(page.getByRole("button", { name: "New folder" })).toBeVisible();
+  const folderName = freshFolder();
+  await makeFolder(page, folderName);
+  const folder = page.getByRole("button", { name: new RegExp(folderName) });
 
   // The row's own Delete, not the first one on the screen.
   await page
@@ -134,7 +148,7 @@ test("deleting a folder asks for its name", async ({ page }) => {
   const confirm = page.getByRole("button", { name: "Delete it" });
   await expect(confirm).toBeDisabled();
 
-  await page.getByPlaceholder("Holiday photographs").fill("Holiday photographs");
+  await page.getByPlaceholder(folderName).fill(folderName);
   await expect(confirm).toBeEnabled();
 
   await page.getByRole("button", { name: "Keep it" }).click();

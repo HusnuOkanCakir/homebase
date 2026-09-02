@@ -170,6 +170,12 @@ export interface Account {
   has_signed_in: boolean;
   created_at: string;
   last_login_at?: string;
+  /** When their joining code stops working, if one is outstanding. Absent once
+   *  they have used it, because an accepted invitation is history rather than
+   *  something an administrator has to act on. */
+  invitation_expires_at?: string;
+  /** Their code no longer works and a new one has to be issued. */
+  invitation_expired: boolean;
 }
 
 export type Role = "administrator" | "member" | "limited";
@@ -1218,6 +1224,18 @@ export const api = {
 
   removeShareUser: (username: string) =>
     post<ShareStatus>("/shares/users/remove", { username }, 60_000),
+
+  /** Somebody's first sign-in, with the code they were given.
+   *
+   *  Not the recovery endpoint, which this used to be. Joining and recovering
+   *  want different things from a code — see internal/auth/invitations.go — and
+   *  told the person different, wrong things on the way. */
+  claimAccount: (username: string, joiningCode: string, newPassword: string) =>
+    post<{ user: User; recovery_code: string; message?: string }>("/auth/claim", {
+      username,
+      joining_code: joiningCode,
+      new_password: newPassword,
+    }),
 
   // --- Files ----------------------------------------------------------------
 

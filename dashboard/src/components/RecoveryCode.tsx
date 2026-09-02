@@ -6,6 +6,18 @@ interface Props {
   acknowledgement: string;
   onAcknowledged: () => void;
   busy?: boolean;
+  /**
+   * Which kind of code this is, because the two need different sentences.
+   *
+   * They looked the same for long enough that this screen told an
+   * administrator, about somebody else's joining code, that it was "your
+   * recovery code", that anyone holding it could "take over your server", and
+   * that they could always create a new one while signed in. Three sentences,
+   * none of them true of what was on the screen.
+   */
+  kind?: "recovery" | "joining";
+  /** Whose joining code it is. Unused for a recovery code, which is your own. */
+  name?: string;
 }
 
 /**
@@ -20,9 +32,18 @@ interface Props {
  * possible moment. The tick box is the smallest honest obstacle: it takes a
  * second, and it makes the claim explicit rather than assumed.
  */
-export function RecoveryCode({ code, acknowledgement, onAcknowledged, busy }: Props) {
+export function RecoveryCode({
+  code,
+  acknowledgement,
+  onAcknowledged,
+  busy,
+  kind = "recovery",
+  name,
+}: Props) {
   const [written, setWritten] = useState(false);
   const [copied, setCopied] = useState(false);
+  const joining = kind === "joining";
+  const whose = name ?? "them";
 
   async function copy() {
     try {
@@ -39,8 +60,9 @@ export function RecoveryCode({ code, acknowledgement, onAcknowledged, busy }: Pr
     <section className="card">
       <h2>Write this down</h2>
       <p>
-        This is your recovery code. If you ever forget your password, this is what gets
-        you back into your server.
+        {joining
+          ? `This is ${whose}'s joining code. They use it to sign in for the first time and choose a password of their own — one you will not know.`
+          : "This is your recovery code. If you ever forget your password, this is what gets you back into your server."}
       </p>
 
       <p className="recovery-code" data-testid="recovery-code">
@@ -57,14 +79,20 @@ export function RecoveryCode({ code, acknowledgement, onAcknowledged, busy }: Pr
       </div>
 
       <p className="muted">
-        Keep it somewhere you will find it again — with your other important papers, not
-        on the server itself. It is shown once and cannot be displayed again, but you can
-        always create a new one while you are signed in.
+        {joining
+          ? `It is shown once and cannot be displayed again, and it stops working a week
+             after today. If ${whose} does not get to it in time, issue another — it costs
+             nothing and there is no limit.`
+          : `Keep it somewhere you will find it again — with your other important papers,
+             not on the server itself. It is shown once and cannot be displayed again, but
+             you can always create a new one while you are signed in.`}
       </p>
 
       <p className="muted">
-        Anyone who has this code can take over your server, so treat it like a spare key
-        to your house.
+        {joining
+          ? `Anyone who has this code can take the account it is for, so hand it to
+             ${whose} directly rather than leaving it somewhere.`
+          : "Anyone who has this code can take over your server, so treat it like a spare key to your house."}
       </p>
 
       <label className="check">

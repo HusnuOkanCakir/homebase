@@ -35,7 +35,7 @@ func withOwner(t *testing.T) (*Service, *User) {
 func TestAnInvitedAccountIsClaimedWithItsCodeAndNotAPassword(t *testing.T) {
 	service, _ := withOwner(t)
 
-	invited, code, err := service.CreateInvitedAccount(t.Context(), "father", RoleMember)
+	invited, code, err := service.CreateInvitedAccount(t.Context(), "father", RoleMember, "alex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,8 +49,10 @@ func TestAnInvitedAccountIsClaimedWithItsCodeAndNotAPassword(t *testing.T) {
 		t.Fatal("the joining code worked as a password; it must not")
 	}
 
-	// It is exchanged for a password only that person knows.
-	claimed, _, err := service.ResetPasswordWithCode(
+	// It is exchanged for a password only that person knows — through the
+	// joining path, not the recovery one. See invitations.go for why those are
+	// different mechanisms.
+	claimed, _, err := service.ClaimAccount(
 		t.Context(), "father", code, "a-password-of-their-own")
 	if err != nil {
 		t.Fatalf("claiming the account failed: %v", err)
@@ -87,7 +89,7 @@ func TestRolesCarryTheirPermissionsAndNothingElse(t *testing.T) {
 			[]string{PermSystemRead, PermAppsRead, PermAccountsManage}},
 	} {
 		t.Run(c.role, func(t *testing.T) {
-			user, _, err := service.CreateInvitedAccount(t.Context(), "person-"+c.role, c.role)
+			user, _, err := service.CreateInvitedAccount(t.Context(), "person-"+c.role, c.role, "alex")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +113,7 @@ func TestRolesCarryTheirPermissionsAndNothingElse(t *testing.T) {
 // A typo must not produce an account with permissions nobody chose.
 func TestAnUnknownRoleIsRefusedRatherThanDefaulted(t *testing.T) {
 	service, _ := withOwner(t)
-	if _, _, err := service.CreateInvitedAccount(t.Context(), "someone", "superuser"); !errors.Is(err, ErrUnknownRole) {
+	if _, _, err := service.CreateInvitedAccount(t.Context(), "someone", "superuser", "alex"); !errors.Is(err, ErrUnknownRole) {
 		t.Fatalf("err = %v, want ErrUnknownRole", err)
 	}
 }
@@ -122,12 +124,12 @@ func TestUsernamesThatWouldBreakFileSharingAreRefused(t *testing.T) {
 	service, _ := withOwner(t)
 	for _, name := range []string{"Father", "my father", "f", "-nope", "nope-",
 		"a_b", "ünlü", ""} {
-		if _, _, err := service.CreateInvitedAccount(t.Context(), name, RoleMember); err == nil {
+		if _, _, err := service.CreateInvitedAccount(t.Context(), name, RoleMember, "alex"); err == nil {
 			t.Errorf("accepted %q", name)
 		}
 	}
 	for _, name := range []string{"father", "my-father", "ab", "person2"} {
-		if _, _, err := service.CreateInvitedAccount(t.Context(), name, RoleMember); err != nil {
+		if _, _, err := service.CreateInvitedAccount(t.Context(), name, RoleMember, "alex"); err != nil {
 			t.Errorf("refused %q: %v", name, err)
 		}
 	}
@@ -145,7 +147,7 @@ func TestTheLastAdministratorCannotBeRemovedOrDemoted(t *testing.T) {
 	}
 
 	// Both become possible once somebody else can administer the machine.
-	second, _, err := service.CreateInvitedAccount(t.Context(), "deputy", RoleAdministrator)
+	second, _, err := service.CreateInvitedAccount(t.Context(), "deputy", RoleAdministrator, "alex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +163,7 @@ func TestTheLastAdministratorCannotBeRemovedOrDemoted(t *testing.T) {
 // that revoked it would be a mystery with no error message attached.
 func TestARoleChangeKeepsTheUnrestrictedAssistantPermission(t *testing.T) {
 	service, _ := withOwner(t)
-	person, _, err := service.CreateInvitedAccount(t.Context(), "researcher", RoleMember)
+	person, _, err := service.CreateInvitedAccount(t.Context(), "researcher", RoleMember, "alex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +190,7 @@ func TestARoleChangeKeepsTheUnrestrictedAssistantPermission(t *testing.T) {
 
 func TestAccountsListsEverybodyWithTheirRole(t *testing.T) {
 	service, _ := withOwner(t)
-	if _, _, err := service.CreateInvitedAccount(t.Context(), "father", RoleLimited); err != nil {
+	if _, _, err := service.CreateInvitedAccount(t.Context(), "father", RoleLimited, "alex"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -247,7 +249,7 @@ func TestClaimingAnAccountCountsAsSigningIn(t *testing.T) {
 	}
 
 	// An invitation nobody has accepted is still reported as such.
-	if _, _, err := service.CreateInvitedAccount(t.Context(), "father", RoleMember); err != nil {
+	if _, _, err := service.CreateInvitedAccount(t.Context(), "father", RoleMember, "alex"); err != nil {
 		t.Fatal(err)
 	}
 	accounts, err = service.Accounts(t.Context())

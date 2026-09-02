@@ -50,8 +50,8 @@ func TestAddingSomebodyToTheHousehold(t *testing.T) {
 
 	// The new person exchanges the code for a password of their own, through
 	// the recovery endpoint that already existed.
-	rec = h.do(http.MethodPost, "/api/v1/auth/recover",
-		`{"username":"father","recovery_code":"`+created.JoiningCode+
+	rec = h.do(http.MethodPost, "/api/v1/auth/claim",
+		`{"username":"father","joining_code":"`+created.JoiningCode+
 			`","new_password":"a-password-of-their-own"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("claiming the account returned %d: %s", rec.Code, rec.Body)
@@ -76,8 +76,8 @@ func TestAMemberCannotAdministerTheServer(t *testing.T) {
 		JoiningCode string `json:"joining_code"`
 	}
 	json.Unmarshal(rec.Body.Bytes(), &created)
-	h.do(http.MethodPost, "/api/v1/auth/recover",
-		`{"username":"father","recovery_code":"`+created.JoiningCode+
+	h.do(http.MethodPost, "/api/v1/auth/claim",
+		`{"username":"father","joining_code":"`+created.JoiningCode+
 			`","new_password":"a-password-of-their-own"}`, nil)
 
 	login := h.do(http.MethodPost, "/api/v1/auth/login",
@@ -209,8 +209,8 @@ func TestTheShellRendersForAnAccountWithoutSystemRead(t *testing.T) {
 		JoiningCode string `json:"joining_code"`
 	}
 	json.Unmarshal(rec.Body.Bytes(), &created)
-	h.do(http.MethodPost, "/api/v1/auth/recover",
-		`{"username":"brother","recovery_code":"`+created.JoiningCode+
+	h.do(http.MethodPost, "/api/v1/auth/claim",
+		`{"username":"brother","joining_code":"`+created.JoiningCode+
 			`","new_password":"another-long-password"}`, nil)
 	login := h.do(http.MethodPost, "/api/v1/auth/login",
 		`{"username":"brother","password":"another-long-password"}`, nil)
@@ -256,8 +256,8 @@ func TestSomebodyWithOnlyFilesCanSeeHowToReachThem(t *testing.T) {
 		JoiningCode string `json:"joining_code"`
 	}
 	json.Unmarshal(rec.Body.Bytes(), &created)
-	h.do(http.MethodPost, "/api/v1/auth/recover",
-		`{"username":"brother","recovery_code":"`+created.JoiningCode+
+	h.do(http.MethodPost, "/api/v1/auth/claim",
+		`{"username":"brother","joining_code":"`+created.JoiningCode+
 			`","new_password":"another-long-password"}`, nil)
 	login := h.do(http.MethodPost, "/api/v1/auth/login",
 		`{"username":"brother","password":"another-long-password"}`, nil)

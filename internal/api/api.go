@@ -89,6 +89,9 @@ func (s *Server) Handler() http.Handler {
 	// them needs a credential to reach. See ratelimit.go.
 	mux.HandleFunc("POST /api/v1/setup", s.limited(s.handleSetup))
 	mux.HandleFunc("POST /api/v1/auth/login", s.limited(s.handleLogin))
+	// Rate-limited like the recovery route, and for the same reason: an
+	// unauthenticated endpoint that checks a code is one somebody can guess at.
+	mux.HandleFunc("POST /api/v1/auth/claim", s.limited(s.handleClaimAccount))
 	mux.HandleFunc("POST /api/v1/auth/recover", s.limited(s.handleRecover))
 
 	// Authenticated.

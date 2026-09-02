@@ -71,6 +71,19 @@ drag it into the Finder sidebar.
 
 Leave any "domain" or "workgroup" box empty.
 
+## Joining a server somebody else set up
+
+Whoever runs the server adds you under **Settings → People** and gives you a **joining
+code** — twenty-five characters, and they can only show it to you once.
+
+On the sign-in page, choose **I have a joining code**, type your name and the code, and pick
+a password. That password is yours: the person who invited you does not know it and cannot
+see it. You are then shown a **recovery code** of your own — write it down, because it is
+the way back in if you forget the password, and it is shown once.
+
+A joining code stops working a week after it was made. If yours no longer works, ask for
+another; it costs them nothing and there is no limit.
+
 ## Your password is your Homebase password
 
 The same name and the same password open the dashboard and open a folder from your laptop.
