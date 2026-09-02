@@ -100,9 +100,13 @@ func remoteMountPoint(root, name string) string {
 	return filepath.Join(root, remoteDirName, name)
 }
 
+// remoteConfigDirFor is where credentials files live. A variable so a test can
+// write one somewhere it is allowed to.
+var remoteConfigDirFor = func() string { return remoteConfigDir }
+
 // remoteCredentialsPath is the root-only file holding one folder's password.
 func remoteCredentialsPath(name string) string {
-	return filepath.Join(remoteConfigDir, "remote-"+name+".cred")
+	return filepath.Join(remoteConfigDirFor(), "remote-"+name+".cred")
 }
 
 // writeRemoteCredentials stores the password where only root can read it.
@@ -112,10 +116,19 @@ func remoteCredentialsPath(name string) string {
 // the process list while the mount runs. A password in there is a password
 // every account on this machine can read.
 func writeRemoteCredentials(name, username, password string) error {
+	// No domain line, deliberately.
+	//
+	// There was one, empty, written on the reasoning that "a home machine wants
+	// an empty domain". That was a guess and it is the wrong kind of guess to
+	// leave in: an empty domain overrides what the person typed. Somebody
+	// signing in to Windows with a Microsoft account has to authenticate as
+	// `MicrosoftAccount\their@email.com`, and a `user@domain` or `DOMAIN\user`
+	// name is something mount.cifs splits for itself — all of which a blank
+	// domain= line quietly undoes.
+	//
+	// Left out, mount.cifs uses what the username carries and asks Windows.
+	// That is one fewer thing between the person and an answer.
 	body := "username=" + username + "\npassword=" + password + "\n"
-	// Windows sends a domain even in a workgroup, and an empty one is what a
-	// home machine wants; stating it stops mount.cifs prompting for it.
-	body += "domain=\n"
 	return writeRootFile(remoteCredentialsPath(name), body, 0o600)
 }
 

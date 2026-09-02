@@ -130,3 +130,44 @@ func TestOnlyABareNameIsWorthRetryingAsMDNS(t *testing.T) {
 		}
 	}
 }
+
+// The credentials file carries what the person typed and nothing invented.
+//
+// It used to add `domain=` with nothing after it, on the reasoning that a home
+// machine wants an empty domain. That was a guess, and the wrong kind: an empty
+// domain overrides the username's own. Somebody whose Windows signs in with a
+// Microsoft account has to authenticate as `MicrosoftAccount\their@email.com`,
+// and a blank domain line quietly undoes exactly that.
+func TestTheCredentialsFileInventsNoDomain(t *testing.T) {
+	dir := t.TempDir()
+	previous := remoteConfigDirFor
+	remoteConfigDirFor = func() string { return dir }
+	t.Cleanup(func() { remoteConfigDirFor = previous })
+
+	if err := writeRemoteCredentials("dads-disk",
+		`MicrosoftAccount\dad@example.com`, "his-password"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(remoteCredentialsPath("dads-disk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	written := string(body)
+
+	if strings.Contains(written, "domain=") {
+		t.Fatalf("a domain was invented: %q", written)
+	}
+	if !strings.Contains(written, `username=MicrosoftAccount\dad@example.com`) {
+		t.Fatalf("the name was not passed through as typed: %q", written)
+	}
+
+	// And it is readable by root alone: the alternative to this file is a mount
+	// option, which every account on the machine can read in /proc/mounts.
+	info, err := os.Stat(remoteCredentialsPath("dads-disk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("somebody else's Windows password is %04o", mode)
+	}
+}
