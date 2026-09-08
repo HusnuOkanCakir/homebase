@@ -116,28 +116,34 @@ make_vnc_password() {
     fi
 }
 
-# open_remote_control states the policy in the packet filter rather than
-# leaving it to a default and a bind.
+# open_remote_control states who may reach the remote control, in the packet
+# filter, because the bind cannot: x11vnc 0.9.16 opens `[::]:5900` whatever
+# `-listen` and `-noipv6` say. Found with `ss -ltnp` after the first install.
 #
-# Both halves of that were needed. x11vnc is given the tunnel's address to
-# listen on, and 0.9.16 opens `[::]:5900` as well whatever `-noipv6` says — so
-# the bind alone does not confine it. And ufw's default-deny was the only thing
-# preventing that, which also meant the remote control could not have worked
-# over the tunnel either: there was no rule to let it through.
-#
-# One rule scoped to the interface fixes both. See packaging/firewall for why
-# an interface rather than the 100.64.0.0/10 range: carriers hand that range to
-# subscribers, and this machine has such an address.
+# The real cards and the tunnel. Scoped to interfaces rather than to address
+# ranges for the reason packaging/firewall gives at length: 100.64.0.0/10 is
+# Tailscale's and also what carriers hand a subscriber's router, and
+# 172.16.0.0/12 is where Docker puts its bridges. An interface has no such
+# ambiguity, and it is what keeps eleven containers away from this port.
 open_remote_control() {
     command -v ufw >/dev/null 2>&1 || return 0
-    ip link show tailscale0 >/dev/null 2>&1 || return 0
-    ufw allow in on tailscale0 to any port 5900 proto tcp \
-        comment "Homebase television remote control" >/dev/null
+    close_remote_control
+    for card in $(ls /sys/class/net) tailscale0; do
+        case "$card" in
+            lo|docker*|br-*|veth*|virbr*) continue ;;
+        esac
+        [ -e "/sys/class/net/$card/device" ] || [ "$card" = tailscale0 ] || continue
+        ip link show "$card" >/dev/null 2>&1 || continue
+        ufw allow in on "$card" to any port 5900 proto tcp \
+            comment "Homebase television remote control" >/dev/null
+    done
 }
 
 close_remote_control() {
     command -v ufw >/dev/null 2>&1 || return 0
-    ufw delete allow in on tailscale0 to any port 5900 proto tcp >/dev/null 2>&1 || true
+    for card in $(ls /sys/class/net) tailscale0; do
+        ufw delete allow in on "$card" to any port 5900 proto tcp >/dev/null 2>&1 || true
+    done
 }
 
 case "${1:-}" in

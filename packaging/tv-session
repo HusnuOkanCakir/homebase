@@ -23,28 +23,27 @@ openbox &
 # arrow in the middle of a film is the kind of thing nobody can unsee.
 unclutter -idle 2 -root &
 
-# The remote control, on the tunnel and nowhere else.
+# The remote control.
 #
-# -rfbport 5900 on the Tailscale address only: VNC is unencrypted and its
-# password scheme carries eight characters, and the first thing anybody does on
-# this screen is type their Homebase password into the browser. Inside the
-# tunnel that is encrypted end to end, including between two machines in the
-# same room. If Tailscale is not up there is no remote control, which is the
-# right way for this to fail.
-tailnet=$(tailscale ip -4 2>/dev/null | head -1 || true)
-if [ -n "$tailnet" ]; then
-    # -noipv6 is not tidiness. Without it x11vnc binds the IPv4 address it was
-    # given *and* [::]:5900 — every IPv6 address the machine has, including the
-    # home network — so the careful argument about keeping this inside the
-    # tunnel would have been undone by a second listening socket on the same
-    # port. Found by reading `ss -ltnp` after the first install rather than by
-    # thinking about it.
-    x11vnc -display :0 -listen "$tailnet" -noipv6 -rfbport 5900 \
-        -rfbauth "$VNC_PASSWORD_FILE" \
-        -forever -shared -noxdamage -repeat -nowf &
-else
-    echo "tv-session: no Tailscale address, so no remote control" >&2
-fi
+# Listens on everything and lets the packet filter decide who may arrive, which
+# is the pattern the rest of this machine already uses for the file server —
+# see packaging/firewall. It is also the only arrangement that works here:
+# x11vnc 0.9.16 opens `[::]:5900` whatever it is told to bind, so a careful
+# `-listen` was never the control it looked like.
+#
+# The household asked for this on the home network rather than through the
+# tunnel, which is the ordinary case: the television is four metres from the
+# computer driving it. Both are open, so it works at home without Tailscale
+# running and from away with it.
+#
+# What that costs, said plainly rather than buried: VNC is not encrypted, so
+# anybody already on the home network can watch this screen. For a television
+# showing films that is not much. It does mean not typing a password into the
+# browser on the television while somebody untrusted is on the network — sign
+# in once and the session lasts a fortnight.
+x11vnc -display :0 -rfbport 5900 \
+    -rfbauth "$VNC_PASSWORD_FILE" \
+    -forever -shared -noxdamage -repeat -nowf &
 
 # Wait for the browser's profile directory rather than racing it.
 sleep 1

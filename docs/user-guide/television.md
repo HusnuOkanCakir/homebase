@@ -43,21 +43,32 @@ Then plug in the HDMI cable and restart the server.
 ## Driving it from another computer
 
 Install any VNC viewer — TightVNC, RealVNC and UltraVNC are all fine on Windows — and connect
-to the server's **Tailscale address**, port 5900, with the password the setup printed.
+to the server on **port 5900** with the password the setup printed:
 
-You will see the television's screen. Your mouse and keyboard drive it.
+| | |
+|---|---|
+| **At home** | `192.168.1.177:5900`, or `homebase.local:5900` |
+| **From away** | the server's Tailscale address, port 5900 |
 
-!!! note "Why the tunnel and not the home network"
+You will see the television's screen in a window. Your own mouse and keyboard drive it.
 
-    VNC is not encrypted, and its password scheme carries eight characters and dates from the
-    1990s. The first thing anybody does on that screen is type their Homebase password into
-    the browser, and on the local network that would cross the wire in the clear.
+!!! warning "This one is not encrypted"
 
-    Inside Tailscale it is encrypted end to end — including between two machines in the same
-    room, where Tailscale still connects directly, so nothing is slower for it.
+    VNC has no encryption, and its password scheme carries eight characters and dates from
+    the 1990s. On your home network, anybody who can already put a device on it could watch
+    this screen.
 
-    The cost is that with Tailscale down there is no remote control until you plug a keyboard
-    into the server. That is the right way round for this to fail.
+    For a television showing films that is not much. The thing to avoid is **typing a
+    password into the browser on the television** while somebody you do not trust is on the
+    network — sign in once and the session lasts a fortnight.
+
+    Reaching it through Tailscale instead is encrypted end to end, including between two
+    machines in the same room, and costs nothing in speed because Tailscale still connects
+    directly. Both are open; use whichever suits.
+
+The port is open on the server's real network cards and on the tunnel, and nowhere else. The
+applications running on the server cannot reach it, for the same reason they cannot reach the
+file server.
 
 ## Sound
 
