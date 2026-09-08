@@ -1,0 +1,58 @@
+#!/bin/sh
+#
+# The session that appears on the television.
+#
+# Started by startx from an autologin on tty1 — see tv-kiosk. Everything here
+# runs as the unprivileged television account.
+#
+# One window manager, one browser, and a way to drive it from across the room.
+# No panel, no desktop, no icons: a television is looked at from four metres
+# away by somebody holding no mouse, and everything that is not the picture is
+# in the way.
+
+set -eu
+
+DASHBOARD=${HOMEBASE_TV_URL:-https://homebase.local}
+VNC_PASSWORD_FILE=/etc/homebase/tv-vnc.pass
+
+# openbox with no keybindings to speak of, purely so that windows have a
+# manager and full-screen works properly. Nothing is ever clicked on it.
+openbox &
+
+# The pointer disappears when it stops moving. On a television a stationary
+# arrow in the middle of a film is the kind of thing nobody can unsee.
+unclutter -idle 2 -root &
+
+# The remote control, on the tunnel and nowhere else.
+#
+# -rfbport 5900 on the Tailscale address only: VNC is unencrypted and its
+# password scheme carries eight characters, and the first thing anybody does on
+# this screen is type their Homebase password into the browser. Inside the
+# tunnel that is encrypted end to end, including between two machines in the
+# same room. If Tailscale is not up there is no remote control, which is the
+# right way for this to fail.
+tailnet=$(tailscale ip -4 2>/dev/null | head -1 || true)
+if [ -n "$tailnet" ]; then
+    # -noipv6 is not tidiness. Without it x11vnc binds the IPv4 address it was
+    # given *and* [::]:5900 — every IPv6 address the machine has, including the
+    # home network — so the careful argument about keeping this inside the
+    # tunnel would have been undone by a second listening socket on the same
+    # port. Found by reading `ss -ltnp` after the first install rather than by
+    # thinking about it.
+    x11vnc -display :0 -listen "$tailnet" -noipv6 -rfbport 5900 \
+        -rfbauth "$VNC_PASSWORD_FILE" \
+        -forever -shared -noxdamage -repeat -nowf &
+else
+    echo "tv-session: no Tailscale address, so no remote control" >&2
+fi
+
+# Wait for the browser's profile directory rather than racing it.
+sleep 1
+
+# The browser, full screen, on the dashboard.
+#
+# Not --kiosk: kiosk mode removes the address bar, and "open any web page" was
+# the whole point of putting a television here. Full screen with the toolbar
+# reachable is what a television wants — the picture fills the screen and the
+# bar is a keystroke away.
+exec firefox --new-window "$DASHBOARD"
