@@ -72,13 +72,26 @@ file server.
 
 ## Sound
 
-Sound goes over the same HDMI cable. If the television is silent, the usual cause is that
-the server is sending sound to its own speakers instead:
+Sound goes over the same HDMI cable, and the session points it at the television every time
+it starts. The default on a laptop is its own speakers, which is right for a laptop and wrong
+for one wired to a television — the picture would be across the room and the sound under it.
+
+If the television is silent anyway, check where the sound is going:
 
 ```sh
-sudo -u homebase-tv pactl list short sinks
-sudo -u homebase-tv pactl set-default-sink <the HDMI one>
+sudo -u homebase-tv XDG_RUNTIME_DIR=/run/user/$(id -u homebase-tv) pactl get-default-sink
 ```
+
+The answer should contain `hdmi`. If it says `analog`, the television was probably switched
+off when the session started; restarting the server is the simplest fix, or:
+
+```sh
+sudo -u homebase-tv XDG_RUNTIME_DIR=/run/user/$(id -u homebase-tv) \
+  pactl set-default-sink alsa_output.pci-0000_00_03.0.hdmi-stereo
+```
+
+Also worth checking on the television itself: many sets default to their own speakers being
+muted on an HDMI input nobody has used before.
 
 ## Turning it off again
 

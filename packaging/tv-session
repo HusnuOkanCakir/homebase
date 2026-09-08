@@ -45,6 +45,22 @@ x11vnc -display :0 -rfbport 5900 \
     -rfbauth "$VNC_PASSWORD_FILE" \
     -forever -shared -noxdamage -repeat -nowf &
 
+# Sound out of the television rather than out of the laptop.
+#
+# The default is the built-in speakers, which is right for a laptop and wrong
+# for one wired to a television: the picture is on the screen across the room
+# and the sound comes out of the machine under it. Set on every start rather
+# than once, because a sink that was absent when the session began — the
+# television switched off at the wall, the cable out — would otherwise leave the
+# choice pointing at the speakers for good.
+#
+# Waited for, because pipewire takes a moment to find the cards.
+for attempt in 1 2 3 4 5; do
+    hdmi=$(pactl list short sinks 2>/dev/null | awk '/hdmi/ {print $2; exit}')
+    [ -n "$hdmi" ] && { pactl set-default-sink "$hdmi" >/dev/null 2>&1; break; }
+    sleep 1
+done
+
 # Wait for the browser's profile directory rather than racing it.
 sleep 1
 

@@ -48,7 +48,7 @@ install_packages() {
     apt-get install -y --no-install-recommends \
         xserver-xorg-core xserver-xorg-input-libinput xinit \
         openbox x11vnc unclutter \
-        pipewire pipewire-pulse wireplumber alsa-utils \
+        pipewire pipewire-pulse wireplumber alsa-utils pulseaudio-utils \
         i965-va-driver fonts-dejavu-core
     # Firefox is a snap on 24.04 whichever package you ask for. Said plainly
     # rather than discovered: this pulls in snapd's machinery, which is already
