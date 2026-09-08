@@ -15,6 +15,26 @@ set -eu
 DASHBOARD=${HOMEBASE_TV_URL:-https://homebase.local}
 VNC_PASSWORD_FILE="$HOME/.vnc/passwd"
 
+# The television is the screen, and the laptop's own panel is not.
+#
+# Without this X extends the desktop: the laptop panel at 0,0 and the television
+# to the right of it. Everything then opens on the panel — the browser included
+# — and the television faithfully displays the empty half nobody is using. It
+# looks exactly like a broken picture and is a correct dual-monitor setup.
+#
+# So the HDMI output becomes the only one, at the origin. The lid can then be
+# shut, which is what somebody does with a laptop wired to a television.
+#
+# If no television is attached the panel is left alone: a server with the cable
+# out should still have a console somebody can log into.
+for output in $(xrandr --query 2>/dev/null | awk '/^HDMI.* connected/ {print $1}'); do
+    xrandr --output "$output" --primary --auto --pos 0x0 2>/dev/null || continue
+    for panel in $(xrandr --query 2>/dev/null | awk '/^eDP.* connected/ {print $1}'); do
+        xrandr --output "$panel" --off 2>/dev/null || true
+    done
+    break
+done
+
 # openbox with no keybindings to speak of, purely so that windows have a
 # manager and full-screen works properly. Nothing is ever clicked on it.
 openbox &
