@@ -58,6 +58,13 @@ import (
 // cannot collide with one.
 const areaPersonal = "me"
 
+// pluggedAreaPrefix namespaces the disks people plug in.
+//
+// Without it a disk labelled "documents" would collide with the shared folder
+// of that name, and whichever came second would be unreachable — silently,
+// because an area is found by matching the first one that answers to the name.
+const pluggedAreaPrefix = "disk:"
+
 // maxListing is how many entries one directory listing returns.
 //
 // A downloads folder with forty thousand files in it should produce a slow
@@ -111,6 +118,30 @@ func (s *Server) areasFor(ctx context.Context, user *auth.User) ([]area, error) 
 				Name: "Your folder",
 				Kind: "personal",
 				path: mine,
+			})
+		}
+	}
+
+	// Disks somebody has plugged into the server.
+	//
+	// This is the shortest path there is between a disk in a drawer and a person
+	// in another country: somebody walks to the server, plugs it in, and it is
+	// here. No account on anybody's computer, no sharing dialog, no name to
+	// resolve, nothing that has to stay awake.
+	//
+	// Read-only, and not as a matter of policy — the mount itself is. The disk
+	// belongs to whoever carried it in and is standing in another room.
+	if disks, err := s.host.PluggedDisks(ctx); err == nil {
+		for _, disk := range disks {
+			if !disk.Connected || disk.Path == "" {
+				continue
+			}
+			areas = append(areas, area{
+				ID:       pluggedAreaPrefix + disk.Name,
+				Name:     disk.Name,
+				Kind:     "plugged",
+				ReadOnly: true,
+				path:     disk.Path,
 			})
 		}
 	}
@@ -257,7 +288,7 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, user *a
 		// retired person's folder is `.removed-sam-…` — and the operating
 		// system's everywhere else. Neither is what somebody opened this to
 		// find.
-		if strings.HasPrefix(name, ".") {
+		if strings.HasPrefix(name, ".") || windowsHousekeeping(name) {
 			continue
 		}
 		child := path.Join(where, name)
@@ -282,6 +313,27 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request, user *a
 		"entries":   entries,
 		"truncated": truncated,
 	})
+}
+
+// windowsHousekeeping reports whether a name is Windows' own plumbing.
+//
+// Windows hides these with a file attribute rather than a leading dot, and
+// Linux has no idea about that attribute, so a disk formatted on Windows lists
+// `System Volume Information` as its first entry. On the first real disk
+// plugged into this server that was two of the three things on the screen, and
+// the one file the household actually wanted was underneath them.
+//
+// Exact names only. Anything cleverer — hiding what looks like a system name,
+// or reading the hidden attribute where a driver exposes it — risks hiding a
+// folder somebody made, which is a far worse failure than showing one they did
+// not.
+func windowsHousekeeping(name string) bool {
+	switch name {
+	case "System Volume Information", "$RECYCLE.BIN", "RECYCLER",
+		"$Recycle.Bin", "found.000", "MSOCache", "Recovery":
+		return true
+	}
+	return false
 }
 
 // --- Download ----------------------------------------------------------------------
