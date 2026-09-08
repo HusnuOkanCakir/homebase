@@ -28,7 +28,16 @@ set -eu
 
 TV_USER=homebase-tv
 SESSION=/usr/libexec/homebase/tv-session
-VNC_PASSWORD_FILE=/etc/homebase/tv-vnc.pass
+# The password lives in the television account's own home, not in
+# /etc/homebase.
+#
+# That directory is root:homebase 0750, and the television account is
+# deliberately not in the `homebase` group — that group owns the hostd socket,
+# and putting a web browser's account in it would undo the boundary this whole
+# project is built around. Without the traverse bit x11vnc cannot read the file
+# at all, and the failure arrives as "password check failed", which sends
+# everybody to check the password.
+VNC_PASSWORD_FILE=/home/homebase-tv/.vnc/passwd
 
 usage() {
     echo "usage: tv-kiosk install|remove|status" >&2
@@ -103,14 +112,16 @@ PROFILE
 
 make_vnc_password() {
     if [ ! -f "$VNC_PASSWORD_FILE" ]; then
-        mkdir -p /etc/homebase
+        mkdir -p /home/$TV_USER/.vnc /etc/homebase
         # x11vnc's own format. Eight characters is all its scheme carries, which
-        # is a reason to keep this on the tunnel rather than a reason to pick a
-        # longer one it would silently truncate.
+        # is a reason not to reach for a longer one it would silently truncate.
         password=$(head -c 6 /dev/urandom | od -An -tx1 | tr -d " \n" | cut -c1-8)
         x11vnc -storepasswd "$password" "$VNC_PASSWORD_FILE" >/dev/null 2>&1
-        chmod 0640 "$VNC_PASSWORD_FILE"
-        chgrp "$TV_USER" "$VNC_PASSWORD_FILE"
+        chown -R "$TV_USER:$TV_USER" /home/$TV_USER/.vnc
+        chmod 0700 /home/$TV_USER/.vnc
+        chmod 0600 "$VNC_PASSWORD_FILE"
+        # A copy the administrator can read back, since the hashed one cannot be
+        # turned back into anything anybody can type.
         echo "$password" > /etc/homebase/tv-vnc.plain
         chmod 0600 /etc/homebase/tv-vnc.plain
     fi

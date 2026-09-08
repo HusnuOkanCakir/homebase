@@ -13,7 +13,7 @@
 set -eu
 
 DASHBOARD=${HOMEBASE_TV_URL:-https://homebase.local}
-VNC_PASSWORD_FILE=/etc/homebase/tv-vnc.pass
+VNC_PASSWORD_FILE="$HOME/.vnc/passwd"
 
 # openbox with no keybindings to speak of, purely so that windows have a
 # manager and full-screen works properly. Nothing is ever clicked on it.
