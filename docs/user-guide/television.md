@@ -16,8 +16,22 @@ The server plays the picture; you drive it from a computer somewhere else in the
 ## What you end up with
 
 Turn the television on and choose the HDMI input. Nothing, because the server is off. Turn
-the server on — the button, or a wake-up packet from a computer at home — and about a minute
-later the dashboard appears on the television.
+the server on — the button, or a wake-up packet from a computer at home — and the picture
+arrives in two stages:
+
+| | |
+|---|---|
+| **After about two minutes** | the television is the screen, the sound is pointed at it, and the remote control is listening |
+| **After about four** | the browser is up on the dashboard |
+
+The second number is Firefox: it is a snap, and snaps start slowly on a laptop of this age.
+Nothing is wrong during that gap, and the order does not matter — the television can be
+switched on before the server, after it, or halfway through, and the picture appears when
+both are ready.
+
+The first time, the browser will warn that the connection is not private, because the server
+signs its own certificate. Choose *Advanced*, then continue. Firefox remembers it, so this
+happens once and never again.
 
 From then on it is a browser on a big screen: the shared folders, Jellyfin, a video site,
 anything. You control it from your own computer across the room, seeing the television's

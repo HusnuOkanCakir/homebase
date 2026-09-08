@@ -22,18 +22,34 @@ VNC_PASSWORD_FILE="$HOME/.vnc/passwd"
 # — and the television faithfully displays the empty half nobody is using. It
 # looks exactly like a broken picture and is a correct dual-monitor setup.
 #
-# So the HDMI output becomes the only one, at the origin. The lid can then be
-# shut, which is what somebody does with a laptop wired to a television.
+# Watched rather than done once, and that is the point of the loop. A television
+# that is switched off, or on another input, reports nothing over HDMI: a server
+# started before somebody reaches for the remote would settle on the laptop
+# panel and stay there. Checking every few seconds costs nothing and means the
+# picture appears whenever the television does, in either order.
 #
 # If no television is attached the panel is left alone: a server with the cable
 # out should still have a console somebody can log into.
-for output in $(xrandr --query 2>/dev/null | awk '/^HDMI.* connected/ {print $1}'); do
-    xrandr --output "$output" --primary --auto --pos 0x0 2>/dev/null || continue
-    for panel in $(xrandr --query 2>/dev/null | awk '/^eDP.* connected/ {print $1}'); do
-        xrandr --output "$panel" --off 2>/dev/null || true
+watch_outputs() {
+    settled=""
+    while :; do
+        hdmi=$(xrandr --query 2>/dev/null | awk '/^HDMI.* connected/ {print $1; exit}')
+        if [ -n "$hdmi" ] && [ "$hdmi" != "$settled" ]; then
+            if xrandr --output "$hdmi" --primary --auto --pos 0x0 2>/dev/null; then
+                for panel in $(xrandr --query 2>/dev/null | awk '/^eDP.* connected/ {print $1}'); do
+                    xrandr --output "$panel" --off 2>/dev/null || true
+                done
+                settled="$hdmi"
+            fi
+        elif [ -z "$hdmi" ]; then
+            # Unplugged again. Forget it, so that plugging it back in is noticed
+            # rather than mistaken for the state we are already in.
+            settled=""
+        fi
+        sleep 5
     done
-    break
-done
+}
+watch_outputs &
 
 # openbox with no keybindings to speak of, purely so that windows have a
 # manager and full-screen works properly. Nothing is ever clicked on it.
