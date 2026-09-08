@@ -1,0 +1,200 @@
+#!/bin/sh
+#
+# Turn the server's HDMI port into a television.
+#
+# Opt-in, run by hand, and deliberately not part of Homebase's own machinery:
+# no hostd operation, no dashboard button, nothing in the API. Homebase is a
+# headless appliance with a privilege boundary that exists to keep a fixed set
+# of typed operations between the network and root — and a desktop session with
+# a browser on it is the opposite of that. So this is a script the owner runs
+# knowingly, on a machine they are standing at, and it can be undone with
+# `tv-kiosk remove`.
+#
+# What it makes:
+#
+#   a dedicated unprivileged account, so the browser is not the account that
+#   holds the household's files;
+#   an autologin on tty1 that starts X and one full-screen browser;
+#   x11vnc on the Tailscale address only, so the living-room PC can drive the
+#   television across the room.
+#
+# Why the tunnel rather than the local network: VNC is not encrypted and its
+# password scheme is a 1990s one, and the first thing anybody will do on that
+# screen is type their Homebase password into the browser. Inside Tailscale
+# that traffic is encrypted end to end, including between two machines in the
+# same room.
+
+set -eu
+
+TV_USER=homebase-tv
+SESSION=/usr/libexec/homebase/tv-session
+# The password lives in the television account's own home, not in
+# /etc/homebase.
+#
+# That directory is root:homebase 0750, and the television account is
+# deliberately not in the `homebase` group — that group owns the hostd socket,
+# and putting a web browser's account in it would undo the boundary this whole
+# project is built around. Without the traverse bit x11vnc cannot read the file
+# at all, and the failure arrives as "password check failed", which sends
+# everybody to check the password.
+VNC_PASSWORD_FILE=/home/homebase-tv/.vnc/passwd
+
+usage() {
+    echo "usage: tv-kiosk install|remove|status" >&2
+    exit 1
+}
+
+require_root() {
+    [ "$(id -u)" = 0 ] || { echo "tv-kiosk: run this with sudo" >&2; exit 1; }
+}
+
+install_packages() {
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    # X and one window manager, and nothing that resembles a desktop: no login
+    # screen, no panel, no file manager, no settings daemon. The television
+    # shows one browser and that is the whole of it.
+    apt-get install -y --no-install-recommends \
+        xserver-xorg-core xserver-xorg-input-libinput xinit \
+        openbox x11vnc unclutter \
+        pipewire pipewire-pulse wireplumber alsa-utils pulseaudio-utils \
+        i965-va-driver fonts-dejavu-core
+    # Firefox is a snap on 24.04 whichever package you ask for. Said plainly
+    # rather than discovered: this pulls in snapd's machinery, which is already
+    # on the machine, and it is the browser that handles the sites a household
+    # actually watches.
+    apt-get install -y firefox
+}
+
+make_user() {
+    if ! getent passwd "$TV_USER" >/dev/null; then
+        # A home directory, because a browser needs a profile to write, and a
+        # shell, because the autologin below has to run one to start the
+        # session. It is a locked account with no password: nobody logs into it
+        # from anywhere, and the only thing that ever runs it is the getty on
+        # the tty the television is plugged into.
+        useradd --create-home --shell /bin/sh \
+                --comment "Homebase television" "$TV_USER"
+    fi
+    passwd --lock "$TV_USER" >/dev/null
+    # The groups a graphical session needs, and only the ones this machine
+    # actually has — `render` does not exist everywhere and a missing group
+    # would fail the whole command.
+    for group in video audio input render; do
+        getent group "$group" >/dev/null && usermod --append --groups "$group" "$TV_USER"
+    done
+}
+
+set_up_autologin() {
+    mkdir -p /etc/systemd/system/getty@tty1.service.d
+    cat > /etc/systemd/system/getty@tty1.service.d/homebase-tv.conf <<UNIT
+# Written by Homebase's tv-kiosk. Removed by \`tv-kiosk remove\`.
+#
+# An autologin rather than a display manager. A display manager is a service
+# that listens, has its own configuration and its own way of going wrong, for
+# the sole purpose of asking a question — "who are you" — that has one answer
+# on a machine wired to a television.
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $TV_USER --noclear %I \$TERM
+UNIT
+
+    # startx from the login shell, so the session is a real logind seat session
+    # and X can open the graphics device without being root.
+    cat > "/home/$TV_USER/.profile" <<PROFILE
+# Written by Homebase's tv-kiosk.
+if [ "\$(tty)" = /dev/tty1 ]; then
+    exec startx $SESSION -- vt1 -nolisten tcp
+fi
+PROFILE
+    chown "$TV_USER:$TV_USER" "/home/$TV_USER/.profile"
+}
+
+make_vnc_password() {
+    if [ ! -f "$VNC_PASSWORD_FILE" ]; then
+        mkdir -p /home/$TV_USER/.vnc /etc/homebase
+        # x11vnc's own format. Eight characters is all its scheme carries, which
+        # is a reason not to reach for a longer one it would silently truncate.
+        password=$(head -c 6 /dev/urandom | od -An -tx1 | tr -d " \n" | cut -c1-8)
+        x11vnc -storepasswd "$password" "$VNC_PASSWORD_FILE" >/dev/null 2>&1
+        chown -R "$TV_USER:$TV_USER" /home/$TV_USER/.vnc
+        chmod 0700 /home/$TV_USER/.vnc
+        chmod 0600 "$VNC_PASSWORD_FILE"
+        # A copy the administrator can read back, since the hashed one cannot be
+        # turned back into anything anybody can type.
+        echo "$password" > /etc/homebase/tv-vnc.plain
+        chmod 0600 /etc/homebase/tv-vnc.plain
+    fi
+}
+
+# open_remote_control states who may reach the remote control, in the packet
+# filter, because the bind cannot: x11vnc 0.9.16 opens `[::]:5900` whatever
+# `-listen` and `-noipv6` say. Found with `ss -ltnp` after the first install.
+#
+# The real cards and the tunnel. Scoped to interfaces rather than to address
+# ranges for the reason packaging/firewall gives at length: 100.64.0.0/10 is
+# Tailscale's and also what carriers hand a subscriber's router, and
+# 172.16.0.0/12 is where Docker puts its bridges. An interface has no such
+# ambiguity, and it is what keeps eleven containers away from this port.
+open_remote_control() {
+    command -v ufw >/dev/null 2>&1 || return 0
+    close_remote_control
+    for card in $(ls /sys/class/net) tailscale0; do
+        case "$card" in
+            lo|docker*|br-*|veth*|virbr*) continue ;;
+        esac
+        [ -e "/sys/class/net/$card/device" ] || [ "$card" = tailscale0 ] || continue
+        ip link show "$card" >/dev/null 2>&1 || continue
+        ufw allow in on "$card" to any port 5900 proto tcp \
+            comment "Homebase television remote control" >/dev/null
+    done
+}
+
+close_remote_control() {
+    command -v ufw >/dev/null 2>&1 || return 0
+    for card in $(ls /sys/class/net) tailscale0; do
+        ufw delete allow in on "$card" to any port 5900 proto tcp >/dev/null 2>&1 || true
+    done
+}
+
+case "${1:-}" in
+install)
+    require_root
+    install_packages
+    make_user
+    set_up_autologin
+    make_vnc_password
+    open_remote_control
+    systemctl daemon-reload
+    systemctl restart getty@tty1
+    echo
+    echo "The television is set up."
+    echo "  Password for the remote control: $(cat /etc/homebase/tv-vnc.plain)"
+    echo "  Connect a VNC viewer to the server's Tailscale address, port 5900."
+    ;;
+remove)
+    require_root
+    close_remote_control
+    rm -f /etc/systemd/system/getty@tty1.service.d/homebase-tv.conf
+    rmdir /etc/systemd/system/getty@tty1.service.d 2>/dev/null || true
+    systemctl daemon-reload
+    systemctl restart getty@tty1
+    # The account and its home are left alone. Removing an account is a
+    # decision about somebody's files, even when that somebody is a browser
+    # profile, and this script is not the place to make it.
+    echo "The television session is off. The $TV_USER account was left in place;"
+    echo "remove it with 'userdel -r $TV_USER' if you want it gone."
+    ;;
+status)
+    printf "account:   %s\n" "$(getent passwd $TV_USER >/dev/null && echo present || echo absent)"
+    printf "autologin: %s\n" "$([ -f /etc/systemd/system/getty@tty1.service.d/homebase-tv.conf ] && echo on || echo off)"
+    printf "session:   %s\n" "$(pgrep -u $TV_USER Xorg >/dev/null 2>&1 && echo running || echo stopped)"
+    printf "remote:    %s\n" "$(ufw status 2>/dev/null | grep -q "5900.*tailscale0" && echo "on the tunnel only" || echo "no firewall rule")"
+    for c in /sys/class/drm/card*/status; do
+        case "$c" in *HDMI*) printf "%-12s %s\n" "$(dirname "$c" | xargs basename | sed 's/card[0-9]*-//'):" "$(cat "$c")" ;; esac
+    done
+    ;;
+*)
+    usage
+    ;;
+esac
