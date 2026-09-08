@@ -1,0 +1,109 @@
+#!/bin/sh
+#
+# The session that appears on the television.
+#
+# Started by startx from an autologin on tty1 — see tv-kiosk. Everything here
+# runs as the unprivileged television account.
+#
+# One window manager, one browser, and a way to drive it from across the room.
+# No panel, no desktop, no icons: a television is looked at from four metres
+# away by somebody holding no mouse, and everything that is not the picture is
+# in the way.
+
+set -eu
+
+DASHBOARD=${HOMEBASE_TV_URL:-https://homebase.local}
+VNC_PASSWORD_FILE="$HOME/.vnc/passwd"
+
+# The television is the screen, and the laptop's own panel is not.
+#
+# Without this X extends the desktop: the laptop panel at 0,0 and the television
+# to the right of it. Everything then opens on the panel — the browser included
+# — and the television faithfully displays the empty half nobody is using. It
+# looks exactly like a broken picture and is a correct dual-monitor setup.
+#
+# Watched rather than done once, and that is the point of the loop. A television
+# that is switched off, or on another input, reports nothing over HDMI: a server
+# started before somebody reaches for the remote would settle on the laptop
+# panel and stay there. Checking every few seconds costs nothing and means the
+# picture appears whenever the television does, in either order.
+#
+# If no television is attached the panel is left alone: a server with the cable
+# out should still have a console somebody can log into.
+watch_outputs() {
+    settled=""
+    while :; do
+        hdmi=$(xrandr --query 2>/dev/null | awk '/^HDMI.* connected/ {print $1; exit}')
+        if [ -n "$hdmi" ] && [ "$hdmi" != "$settled" ]; then
+            if xrandr --output "$hdmi" --primary --auto --pos 0x0 2>/dev/null; then
+                for panel in $(xrandr --query 2>/dev/null | awk '/^eDP.* connected/ {print $1}'); do
+                    xrandr --output "$panel" --off 2>/dev/null || true
+                done
+                settled="$hdmi"
+            fi
+        elif [ -z "$hdmi" ]; then
+            # Unplugged again. Forget it, so that plugging it back in is noticed
+            # rather than mistaken for the state we are already in.
+            settled=""
+        fi
+        sleep 5
+    done
+}
+watch_outputs &
+
+# openbox with no keybindings to speak of, purely so that windows have a
+# manager and full-screen works properly. Nothing is ever clicked on it.
+openbox &
+
+# The pointer disappears when it stops moving. On a television a stationary
+# arrow in the middle of a film is the kind of thing nobody can unsee.
+unclutter -idle 2 -root &
+
+# The remote control.
+#
+# Listens on everything and lets the packet filter decide who may arrive, which
+# is the pattern the rest of this machine already uses for the file server —
+# see packaging/firewall. It is also the only arrangement that works here:
+# x11vnc 0.9.16 opens `[::]:5900` whatever it is told to bind, so a careful
+# `-listen` was never the control it looked like.
+#
+# The household asked for this on the home network rather than through the
+# tunnel, which is the ordinary case: the television is four metres from the
+# computer driving it. Both are open, so it works at home without Tailscale
+# running and from away with it.
+#
+# What that costs, said plainly rather than buried: VNC is not encrypted, so
+# anybody already on the home network can watch this screen. For a television
+# showing films that is not much. It does mean not typing a password into the
+# browser on the television while somebody untrusted is on the network — sign
+# in once and the session lasts a fortnight.
+x11vnc -display :0 -rfbport 5900 \
+    -rfbauth "$VNC_PASSWORD_FILE" \
+    -forever -shared -noxdamage -repeat -nowf &
+
+# Sound out of the television rather than out of the laptop.
+#
+# The default is the built-in speakers, which is right for a laptop and wrong
+# for one wired to a television: the picture is on the screen across the room
+# and the sound comes out of the machine under it. Set on every start rather
+# than once, because a sink that was absent when the session began — the
+# television switched off at the wall, the cable out — would otherwise leave the
+# choice pointing at the speakers for good.
+#
+# Waited for, because pipewire takes a moment to find the cards.
+for attempt in 1 2 3 4 5; do
+    hdmi=$(pactl list short sinks 2>/dev/null | awk '/hdmi/ {print $2; exit}')
+    [ -n "$hdmi" ] && { pactl set-default-sink "$hdmi" >/dev/null 2>&1; break; }
+    sleep 1
+done
+
+# Wait for the browser's profile directory rather than racing it.
+sleep 1
+
+# The browser, full screen, on the dashboard.
+#
+# Not --kiosk: kiosk mode removes the address bar, and "open any web page" was
+# the whole point of putting a television here. Full screen with the toolbar
+# reachable is what a television wants — the picture fills the screen and the
+# bar is a keystroke away.
+exec firefox --new-window "$DASHBOARD"

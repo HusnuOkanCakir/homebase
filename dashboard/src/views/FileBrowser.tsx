@@ -370,6 +370,14 @@ export function FileBrowser() {
         </p>
       ) : null}
 
+      {area?.kind === "plugged" ? (
+        <p className="hint">
+          This is a disk somebody plugged into the server. Homebase can only read
+          it — nothing here can change what is on it. Press <strong>Finish with
+          it</strong> below before unplugging it.
+        </p>
+      ) : null}
+
       {area?.kind === "personal" ? (
         <p className="hint">
           This folder is yours. The other people on this server cannot open it,
